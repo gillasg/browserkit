@@ -227,8 +227,17 @@ async function probeHost(url: URL): Promise<HostProbe> {
   return probe;
 }
 
+// Probes run one at a time: a sweep over many dead hosts must never open a burst of tabs.
+let probeQueue: Promise<unknown> = Promise.resolve();
+
 /** A background tab loads the address, so Chrome reports the net:: error or the block page. */
-async function navigateProbe(url: URL): Promise<HostProbe> {
+function navigateProbe(url: URL): Promise<HostProbe> {
+  const run = probeQueue.then(() => navigateProbeNow(url));
+  probeQueue = run.catch(() => undefined);
+  return run;
+}
+
+async function navigateProbeNow(url: URL): Promise<HostProbe> {
   const tab = await chrome.tabs.create({ url: url.href, active: false }).catch(() => undefined);
   if (tab?.id === undefined) return {};
   try {
