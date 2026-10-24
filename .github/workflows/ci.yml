@@ -43,7 +43,9 @@ jobs:
         env:
           CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
           REQUIRE_E2E: "1"
-      - run: node --test --test-timeout=180000 test/*.test.mjs
+      # Several suites drive real Chrome, so a slow macOS runner runs them side by side; each file
+      # gets a generous deadline rather than a share of one.
+      - run: node --test --test-timeout=300000 test/*.test.mjs
         env:
           CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
           REQUIRE_E2E: "1"
