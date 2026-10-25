@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import WebSocket from "ws";
+import { uiScript } from "../packages/tools/dist/providers.js";
 
 const chromePath =
   process.env.CHROME_PATH ??
@@ -585,6 +586,22 @@ test(
           assert.match(again.stdout, new RegExp(`\\b${keptId}\\b`), again.stdout);
         },
       );
+
+      await t.test("the provider page fallback types a prompt and reads the answer", async () => {
+        const script = uiScript("gemini", "hello there", { timeoutMs: 6000, pollMs: 200 });
+        const { stdout } = await run(
+          process.execPath,
+          [
+            cli,
+            "repl",
+            "--session",
+            "provider-ui",
+            `page = await browser.openTab(${JSON.stringify(siteUrl + "provider")}); await page.waitForTimeout(300); ${script}`,
+          ],
+          { env },
+        );
+        assert.match(stdout, /answer: hello there/, stdout);
+      });
 
       await t.test(
         "browser results count the tabs a run owns, and reset keeps only kept tabs",

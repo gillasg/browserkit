@@ -526,8 +526,8 @@ var browser = Object.freeze({
             responseHeaders: full.responseHeaders || {},
           });
         }
-        var script = '// Captured requests; fetch with the same method, headers and body.\n' +
-          'globalThis.requests = ' + JSON.stringify(requests, null, 2) + ';\n';
+        var script = '// Captured requests; fetch with the same method, headers and body.\\n' +
+          'globalThis.requests = ' + JSON.stringify(requests, null, 2) + ';\\n';
         return {requests, script};
       },
       // Failed requests grouped by endpoint: statuses, sizes, timing, block headers and the last
