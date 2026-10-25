@@ -8,6 +8,11 @@ import type { Command } from "../usage.js";
 
 async function search(args: Args): Promise<number> {
   const query = args.positional.join(" ").trim().toLowerCase();
+  // --summary is for a quick index: one line per command, nothing else.
+  if (has(args, "summary")) {
+    for (const command of COMMANDS) out(`${command.name}: ${command.summary}`);
+    return 0;
+  }
   if (!query) {
     for (const command of COMMANDS)
       out(`${command.name.padEnd(14)} ${command.group.padEnd(12)} ${command.summary}`);

@@ -1,4 +1,4 @@
-import { existsSync, lstatSync, readlinkSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync, readlinkSync } from "node:fs";
 import { mkdir, rmdir, symlink, unlink } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -10,13 +10,19 @@ import { fileURLToPath } from "node:url";
 
 const cli = fileURLToPath(new URL("./cli.js", import.meta.url));
 
-/** The skill ships beside the repo; a package install keeps it next to dist. */
-function skillSource(): string | undefined {
-  const candidates = [
-    resolve(dirname(cli), "..", "..", "..", "skills", "browserkit"),
-    resolve(dirname(cli), "..", "skills", "browserkit"),
+/** Every skill that ships beside the repo; a package install keeps them next to dist. */
+function skillSources(): { name: string; path: string }[] {
+  const bases = [
+    resolve(dirname(cli), "..", "..", "..", "skills"),
+    resolve(dirname(cli), "..", "skills"),
   ];
-  return candidates.find((path) => existsSync(join(path, "SKILL.md")));
+  for (const base of bases) {
+    if (!existsSync(base)) continue;
+    return readdirSync(base, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && existsSync(join(base, entry.name, "SKILL.md")))
+      .map((entry) => ({ name: entry.name, path: join(base, entry.name) }));
+  }
+  return [];
 }
 
 /** Where the link already points, or undefined when nothing is there. */
@@ -43,13 +49,18 @@ async function linkSkill(folder: string, source: string): Promise<string | undef
   return target;
 }
 
-/** Installs the browserkit skill; returns the paths linked, and nothing when it is not shipped. */
+/** Installs every shipped skill; returns the paths linked, and nothing when none ship. */
 export async function installSkill(): Promise<string[]> {
-  const source = skillSource();
-  if (!source) return [];
+  const sources = skillSources();
+  if (!sources.length) return [];
   const shared = join(homedir(), ".agents", "skills");
-  const agents = await linkSkill(shared, source);
-  // Claude Code reads ~/.claude/skills: link it to the shared copy.
-  const claude = await linkSkill(join(homedir(), ".claude", "skills"), join(shared, "browserkit"));
-  return [agents, claude].filter((path): path is string => Boolean(path));
+  const linked: string[] = [];
+  for (const source of sources) {
+    const agents = await linkSkill(shared, source.path);
+    if (agents) linked.push(agents);
+    // Claude Code reads ~/.claude/skills: link it to the shared copy.
+    const claude = await linkSkill(join(homedir(), ".claude", "skills"), join(shared, source.name));
+    if (claude) linked.push(claude);
+  }
+  return linked;
 }

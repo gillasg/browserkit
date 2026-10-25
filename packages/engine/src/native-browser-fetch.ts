@@ -69,6 +69,11 @@ export async function fetchCall(value: Record<string, unknown>): Promise<unknown
     url: response.url,
     headers: Object.fromEntries(response.headers),
   };
+  if (response.status === 401 || response.status === 403)
+    result.hint =
+      "A site that refuses a bare request usually wants a Referer/Origin or a session cookie: " +
+      "pass {headers: {referer, origin}} (the browser applies them), or call from the site's own " +
+      "tab with page.fetchJson(url) so cookies and headers match.";
   if (request.as === "base64") return { ...result, ...(await base64(response)) };
   const text = await response.text();
   if (request.as !== "text") {

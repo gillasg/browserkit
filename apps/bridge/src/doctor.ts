@@ -1,5 +1,6 @@
-import { access } from "node:fs/promises";
-import { join } from "node:path";
+import { spawnSync } from "node:child_process";
+import { access, readdir } from "node:fs/promises";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { BridgeClient } from "./client.js";
 import { NATIVE_HOST, dataDirectory, statePath } from "./paths.js";
@@ -40,6 +41,16 @@ export async function runDoctor(): Promise<number> {
     (await exists(extensionBuild)) ? "ok" : "warn",
     "extension build",
     (await exists(extensionBuild)) ? extensionBuild : "missing; run the extension build",
+  );
+  // A half-written dist file makes every command fail with a syntax error, so catch it here.
+  const dist = dirname(fileURLToPath(new URL("./cli.js", import.meta.url)));
+  const broken = await checkDistSyntax(dist, exists);
+  check(
+    broken.length ? "fail" : "ok",
+    "command files",
+    broken.length
+      ? `${broken.length} file(s) do not parse: ${broken.slice(0, 3).join("; ")}`
+      : "every dist command file parses",
   );
   const state = await exists(statePath());
   check(
@@ -87,4 +98,28 @@ export async function runDoctor(): Promise<number> {
     );
   }
   return status === "fail" ? 1 : 0;
+}
+
+/** node --check every shipped command file; a broken build is named, not guessed at. */
+async function checkDistSyntax(
+  dist: string,
+  exists: (path: string) => Promise<boolean>,
+): Promise<string[]> {
+  const files = [join(dist, "cli.js"), join(dist, "mcp.js")];
+  const commands = join(dist, "commands");
+  if (await exists(commands))
+    for (const name of await readdir(commands).catch(() => []))
+      if (name.endsWith(".js")) files.push(join(commands, name));
+  const broken: string[] = [];
+  for (const file of files) {
+    if (!(await exists(file))) continue;
+    const result = spawnSync(process.execPath, ["--check", file], { encoding: "utf8" });
+    if (result.status !== 0) {
+      const reason = String(result.stderr ?? "")
+        .split("\n")
+        .find((line) => line.trim() && !line.startsWith("node:"));
+      broken.push(`${basename(file)}: ${reason ?? "does not parse"}`);
+    }
+  }
+  return broken;
 }

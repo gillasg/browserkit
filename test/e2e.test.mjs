@@ -110,6 +110,11 @@ test(
         response.end(JSON.stringify({ language: request.headers["accept-language"] }));
         return;
       }
+      if (request.url?.startsWith("/api/forbidden")) {
+        response.writeHead(403, { "content-type": "application/json" });
+        response.end(JSON.stringify({ error: "forbidden" }));
+        return;
+      }
       if (request.url?.startsWith("/api/items")) {
         response.setHeader("content-type", "application/json");
         response.end(JSON.stringify({ items: ["a", "b", "c"] }));
@@ -409,6 +414,67 @@ test(
         });
       });
 
+      await t.test("the agent feedback conveniences answer in one cell", async () => {
+        const cell = (code) =>
+          run(process.execPath, [cli, "repl", "--session", "feedback", code], { env });
+        const { stdout } = await cell(`
+          page = await browser.openTab(${JSON.stringify(siteUrl + "?feedback")});
+          const mine = await browser.myTabs();
+          const filtered = await browser.tabs({ mine: true });
+          const failure = await page.navigate("http://127.0.0.1:1/nope").then(() => null, (error) => String(error.message || error));
+          const lastError = page.lastError;
+          const forbidden = await browser.fetch(${JSON.stringify(siteUrl + "api/forbidden")}).then((result) => ({ status: result.status, hint: result.hint }), (error) => ({ error: String(error.message || error) }));
+          console.log("FEEDBACK " + JSON.stringify({
+            mine: mine.map((tab) => tab.id),
+            filtered: filtered.map((tab) => tab.id),
+            failure,
+            lastError,
+            forbidden,
+          }));`);
+        const value = JSON.parse(/FEEDBACK (.*)/.exec(stdout)[1]);
+        assert.ok(value.mine.length >= 1, stdout);
+        assert.deepEqual(value.filtered, value.mine, stdout);
+        assert.ok(value.failure, stdout);
+        assert.equal(value.lastError.url, "http://127.0.0.1:1/nope", stdout);
+        assert.ok(value.lastError.code, stdout);
+        assert.equal(value.lastError.stage, "navigate", stdout);
+        assert.equal(value.forbidden.status, 403, stdout);
+        assert.match(String(value.forbidden.hint), /referer|origin/i, stdout);
+
+        // A cell from a file, and --quiet keeps stdout empty.
+        const file = join(home, "cell.js");
+        await writeFile(file, "6 * 7");
+        const quiet = await run(
+          process.execPath,
+          [cli, "repl", "@" + file, "--session", "feedback-file", "--quiet"],
+          { env },
+        );
+        assert.equal(quiet.stdout.trim(), "");
+        const loud = await run(
+          process.execPath,
+          [cli, "repl", "@" + file, "--session", "feedback-file"],
+          { env },
+        );
+        assert.match(loud.stdout, /42/);
+
+        const summary = await run(process.execPath, [cli, "commands", "--summary"], { env });
+        assert.match(summary.stdout, /ask: /);
+
+        // Providers are listed without touching a provider, and a bad name says so.
+        const listed = JSON.parse(
+          (await run(process.execPath, [cli, "providers", "--json"], { env })).stdout,
+        );
+        assert.equal(listed.providers.length, 5, JSON.stringify(listed));
+        const unknown = await run(process.execPath, [cli, "ask", "nope", "hello", "--json"], {
+          env,
+        }).then(
+          () => "",
+          (error) =>
+            String(error.stdout ?? "") + String(error.stderr ?? "") + String(error.message ?? ""),
+        );
+        assert.match(unknown, /PROVIDER_UNKNOWN/);
+      });
+
       await t.test(
         "browser results count the tabs a run owns, and reset keeps only kept tabs",
         async () => {
@@ -614,7 +680,7 @@ test(
         );
       });
 
-      await t.test("a tab the user closed is not reopened by itself", async () => {
+      await t.test("a tab the user closed is reopened fresh with a warning", async () => {
         const { stdout } = await run(
           process.execPath,
           [
@@ -623,15 +689,19 @@ test(
             "--session",
             "closed-tab",
             `page = await browser.openTab(${JSON.stringify(siteUrl + "?closed")}, { newTab: true });
+            const first = page.target.tabId;
             await page.close();
-            const message = await browser.openTab(${JSON.stringify(siteUrl + "?closed")}).then(() => "reopened", (error) => error.message);
-            console.log("CLOSED " + JSON.stringify(message));`,
+            const fresh = await browser.openTab(${JSON.stringify(siteUrl + "?closed")}).then((tab) => tab.target.tabId, (error) => "error: " + error.message);
+            const live = (await browser.tabs()).some((tab) => tab.id === fresh);
+            console.log("CLOSED " + JSON.stringify({ first, fresh, live }));`,
           ],
           { env },
         );
-        const message = JSON.parse(/CLOSED (.*)/.exec(stdout)[1]);
-        assert.match(message, /was closed/);
-        assert.match(message, /newTab: true/);
+        const value = JSON.parse(/CLOSED (.*)/.exec(stdout)[1]);
+        assert.equal(typeof value.fresh, "number", stdout);
+        assert.notEqual(value.fresh, value.first, stdout);
+        assert.equal(value.live, true, stdout);
+        assert.match(stdout, /opened a fresh tab/, stdout);
       });
 
       await t.test("activeTab returns a live active tab", async () => {
@@ -1308,7 +1378,7 @@ test(
           const listed = await mcp.call("tools/list", {});
           assert.deepEqual(
             listed.tools.map((tool) => tool.name),
-            ["browser_code", "browser_tabs", "crawl", "site_mapper"],
+            ["browser_code", "browser_tabs", "browser_action", "crawl", "site_mapper"],
           );
           const crawled = await mcp.call("tools/call", {
             name: "crawl",

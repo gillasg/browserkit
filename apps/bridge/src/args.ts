@@ -34,6 +34,7 @@ const BOOLEAN = new Set([
   "secure",
   "site",
   "static",
+  "summary",
   "dynamic",
   "status",
   "unreviewed",

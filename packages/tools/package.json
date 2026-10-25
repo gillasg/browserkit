@@ -33,6 +33,10 @@
       "types": "./dist/workflow-store.d.ts",
       "import": "./dist/workflow-store.js"
     },
+    "./providers": {
+      "types": "./dist/providers.d.ts",
+      "import": "./dist/providers.js"
+    },
     "./jobs": {
       "types": "./dist/jobs.d.ts",
       "import": "./dist/jobs.js"

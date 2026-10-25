@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import { BridgeClient } from "../client.js";
 import { startBridge } from "../bridge-server.js";
 import { runDoctor } from "../doctor.js";
@@ -12,8 +13,19 @@ import type { Command } from "../usage.js";
 // The browser itself: the bridge, the REPL, tabs, the journal, the MCP server.
 
 async function repl(args: Args): Promise<number> {
-  const code = args.positional.join(" ");
-  if (!code) throw new Error('Usage: browserkit repl "<code>" [--session name] [--timeout ms]');
+  // @file.js runs a file; "-" reads the code from stdin. Cells are often longer than a shell
+  // line, so both keep quoting out of the way.
+  const given = args.positional.join(" ");
+  const code =
+    given === "-"
+      ? await stdin()
+      : given.startsWith("@")
+        ? await readFile(given.slice(1), "utf8")
+        : given;
+  if (!code.trim())
+    throw new Error(
+      'Usage: browserkit repl "<code>" | @file.js | - [--session name] [--timeout ms] [--quiet]',
+    );
   // After-action behaviour for this realm: --screenshot turns it on, --settle waits after each
   // action, --full captures at full resolution, --no-screenshot/--no-diff switch parts off.
   const settings: string[] = [];
@@ -33,11 +45,18 @@ async function repl(args: Args): Promise<number> {
       session: flag(args, "session") ?? "cli",
       ...(timeout ? { timeoutMs: Number(timeout) } : {}),
     });
-    process.stdout.write(formatResult(result).text + "\n");
+    if (!has(args, "quiet")) process.stdout.write(formatResult(result).text + "\n");
     return result.error ? 1 : 0;
   } finally {
     bridge.close();
   }
+}
+
+/** Reads a cell piped on stdin. */
+async function stdin(): Promise<string> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of process.stdin) chunks.push(Buffer.from(chunk));
+  return Buffer.concat(chunks).toString("utf8");
 }
 
 async function tabs(args: Args): Promise<number> {
@@ -150,9 +169,13 @@ Prints tab id, title and URL, one tab per line; --json prints the browser's own 
     name: "repl",
     group: "Browser",
     summary: "run a browser_code cell",
-    help: `Usage: browserkit repl "<code>" [--session name] [--timeout ms]
+    help: `Usage: browserkit repl "<code>" [--session name] [--timeout ms] [--quiet]
+       browserkit repl @file.js [--session name]
+       echo "<code>" | browserkit repl -
 
-The last expression is returned. Variables and tabs persist per session.`,
+The last expression is returned. Variables and tabs persist per session. A long cell goes in a
+file (@file.js) or on stdin (-) instead of on the command line, so quoting and line endings stay
+out of the way. --quiet prints nothing but still sets the exit code. --timeout caps the cell.`,
     run: repl,
   },
   {

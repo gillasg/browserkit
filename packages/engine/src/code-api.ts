@@ -165,7 +165,8 @@ var browser = Object.freeze({
           console.log('[ok] openTab reused tab ' + known.tabId + ' for ' + (origin || url) + (same ? '' : ' (navigated)') + '; pass {newTab: true} for a separate tab');
           return __openResult(live, true);
         }
-        throw Error('TARGET_LOST: tab ' + known.tabId + ' for ' + (origin || url) + ' was closed; pass {newTab: true} only if you mean to open it again');
+        // A working tab the user closed is not a failure: open a fresh one and say so.
+        console.log('[warn] the working tab ' + known.tabId + ' for ' + (origin || url) + ' was closed; opened a fresh tab');
       } finally { __busy.delete(__key(known)); }
     }
     const result = await __step({op:'openTab', clientInstanceId, url,
@@ -176,7 +177,8 @@ var browser = Object.freeze({
     if (!options.window) __opened.set(origin || url, result.tab.target);
     await bu.use(result.tab.target);
     if (result.navigation === 'failed') {
-      console.log('[warn] tab ' + result.tab.target.tabId + ' opened, but ' + url + ' did not load: ' + (result.reason || 'navigation failed') + '; the tab is still yours (page.navigation is "failed", page.reason says why)');
+      __noteNavError(result.tab.target, url, 'openTab', result.reason || 'navigation failed');
+      console.log('[warn] tab ' + result.tab.target.tabId + ' opened, but ' + url + ' did not load: ' + (result.reason || 'navigation failed') + '; the tab is still yours (page.navigation is "failed", page.lastError says why)');
     }
     return __openResult(result.tab, false, result.navigation === 'failed' ? result.reason : undefined);
   },
@@ -226,6 +228,8 @@ var browser = Object.freeze({
   reset: () => __call({tabs:'reset'}),
   // Many pages past the cell deadline: start a job, then check it in a later cell.
   job: __job,
+  // Stop a running job: browser.jobCancel(jobId), then browser.job(id) reports cancelled.
+  jobCancel: (id) => __call({job:{action:'cancel', id:String(id)}}),
   downloads: Object.freeze({
     list: (text = "", options = {}) => __call({downloads:"list", text, ...options}),
   }),
@@ -272,6 +276,9 @@ var browser = Object.freeze({
   },
   page: (target) => (__lastTarget = target, Object.freeze(__extendPage(target, {
     target,
+    // Why the last navigation failed, if it did: { code, url, stage, message, at }. The page is
+    // left as it is, so it can still be read or evaluated.
+    get lastError() { return __lastErrors.get(__key(target)) || null; },
     // Both page.url / page.title (properties) and page.url() / await page.title() (Playwright) work.
     get url() { return __callableString(() => __tabs.get(__key(target))?.url || __states.get(__key(target))?.url); },
     get title() { return __callableString(() => __tabs.get(__key(target))?.title,
@@ -320,8 +327,18 @@ var browser = Object.freeze({
     },
     // A number waits that many milliseconds; a selector waits for it (timeouts above the engine cap keep polling).
     wait: (selector, options = {}) => typeof selector === 'number' ? __sleep(selector) : __waitSelector(target, selector, options),
-    navigate: (url, options = {}) => __step({op:"navigate", target, url: __absoluteUrl(url, target),
-      ...(options.present === false ? {present:false} : {})}),
+    navigate: async (url, options = {}) => {
+      var destination = __absoluteUrl(url, target);
+      try {
+        var result = await __step({op:"navigate", target, url: destination,
+          ...(options.present === false ? {present:false} : {})});
+        __lastErrors.delete(__key(target));
+        return result;
+      } catch (error) {
+        __noteNavError(target, destination, 'navigate', error);
+        throw error;
+      }
+    },
     diagnostics: (clear = false) => __step({op:"diagnostics", target, clear}),
     console: async (options = {}) => {
       var entries = (await __step({op:"diagnostics", target, clear: !!options.clear})).data.console || [];
@@ -501,6 +518,12 @@ var browser = Object.freeze({
 export const browserFastApi = `
 var __states = new Map(), __tabs = new Map(), __seen = new Map(), __dirty = new Map(), __opened = new Map(), __busy = new Set(), __keptTabs = new Set(), __closedTabs = new Map(), __focusedWindowId, __attachedTarget, __lastTarget;
 var __key = target => JSON.stringify(target);
+// The last navigation failure per tab: page.lastError = { code, url, stage, message, at }.
+var __lastErrors = new Map();
+function __noteNavError(target, url, stage, error) {
+  var message = String(error && error.message || error);
+  __lastErrors.set(__key(target), { code: message.split(':')[0] || 'NAVIGATION_FAILED', url: String(url || ''), stage, message, at: new Date().toISOString() });
+}
 // A bare tab id from browser.tabs() or a step line stands for that tab's full target.
 // Printed tabs show what an agent reads (id, title, url, active); the rest stays usable but
 // leaves printouts and JSON, so listing many tabs costs little context.
@@ -601,6 +624,7 @@ function __waitCondition(target, expression, timeout) {
 }
 function __beginCell() { __dirty.clear(); __hasDelivered=false; __deliveryValue=undefined; }
 async function __step(step, readOnly = false) {
+  var startedAt = Date.now();
   if (step.target && __closedTabs.has(step.target.tabId)) {
     var closed = __closedTabs.get(step.target.tabId);
     var note = 'closed by you (tab ' + step.target.tabId + (closed.url ? ', ' + closed.url : '') + ')';
@@ -632,7 +656,7 @@ async function __step(step, readOnly = false) {
   if (action) {
     var moved = before && result.url && before.split('#')[0] !== result.url.split('#')[0] && ['click','fill','press'].includes(step.op);
     console.log('[ok] ' + step.op + (result.outcome ? ' ' + result.outcome : '') + (result.url ? ' -> ' + result.url : '') + (moved ? ' (page changed from ' + before + ')' : '') +
-      (result.data && result.data.settle ? ' (' + result.data.settle.why + ')' : '') + (result.note ? ' - ' + result.note : ''));
+      (result.data && result.data.settle ? ' (' + result.data.settle.why + ')' : '') + ' ' + (Date.now() - startedAt) + ' ms' + (result.note ? ' - ' + result.note : ''));
   }
   if (action && step.op !== 'observe' && step.target) { try { await __autoAfter(step.target, step); } catch {} }
   return result;

@@ -72,7 +72,7 @@ const JOB_STORAGE = "aeon-code-jobs";
 const MAX_JOB_ITEM_CHARS = 200_000;
 
 interface Job extends Cell {
-  status: "running" | "complete" | "failed" | "cancelled";
+  status: "running" | "complete" | "failed" | "cancelled" | "lost";
   startedAt: number;
   finishedAt?: number;
   total: number;
@@ -327,6 +327,16 @@ async function jobCall(cell: Cell, request: Record<string, unknown>): Promise<un
   await restoreJobs();
   const job = jobs.get(String(request.id ?? ""));
   if (!job) throw new Error("TARGET_LOST: no browser job " + String(request.id ?? ""));
+  if (action === "cancel") {
+    if (job.status === "running") {
+      job.status = "cancelled";
+      job.error = "Cancelled";
+      job.finishedAt = Date.now();
+      job.done = true;
+      await saveJobs();
+    }
+    return { jobId: job.run.cellId, status: job.status };
+  }
   if (action === "artifact") {
     if (typeof request.path === "string") job.artifact = request.path;
     else delete job.artifact;
@@ -452,10 +462,16 @@ function restoreJobs(): Promise<void> {
         if (typeof item.jobId !== "string" || jobs.has(item.jobId)) continue;
         jobs.set(item.jobId, {
           ...emptyJob(item.jobId, String(item.chatId ?? ""), Number(item.total ?? 0)),
+          // A job that was still running when the worker or browser restarted cannot be resumed:
+          // it is lost, not failed, so a caller can tell the difference.
           status:
             item.status === "complete" || item.status === "failed" || item.status === "cancelled"
               ? item.status
-              : "failed",
+              : "lost",
+          ...(item.status === "lost" ||
+          !["complete", "failed", "cancelled"].includes(String(item.status))
+            ? { error: "the job's cell is gone (browser or worker restarted); start it again" }
+            : {}),
           startedAt: Number(item.startedAt ?? Date.now()),
           ...(item.finishedAt ? { finishedAt: Number(item.finishedAt) } : {}),
           ...(Array.isArray(item.results) ? { results: item.results } : {}),
