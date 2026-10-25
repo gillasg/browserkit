@@ -7,7 +7,7 @@ import {
 } from "./native-browser-session.js";
 import { publishBrowserEvent } from "./native-browser-events.js";
 import { engineConfig } from "./engine-config.js";
-import { groupAgentTab } from "./native-browser-groups.js";
+import { groupAgentTab, isAgentGroupId } from "./native-browser-groups.js";
 import { markAgentTabGrouped, trackAgentTab } from "./native-browser-tab-cleanup.js";
 import { isQuietTab } from "./native-browser-quiet.js";
 import { onEngineInstall } from "./native-engine-install.js";
@@ -36,7 +36,14 @@ onEngineInstall(() => {
     active.set(windowId, tabId);
   });
   chrome.tabs.onCreated.addListener((tab) => {
-    if (tab.id !== undefined && tab.openerTabId !== undefined) void adopt(tab.id, tab.openerTabId);
+    if (tab.id === undefined) return;
+    // Chrome carries a group over to a new tab opened from a grouped tab. The new-tab page is
+    // the user's tab, not a popup, so detach it from an agent group and never adopt it.
+    if (isNewTabPage(tab) || !(tab.pendingUrl ?? tab.url ?? "")) {
+      void ungroupAgentNewTab(tab.id);
+      return;
+    }
+    if (tab.openerTabId !== undefined) void adopt(tab.id, tab.openerTabId);
   });
   chrome.webNavigation.onCreatedNavigationTarget.addListener(
     (event) => void adopt(event.tabId, event.sourceTabId),
@@ -47,6 +54,28 @@ onEngineInstall(() => {
     for (const set of children.values()) set.delete(tabId);
   });
 });
+function isNewTabPage(tab: chrome.tabs.Tab): boolean {
+  const url = tab.pendingUrl ?? tab.url ?? "";
+  return (
+    /^(?:chrome|edge|brave|vivaldi|opera):\/\/newtab/i.test(url) ||
+    url === "about:newtab" ||
+    url.startsWith("chrome-search://local-ntp")
+  );
+}
+
+async function ungroupAgentNewTab(tabId: number): Promise<void> {
+  // The group can be attached just after onCreated. Check once immediately and once after a
+  // short settle, and leave user groups alone.
+  for (const delay of [0, 50]) {
+    if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
+    const tab = await chrome.tabs.get(tabId).catch(() => undefined);
+    if (!tab) return;
+    if (tab.groupId === undefined || tab.groupId < 0) continue;
+    if (isAgentGroupId(tab.groupId)) await chrome.tabs.ungroup(tabId).catch(() => undefined);
+    return;
+  }
+}
+
 async function adopt(tabId: number, openerId: number): Promise<void> {
   try {
     const owner = browserSessionOwner(openerId);
