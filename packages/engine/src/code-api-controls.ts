@@ -1,10 +1,17 @@
 // Forms and page furniture in browser code: page.controls (every field's full state),
 // page.batch (several steps in one call, each target matched exactly once, ending in a check),
-// page.overlays.dismiss (cookie banners and pop-ups, rejecting first), page.media.inspect (what
-// is playing) and page.challenges (bot checks, captchas, blocks and sign-in walls, also noted
-// in bu.state). Page-side functions are self-contained: they run through page.inspect or a
-// frame's evaluate, so they cannot call anything outside themselves.
+// page.overlays.dismiss (cookie banners and pop-ups, rejecting first), page.enterSite (age,
+// terms, region and "click to enter" gates, clicking the affirmative control),
+// page.media.inspect (what is playing) and page.challenges (bot checks, captchas, blocks and
+// sign-in walls, also noted in bu.state). Page-side functions are self-contained: they run
+// through page.inspect or a frame's evaluate, so they cannot call anything outside themselves.
+import { affirmativeIndex, classifyGate } from "./gates.js";
+
 export const browserControlsApi = `
+// Gate classification is the same pure function the unit tests cover; it is injected here so the
+// page side and the tests cannot drift.
+var __classifyGate = ${classifyGate};
+var __pickAffirmative = ${affirmativeIndex};
 // Page-side. mode 'list': controls with their state. mode 'find': the one element a batch target
 // names, tagged with data-aeon-t so the engine acts on it. mode 'select': picks options in a
 // native select. Open shadow roots are searched; iframes are the caller's job.
@@ -462,6 +469,74 @@ async function __dismissOverlays(target, options = {}) {
   return {dismissed, ...(left ? {left} : {})};
 }
 
+// Page-side: a gate layer (age, terms, region, enter) and its affirmative control, tagged like
+// the cookie overlay so the engine can click it in the frame it was found in.
+function __pageGate(arg) {
+  var clean = (value) => String(value ?? '').replace(/\\s+/g, ' ').trim();
+  var shown = (el) => { var r = el.getBoundingClientRect(); var style = getComputedStyle(el); return r.width > 40 && r.height > 40 && style.visibility !== 'hidden' && style.display !== 'none'; };
+  var tag = (el, kind) => {
+    for (var old of document.querySelectorAll('[data-aeon-t]')) old.removeAttribute('data-aeon-t');
+    el.setAttribute('data-aeon-t', arg.token);
+    return {gate: kind, label: clean(el.innerText || el.value || el.getAttribute('aria-label') || '').slice(0, 80)};
+  };
+  var area = innerWidth * innerHeight;
+  var roots = [document];
+  var layers = [];
+  while (roots.length) {
+    var root = roots.shift();
+    layers.push(...root.querySelectorAll('*'));
+    for (var node of root.querySelectorAll('*')) if (node.shadowRoot) roots.push(node.shadowRoot);
+  }
+  layers = layers.filter((el) => {
+    if (el.matches('html,head,body,header,nav,[role=banner],[role=navigation]') || !shown(el)) return false;
+    var modal = el.matches('[role=dialog],[role=alertdialog],[aria-modal=true],dialog[open]');
+    var r = el.getBoundingClientRect(), position = getComputedStyle(el).position;
+    return modal || ((position === 'fixed' || position === 'sticky') && r.width * r.height > area * 0.04);
+  });
+  layers = layers.filter((el) => !layers.some((other) => other !== el && other.contains(el)));
+  for (var layer of layers) {
+    var text = clean(layer.innerText).slice(0, 1500);
+    var kind = __classifyGate(text);
+    if (kind === 'none') continue;
+    var buttons = [...layer.querySelectorAll('button,[role=button],a,input[type=button],input[type=submit]')].filter(shown);
+    var labels = buttons.map((button) => clean(button.innerText || button.value || button.getAttribute('aria-label') || button.getAttribute('title') || ''));
+    var index = __pickAffirmative(labels);
+    if (index < 0) return {gate: kind, blocked: 'no affirmative control (labels: ' + labels.slice(0, 6).join(' | ') + ')', text: text.slice(0, 140)};
+    return tag(buttons[index], kind);
+  }
+  return null;
+}
+var __GATE_FRAMES = /age|gate|consent|cmp|privacy|region|country|enter|intro|splash|welcome/i;
+async function __gateRound(target) {
+  var token = 'g' + (++__tagSeq), page = browser.page(target);
+  var hit = await page.inspect(__pageGate, {token});
+  if (hit) return hit.blocked ? hit : {...hit, act: () => page.locator('[data-aeon-t="' + token + '"]').click()};
+  for (var frame of await __otherFrames(target, __GATE_FRAMES)) {
+    var inFrame = await frame.evaluate(__pageGate, {token}).catch(() => null);
+    if (inFrame) return inFrame.blocked ? inFrame : {...inFrame, act: () => frame.click('[data-aeon-t="' + token + '"]')};
+  }
+  return null;
+}
+// Detects the gate, clicks the affirmative control (never sign-in, paid or leave), and says what
+// it clicked. What was clicked is recorded in the site's pack, so the next session starts knowing.
+async function __enterSite(target, options = {}) {
+  var handled = [], left;
+  for (var round = 0; round < 3; round++) {
+    var hit = await __gateRound(target);
+    if (!hit) break;
+    if (hit.blocked) { left = {gate: hit.gate, why: hit.blocked, text: hit.text}; break; }
+    await hit.act();
+    handled.push({gate: hit.gate, clicked: hit.label});
+    await __sleep(400);
+  }
+  var last = handled[handled.length - 1];
+  var result = {gate: last ? last.gate : 'none', clicked: last ? last.clicked : null, handled, ...(left ? {left} : {})};
+  if (last) {
+    try { await __call({learn: {url: await browser.page(target).url(), gate: last.gate, clicked: last.clicked}}); } catch {}
+  }
+  return result;
+}
+
 // Page-side: every video and audio element, playing first, with the page's media session.
 function __pageMedia() {
   var roots = [document], els = [];
@@ -579,7 +654,12 @@ function __extendPageControls(target, base) {
     }),
     batch: (steps, options = {}) => __batch(target, steps, options),
     overlays: Object.freeze({dismiss: (options = {}) => __dismissOverlays(target, options)}),
-    media: Object.freeze({
+    // Age, terms, region and "click to enter" gates, besides cookies: click the affirmative
+    // control, return {gate, clicked}.
+    enterSite: (options = {}) => __enterSite(target, options),
+    // page.media() returns every manifest this tab (and its frames/workers) requested, parsed:
+    // {masters: [{url, variants: [{width, height, bandwidth, codecs, url}]}], playlists, headers}.
+    media: Object.assign(async (options = {}) => __call({media:{target, ...options}}), {
       inspect: () => __mediaInspect(target),
       // The first HLS (.m3u8) or DASH (.mpd) manifest this tab requested, with its headers.
       manifest: () => __mediaManifest(target),

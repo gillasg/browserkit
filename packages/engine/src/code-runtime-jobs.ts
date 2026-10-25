@@ -1,9 +1,13 @@
 // Browser jobs outlive the cell that started them: their state is kept in session storage and
 // restored when the worker restarts, so browser.job status still answers.
 import type { Cell } from "./code-runtime-host.js";
+import type { JobOptions } from "./code-job-code.js";
+import type { SweepOptions } from "./code-sweep-code.js";
 import type { BrowserIdentity } from "./native-worker-identity.js";
 
 export const jobs = new Map<string, Job>();
+/** Watchdogs for running jobs; a job whose realm is gone is settled by one. */
+export const jobTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const JOB_STORAGE = "aeon-code-jobs";
 export const MAX_JOB_ITEM_CHARS = 200_000;
 
@@ -16,6 +20,12 @@ export interface Job extends Cell {
   progress?: { done: number; total: number; label?: string };
   error?: string;
   artifact?: string;
+  /** The items and function a resume replays; a lost job keeps them. */
+  items?: unknown[];
+  fn?: string;
+  options?: JobOptions | SweepOptions;
+  /** A job of pages, or a sweep with outcomes and evidence per URL. */
+  mode?: "job" | "sweep";
 }
 
 let jobsRestored: Promise<void> | undefined;
@@ -42,6 +52,20 @@ export function restoreJobs(): Promise<void> {
           startedAt: Number(item.startedAt ?? Date.now()),
           ...(item.finishedAt ? { finishedAt: Number(item.finishedAt) } : {}),
           ...(Array.isArray(item.results) ? { results: item.results } : {}),
+          ...(item.progress && typeof item.progress === "object"
+            ? {
+                progress: {
+                  done: Number((item.progress as { done?: unknown }).done ?? 0),
+                  total: Number((item.progress as { total?: unknown }).total ?? item.total ?? 0),
+                },
+              }
+            : {}),
+          ...(Array.isArray(item.items) ? { items: item.items } : {}),
+          ...(typeof item.fn === "string" ? { fn: item.fn } : {}),
+          ...(item.options && typeof item.options === "object"
+            ? { options: item.options as JobOptions | SweepOptions }
+            : {}),
+          ...(item.mode === "sweep" ? { mode: "sweep" as const } : {}),
           ...(typeof item.error === "string" ? { error: item.error } : {}),
           ...(typeof item.artifact === "string" ? { artifact: item.artifact } : {}),
         });
@@ -94,6 +118,11 @@ export function saveJobs(): Promise<void> {
       startedAt: job.startedAt,
       ...(job.finishedAt ? { finishedAt: job.finishedAt } : {}),
       ...(job.results && text.length <= 1_000_000 ? { results: job.results } : {}),
+      ...(job.progress ? { progress: job.progress } : {}),
+      ...(job.items && job.items.length <= 500 ? { items: job.items } : {}),
+      ...(job.fn ? { fn: job.fn } : {}),
+      ...(job.options ? { options: job.options } : {}),
+      ...(job.mode ? { mode: job.mode } : {}),
       ...(job.error ? { error: job.error } : {}),
       ...(job.artifact ? { artifact: job.artifact } : {}),
     };

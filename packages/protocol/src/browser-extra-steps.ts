@@ -81,6 +81,8 @@ export const browserExtraSteps = [
         .refine((value) => ["http:", "https:"].includes(new URL(value).protocol)),
       /** false for parallel reads: navigate without changing the Split View pair. */
       present: z.boolean().optional(),
+      /** The Referer this navigation sends (some players gate on it). */
+      referer: z.string().url().max(8192).optional(),
       /** How long to wait for the page to load; a slow page is reported, not waited on forever. */
       timeoutMs: z.number().int().min(500).max(120000).optional(),
     })

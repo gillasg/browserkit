@@ -1,6 +1,8 @@
 import type { Command } from "../usage.js";
 import { boostsCommand } from "./boosts.js";
 import { browserGroup } from "./browser.js";
+import { jobCommand } from "./job.js";
+import { sweepCommand } from "./sweep.js";
 import {
   checkCommand,
   crawlCommand,
@@ -32,6 +34,8 @@ import { profileCommand } from "./profile.js";
 // Every capability the MCP tools and the bundled packages have, as a command.
 export const COMMANDS: Command[] = [
   ...browserGroup,
+  sweepCommand,
+  jobCommand,
   crawlCommand,
   checkCommand,
   scrapeCommand,

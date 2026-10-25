@@ -38,6 +38,7 @@ import {
   trackAgentTab,
 } from "./native-browser-tab-cleanup.js";
 import { currentFocusedWindowId } from "./native-inventory-client.js";
+import { browserSessionOwner } from "./native-browser-session.js";
 import { ownerTitle } from "./native-browser-owner.js";
 import { enableQuietTab } from "./native-browser-quiet.js";
 import { showAgentCaption } from "./native-browser-cursor.js";
@@ -251,7 +252,7 @@ export async function performExtra(
       if (step.op === "navigate") {
         // Recorded from the first request, so page.network.list() has the new page's calls.
         await captureFromTabStart(tabId);
-        return navigateReady(tabId, step.url, step.timeoutMs);
+        return navigateReady(tabId, step.url, step.timeoutMs, step.referer);
       }
       if (step.op === "diagnostics") {
         await enableConsoleCapture(tabId);
@@ -539,14 +540,24 @@ async function refreshActiveTabs(): Promise<void> {
 }
 
 async function listTabs(request: BrowserExecutorRequest): Promise<BrowserExecutorResult> {
-  const query = request.step.op === "listTabs" ? request.step.query : undefined;
+  const step = request.step.op === "listTabs" ? request.step : undefined;
+  const query = step?.query;
   await ensureAgentTabsRestored();
   await refreshActiveTabs();
-  const tabs = currentInventoryTabs().filter((tab) => safePage(tab.url));
+  const mine = new Set(mineTabIds(request.chatId));
+  const tabs = currentInventoryTabs()
+    .filter((tab) => safePage(tab.url))
+    // Another session's tab is borrowed, not listed: attachTab says TAB_OWNED_ELSEWHERE.
+    // {all: true} lists them too; {mine: true} lists only this session's tabs.
+    .filter((tab) => {
+      if (step?.mine) return mine.has(tab.target.tabId);
+      if (step?.all) return true;
+      const owner = browserSessionOwner(tab.target.tabId);
+      return owner === undefined || owner === request.chatId;
+    });
   const filtered = query
     ? tabs.filter((tab) => `${tab.title} ${tab.url}`.toLowerCase().includes(query.toLowerCase()))
     : tabs;
-  const mine = new Set(mineTabIds(request.chatId));
   return BrowserExecutorResultSchema.parse({
     kind: "tabs",
     tabs: filtered.slice(0, 256).map((tab) => ({ ...tab, mine: mine.has(tab.target.tabId) })),

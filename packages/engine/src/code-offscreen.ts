@@ -137,7 +137,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
   }
   if (message.kind === "stopJobs") {
     for (const [jobId, job] of jobRealms)
-      if (job.chatId === message.chatId) {
+      if (job.chatId === message.chatId && (!message.jobId || message.jobId === jobId)) {
         job.frame.remove();
         jobRealms.delete(jobId);
       }

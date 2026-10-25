@@ -7,6 +7,12 @@ export interface NetworkEntry {
   type: string;
   startedAt: number;
   frameId?: string;
+  /** The frame or worker that made the request, when it was not the top frame. */
+  frameUrl?: string;
+  /** Where it ran: the top frame, an out-of-process iframe, a worker or a service worker. */
+  source?: "worker" | "service-worker";
+  /** The child debugger session that carried it, for body reads. */
+  sessionId?: string;
   documentURL?: string;
   requestHeaders: Record<string, string>;
   requestBody?: string;
@@ -50,6 +56,10 @@ export function summarize(entry: NetworkEntry): Record<string, unknown> {
   if (entry.remoteIPAddress) summary.remoteIPAddress = entry.remoteIPAddress;
   if (entry.size !== undefined) summary.size = entry.size;
   summary.json = /json/i.test(entry.mimeType ?? "");
+  summary.state = entry.failed ? "failed" : entry.done ? "done" : "pending";
+  if (entry.frameUrl) summary.frameUrl = entry.frameUrl;
+  if (entry.source) summary.source = entry.source;
+  if (entry.documentURL) summary.documentURL = entry.documentURL;
   if (entry.requestBody !== undefined) summary.requestBody = entry.requestBody.slice(0, 2000);
   if (entry.initiator?.url) summary.initiator = entry.initiator.url;
   if (!entry.done) summary.loading = true;

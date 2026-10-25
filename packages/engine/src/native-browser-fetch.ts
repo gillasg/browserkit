@@ -75,13 +75,16 @@ export async function fetchCall(value: Record<string, unknown>): Promise<unknown
     headers: Object.fromEntries(response.headers),
     ...(rateWaitMs ? { rateWaitMs } : {}),
   };
-  if (response.status === 401 || response.status === 403)
+  if ((response.status === 401 || response.status === 403) && !split.referer && !split.origin)
     result.hint =
-      "A site that refuses a bare request usually wants a Referer/Origin or a session cookie: " +
-      "pass {headers: {referer, origin}} (the browser applies them), or call from the site's own " +
-      "tab with page.fetchJson(url) so cookies and headers match.";
+      "A site that refuses a bare request usually wants the page's Referer/Origin or a session " +
+      "cookie: retry with referer/origin of the page (pass {headers: {referer, origin}}, or " +
+      "asOrigin: true on browser.fetch), or call from the site's own tab with page.fetchJson(url) " +
+      "so cookies and headers match. The body below is the refusal, not the answer.";
   if (request.as === "base64") return { ...result, ...(await base64(response)) };
   const text = await response.text();
+  // A refusal page is kept, but bounded: enough to read a reason, not a 5 MB error page.
+  const cap = response.ok ? MAX_TEXT : Math.min(MAX_TEXT, 200_000);
   if (request.as !== "text") {
     try {
       return { ...result, json: JSON.parse(text) as unknown };
@@ -91,8 +94,8 @@ export async function fetchCall(value: Record<string, unknown>): Promise<unknown
   }
   return {
     ...result,
-    text: text.length > MAX_TEXT ? text.slice(0, MAX_TEXT) : text,
-    ...(text.length > MAX_TEXT ? { truncated: true, length: text.length } : {}),
+    text: text.length > cap ? text.slice(0, cap) : text,
+    ...(text.length > cap ? { truncated: true, length: text.length } : {}),
   };
 }
 

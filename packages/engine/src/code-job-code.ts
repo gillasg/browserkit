@@ -28,12 +28,15 @@ export function jobCode(spec: {
   items: unknown[];
   fn: string;
   options: JobOptions;
+  /** Resume: results before this index are already stored. */
+  offset?: number;
 }): string {
   return `(async () => {
   const spec = ${JSON.stringify(spec)};
   const fn = (${spec.fn});
-  const items = spec.items, options = spec.options, results = new Array(items.length);
-  let next = 0, done = 0;
+  const items = spec.items, options = spec.options, results = new Array(spec.offset || 0);
+  const offset = spec.offset || 0;
+  let next = 0, done = offset;
   const limit = Math.max(1, Math.min(options.concurrency, options.maxTabs, items.length));
   async function one(index) {
     const item = items[index];
@@ -58,11 +61,14 @@ export function jobCode(spec: {
   await Promise.all(Array.from({length:limit}, async () => {
     while (next < items.length) {
       const index = next++;
-      results[index] = await one(index);
+      results[offset + index] = await one(index);
       done++;
-      bu.progress(done, items.length, options.label);
+      // Each finished item is reported at once: the durable job record survives a lost
+      // completion message, and a resume knows exactly where to start.
+      await __call({job:{action:'item', id:spec.jobId, index:offset + index, result:results[offset + index]}}).catch(() => {});
+      bu.progress(done, offset + items.length, options.label);
     }
   }));
-  return {jobId: spec.jobId, complete: true, total: items.length, results, finishedAt: Date.now()};
+  return {jobId: spec.jobId, complete: true, total: offset + items.length, offset, results, finishedAt: Date.now()};
 })()`;
 }

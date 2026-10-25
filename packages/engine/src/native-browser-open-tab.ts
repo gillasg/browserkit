@@ -39,7 +39,7 @@ export async function openTab(
     step.ownerTitle ?? ownerTitle(request.chatId),
   );
   if (step.quiet) await enableQuietTab(created.id);
-  const navigation = await navigateOpenedTab(created.id, step.url, step.timeoutMs);
+  const navigation = await navigateOpenedTab(created.id, step.url, step.timeoutMs, step.referer);
   assertRequestActive(request);
   const tab = await refreshInventoryTab(created.id);
   if (!tab || !sameIdentity(tab.target, identity)) throw new Error("TARGET_LOST");
@@ -60,11 +60,12 @@ async function navigateOpenedTab(
   tabId: number,
   url: string,
   timeoutMs?: number,
+  referer?: string,
 ): Promise<string | undefined> {
   try {
     await withBrowserDebugger(tabId, async () => {
       await captureFromTabStart(tabId);
-      await navigateReady(tabId, url, timeoutMs);
+      await navigateReady(tabId, url, timeoutMs, referer);
     });
     return undefined;
   } catch (error) {

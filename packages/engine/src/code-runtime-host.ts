@@ -8,17 +8,10 @@ import {
   type BrowserStep,
   type BrowserTargetKey,
 } from "@browserkit/protocol";
-import {
-  jobs,
-  emptyJob,
-  restoreJobs,
-  saveJobs,
-  MAX_JOB_ITEM_CHARS,
-  type Job,
-} from "./code-runtime-jobs.js";
+import { jobs, saveJobs } from "./code-runtime-jobs.js";
 import { browserErrorDetail, errorCode, targetIdentity } from "./native-browser-common.js";
 import { stepFailure } from "./code-step-errors.js";
-import { jobCode, jobOptions } from "./code-job-code.js";
+import { jobCall, finishJob, cancelJobs } from "./code-runtime-job-control.js";
 import { executeLocalBrowserStep } from "./native-browser-executor.js";
 import { browserSessionOwner } from "./native-browser-session.js";
 import { currentInventoryTabs } from "./native-inventory-client.js";
@@ -34,10 +27,11 @@ import {
 } from "./native-browser-site-rules.js";
 import { handOffToUser } from "./native-browser-handoff.js";
 import { presentBrowserTask, presentsBrowserTask } from "./native-browser-layout.js";
-import { resetChatTabs, agentTabSummary } from "./native-browser-tab-cleanup.js";
+import { resetChatTabs, agentTabSummary, reapChatPopups } from "./native-browser-tab-cleanup.js";
 import { setOwnerTitle } from "./native-browser-owner.js";
 import { disableQuietTab, enableQuietTab } from "./native-browser-quiet.js";
 import { networkCall } from "./native-browser-network.js";
+import { mediaCall, type MediaRequest } from "./native-browser-media.js";
 import { isLibraryRequest, libraryCall } from "./native-browser-library.js";
 import { windowsCall } from "./native-browser-windows.js";
 import { tabGroupsCall } from "./native-browser-groups.js";
@@ -72,6 +66,8 @@ export interface Cell {
   guarded: Set<number>;
   /** Popup count when the cell started, so its tab line says what this cell parked. */
   popupsAtStart: number;
+  /** When the cell began; its result carries the total ms. */
+  startedAt?: number;
 }
 const cells = new Map<string, Cell>();
 let offscreen: Promise<void> | undefined;
@@ -150,6 +146,7 @@ async function startCell(identity: BrowserIdentity, socket: WebSocket, run: Brow
     done: false,
     popupsAtStart: agentTabSummary(run.chatId).popups,
   };
+  cell.startedAt = Date.now();
   cells.set(run.cellId, cell);
   try {
     const result = (await toOffscreen({
@@ -196,6 +193,7 @@ function finish(
     ...(result.error ? { error: result.error.slice(0, 20000) } : {}),
     ...(result.reset ? { reset: true } : {}),
     steps: cell.steps.slice(-MAX_TRACE),
+    ms: Math.max(0, Date.now() - (cell.startedAt ?? Date.now())),
     opened: [...cell.opened.values()],
     tabStats: (() => {
       const summary = agentTabSummary(cell.run.chatId);
@@ -236,6 +234,11 @@ function serveCall(cell: Cell, value: Record<string, unknown> | null): Promise<u
     return Promise.resolve({ clientInstanceIds: [cell.identity.clientInstanceId] });
   if (value && typeof value.job === "object" && value.job)
     return jobCall(cell, value.job as Record<string, unknown>);
+  if (value && typeof value.media === "object" && value.media) {
+    const media = value.media as { target?: unknown } & Record<string, unknown>;
+    const target = authorizedTarget(cell, media.target);
+    return mediaCall(target.tabId, media as MediaRequest);
+  }
   if (value && typeof value.progress === "object" && jobs.get(cell.run.cellId) === cell) {
     const job = jobs.get(cell.run.cellId);
     const progress = value.progress as { done?: unknown; total?: unknown; label?: unknown };
@@ -245,12 +248,16 @@ function serveCall(cell: Cell, value: Record<string, unknown> | null): Promise<u
         total: Math.max(0, Number(progress.total) || 0),
         ...(typeof progress.label === "string" ? { label: progress.label.slice(0, 200) } : {}),
       };
+    void saveJobs();
     return Promise.resolve({ ok: true });
   }
   if (value && typeof value.handoff === "object" && value.handoff)
     return handoff(cell, value.handoff);
   if (value && typeof value.quiet === "object" && value.quiet) return quietCall(cell, value.quiet);
   if (value && value.tabs === "reset") return resetCall(cell);
+  if (value && value.session === "close") return resetCall(cell);
+  if (value && value.session === "reap")
+    return reapChatPopups(cell.run.chatId).then((closed) => ({ closed }));
   if (value && value.tabs === "close") return closeTabCall(cell.run.chatId, value);
   if (value && typeof value.network === "string")
     return networkCall(authorizedTarget(cell, value.target).tabId, value.network, value);
@@ -313,136 +320,6 @@ async function resetCall(cell: Cell): Promise<unknown> {
     chatId: cell.run.chatId,
   }).catch(() => undefined);
   return resetChatTabs(cell.run.chatId);
-}
-
-async function jobCall(cell: Cell, request: Record<string, unknown>): Promise<unknown> {
-  const action = String(request.action ?? "status");
-  if (action === "start") return startJob(cell, request);
-  await restoreJobs();
-  const job = jobs.get(String(request.id ?? ""));
-  if (!job) throw new Error("TARGET_LOST: no browser job " + String(request.id ?? ""));
-  if (action === "cancel") {
-    if (job.status === "running") {
-      job.status = "cancelled";
-      job.error = "Cancelled";
-      job.finishedAt = Date.now();
-      job.done = true;
-      await saveJobs();
-    }
-    return { jobId: job.run.cellId, status: job.status };
-  }
-  if (action === "artifact") {
-    if (typeof request.path === "string") job.artifact = request.path;
-    else delete job.artifact;
-    await saveJobs();
-    return { ok: true, artifact: job.artifact };
-  }
-  if (action === "status")
-    return {
-      jobId: job.run.cellId,
-      status: job.status,
-      total: job.total,
-      done: job.progress?.done ?? job.results?.filter(Boolean).length ?? 0,
-      ...(job.progress ? { progress: job.progress } : {}),
-      startedAt: job.startedAt,
-      ...(job.finishedAt ? { finishedAt: job.finishedAt } : {}),
-      ...(job.artifact ? { artifact: job.artifact } : {}),
-      ...(job.error ? { error: job.error } : {}),
-    };
-  if (action === "result")
-    return {
-      jobId: job.run.cellId,
-      status: job.status,
-      total: job.total,
-      results: job.results ?? [],
-      ...(job.error ? { error: job.error } : {}),
-      ...(job.artifact ? { artifact: job.artifact } : {}),
-    };
-  throw new Error("UNSUPPORTED: browser.job." + action);
-}
-
-async function startJob(cell: Cell, request: Record<string, unknown>): Promise<unknown> {
-  const items = request.items;
-  const source = request.fn;
-  if (!Array.isArray(items) || !items.length || items.length > 500)
-    throw new Error("browser.job takes 1–500 items");
-  if (typeof source !== "string" || !source.trim())
-    throw new Error("browser.job needs a function (items, page, index) => …");
-  if (source.length > MAX_JOB_ITEM_CHARS) throw new Error("browser.job's function is too large");
-  const options = jobOptions(request.options);
-  const jobId = crypto.randomUUID();
-  const job: Job = {
-    run: {
-      kind: "browser.code.run",
-      cellId: jobId,
-      chatId: cell.run.chatId,
-      toolCallId: "job-" + jobId,
-      code: "browser.job",
-      targets: [],
-      timeoutMs: 600_000,
-    },
-    socket: cell.socket,
-    identity: cell.identity,
-    operationId: crypto.randomUUID(),
-    allowed: new Map(),
-    opened: new Map(),
-    guarded: new Set(),
-    steps: [],
-    count: 0,
-    calls: new Map(),
-    sequence: 0,
-    progressTimer: undefined,
-    waitingForUser: false,
-    done: false,
-    popupsAtStart: agentTabSummary(cell.run.chatId).popups,
-    status: "running",
-    startedAt: Date.now(),
-    total: items.length,
-  };
-  jobs.set(jobId, job);
-  await saveJobs();
-  const code = jobCode({ jobId, items, fn: source, options });
-  try {
-    await toOffscreen({
-      target: "aeon-code-offscreen",
-      kind: "job",
-      jobId,
-      chatId: cell.run.chatId,
-      code,
-    });
-  } catch (error) {
-    job.status = "failed";
-    job.error = String(error);
-    await saveJobs();
-    throw error;
-  }
-  return { jobId, status: "running", total: items.length };
-}
-
-function finishJob(message: Record<string, unknown>): void {
-  const job = jobs.get(String(message.jobId ?? ""));
-  if (!job) return;
-  job.done = true;
-  job.finishedAt = Date.now();
-  const value = message.value as { results?: unknown[] } | undefined;
-  if (Array.isArray(value?.results)) job.results = value.results;
-  else delete job.results;
-  const error = typeof message.error === "string" ? message.error : undefined;
-  job.status = error ? "failed" : "complete";
-  if (error) job.error = error;
-  else delete job.error;
-  job.calls.clear();
-  void saveJobs();
-}
-
-function cancelJobs(chatId: string): void {
-  for (const job of jobs.values())
-    if (job.run.chatId === chatId && job.status === "running") {
-      job.status = "cancelled";
-      job.finishedAt = Date.now();
-      job.error = "Browser job cancelled";
-    }
-  void saveJobs();
 }
 
 async function guardCellTab(cell: Cell, tabId: number): Promise<void> {
@@ -523,6 +400,7 @@ async function serve(cell: Cell, request: unknown): Promise<unknown> {
     throw await stepFailure(step, error);
   } finally {
     entry.tEnd = Date.now();
+    entry.ms = Math.max(0, Number(entry.tEnd) - Number(entry.tStart ?? entry.tEnd));
     const tabId = resultTab ?? stepTab;
     if (tabId !== undefined)
       Object.assign(entry, await stepTrace(tabId, INPUT_OPS.has(step.op)).catch(() => ({})));
@@ -609,6 +487,13 @@ function authorize(cell: Cell, step: BrowserStep): void {
     // Attaching a listed tab is an explicit agent choice; Core records it after the cell.
     if (!currentInventoryTabs().some((tab) => targetIdentity(tab.target) === key))
       throw new Error("TARGET_LOST");
+    const owner = browserSessionOwner(target.tabId);
+    if (owner !== undefined && owner !== cell.run.chatId)
+      throw new Error(
+        "TAB_OWNED_ELSEWHERE: tab " +
+          target.tabId +
+          " is driven by another session; browser.tabs({all:true}) shows it, open your own copy with browser.openTab(url, {newTab:true})",
+      );
     cell.allowed.set(key, target);
     cell.opened.set(key, target);
     return;
@@ -689,7 +574,7 @@ async function ensureOffscreen(): Promise<void> {
   await offscreen;
 }
 
-async function toOffscreen(message: Record<string, unknown>): Promise<unknown> {
+export async function toOffscreen(message: Record<string, unknown>): Promise<unknown> {
   await ensureOffscreen();
   return chrome.runtime.sendMessage(message);
 }

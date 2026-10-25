@@ -15,7 +15,14 @@ import { BrowserElementTargetSchema, SemanticTargetSchema } from "./browser-elem
 export const BrowserStepSchema = z.discriminatedUnion("op", [
   ...browserExtraSteps,
   ...browserCapabilitySteps,
-  z.object({ op: z.literal("listTabs"), query: z.string().max(160).optional() }).strict(),
+  z
+    .object({
+      op: z.literal("listTabs"),
+      query: z.string().max(160).optional(),
+      mine: z.boolean().optional(),
+      all: z.boolean().optional(),
+    })
+    .strict(),
   z
     .object({
       op: z.literal("openTab"),
@@ -24,6 +31,8 @@ export const BrowserStepSchema = z.discriminatedUnion("op", [
       foreground: z.boolean().default(false),
       /** Park popups, mute media and block ad hosts while the agent uses this tab. */
       quiet: z.boolean().optional(),
+      /** The Referer this page load sends (some providers allowlist it). */
+      referer: z.string().url().max(8192).optional(),
       /** false for a background read pool: open without changing the Split View pair. */
       present: z.boolean().optional(),
       /** What the host calls the owner's tab group (a chat title, "Routine · …", "Mapping"). */

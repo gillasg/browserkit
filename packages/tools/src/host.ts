@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { learnAbout, readLearned, learnedHint } from "@browserkit/site-mapper";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { handleCredentialRequest, isCredentialRequest } from "@browserkit/credentials";
 import {
@@ -120,10 +121,48 @@ export function createHostHandler(
   return (request, context) => {
     if (isCredentialRequest(request)) return handleCredentialRequest(request, home);
     if (isSiteRulesRequest(request)) return answerSiteRules(context, options, home);
+    if (isLearnRequest(request)) return answerLearn(request);
+    if (isLearnedRequest(request)) return answerLearned(request);
     if (isSiteMapperRequest(request))
       return options.siteMapper?.(request, context) ?? handleSiteMapperRequest(request);
     return options.extra?.(request, context);
   };
+}
+
+/** What a run learned about a site, kept in the site's pack (see site-mapper's learned.ts). */
+export function isLearnRequest(value: unknown): boolean {
+  return Boolean(value && typeof (value as { learn?: unknown }).learn === "object");
+}
+
+export function isLearnedRequest(value: unknown): boolean {
+  return Boolean(value && typeof (value as { learned?: unknown }).learned === "string");
+}
+
+async function answerLearn(request: unknown): Promise<unknown> {
+  const patch = (request as { learn?: Record<string, unknown> }).learn ?? {};
+  const site =
+    (typeof patch.site === "string" && patch.site) ||
+    siteName(String(patch.url ?? "")) ||
+    undefined;
+  if (!site) throw new Error("learn needs a site (or a url)");
+  const note = await learnAbout(site, {
+    ...(typeof patch.gate === "string" ? { gate: patch.gate } : {}),
+    ...(typeof patch.clicked === "string" ? { clicked: patch.clicked } : {}),
+    ...(typeof patch.referer === "string" ? { referer: patch.referer } : {}),
+    ...(patch.play === true ? { play: true } : {}),
+    ...(Array.isArray(patch.functions)
+      ? { functions: patch.functions.map(String).slice(0, 20) }
+      : {}),
+    ...(typeof patch.note === "string" ? { note: patch.note.slice(0, 500) } : {}),
+  });
+  return { saved: true, site: note.site, runs: note.runs };
+}
+
+async function answerLearned(request: unknown): Promise<unknown> {
+  const url = String((request as { learned?: unknown }).learned ?? "");
+  const site = siteName(url);
+  const note = site ? await readLearned(site) : undefined;
+  return { site, ...(note ? note : {}), hint: learnedHint(note) };
 }
 
 async function answerSiteRules(

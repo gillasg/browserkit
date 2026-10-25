@@ -261,6 +261,7 @@ export async function navigateReady(
   tabId: number,
   url: string,
   timeoutMs = 8000,
+  referer?: string,
 ): Promise<{ url: string; timedOut: boolean }> {
   const navigation = await new Promise<{ url: string; timedOut: boolean }>((resolve, reject) => {
     let committed = false;
@@ -309,7 +310,10 @@ export async function navigateReady(
     chrome.webNavigation.onErrorOccurred.addListener(error);
     chrome.webNavigation.onHistoryStateUpdated.addListener(sameDocument);
     chrome.webNavigation.onReferenceFragmentUpdated.addListener(sameDocument);
-    void chrome.tabs.update(tabId, { url }).catch((cause) => {
+    const navigate = referer
+      ? chrome.debugger.sendCommand({ tabId }, "Page.navigate", { url, referrer: referer })
+      : chrome.tabs.update(tabId, { url });
+    void navigate.catch((cause) => {
       clean();
       reject(cause);
     });

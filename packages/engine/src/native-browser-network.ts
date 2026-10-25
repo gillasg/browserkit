@@ -3,7 +3,15 @@ import {
   onBrowserDebuggerAttached,
   withBrowserDebugger,
 } from "./native-browser-session.js";
-import { toHar, summarize, type NetworkEntry } from "./native-browser-network-format.js";
+import { toHar, type NetworkEntry } from "./native-browser-network-format.js";
+import { listEntries, recentOf } from "./native-browser-network-list.js";
+import {
+  attachChild,
+  childScopes,
+  NETWORK_BUFFERS,
+  scopeKey,
+  type ChildScope,
+} from "./native-browser-network-scopes.js";
 import { dryRunActive, setDryRun } from "./native-browser-dry-run.js";
 import { onEngineInstall } from "./native-engine-install.js";
 import {
@@ -50,6 +58,8 @@ interface Recorder {
   fromStart?: boolean;
   /** page.network.waitFor callers still waiting for one request to finish. */
   waiters?: Set<Waiter>;
+  /** Set while a child session event is handled, so its entry says where it came from. */
+  scope?: ChildScope | undefined;
 }
 
 interface Waiter {
@@ -71,11 +81,28 @@ onBrowserDebuggerAttached(async (tabId) => {
 onEngineInstall(() => {
   chrome.debugger.onEvent.addListener((source, method, raw) => {
     const tabId = source.tabId;
-    const recorder = tabId === undefined ? undefined : recorders.get(tabId);
-    if (!recorder || source.sessionId || tabId === undefined) return;
+    if (tabId === undefined) return;
     const params = (raw ?? {}) as Params;
+    if (method === "Target.attachedToTarget") return attachChild(tabId, params);
+    if (method === "Target.detachedFromTarget") {
+      childScopes.delete(scopeKey(tabId, String(params.sessionId ?? "")));
+      return;
+    }
+    const recorder = recorders.get(tabId);
+    if (!recorder) return;
+    const scope = source.sessionId ? childScopes.get(scopeKey(tabId, source.sessionId)) : undefined;
+    // A child session is only interesting for its own traffic.
+    if (source.sessionId && !scope) return;
     const handler = HANDLERS[method];
-    if (handler) handler(recorder, params, tabId);
+    if (!handler) return;
+    recorder.scope = scope
+      ? { ...scope, ...(source.sessionId ? { sessionId: source.sessionId } : {}) }
+      : undefined;
+    try {
+      handler(recorder, params, tabId);
+    } finally {
+      recorder.scope = undefined;
+    }
   });
 });
 
@@ -163,6 +190,11 @@ function requestWillBeSent(recorder: Recorder, params: Params): void {
     done: false,
   };
   if (typeof params.frameId === "string") entry.frameId = params.frameId;
+  if (recorder.scope) {
+    if (recorder.scope.sessionId) entry.sessionId = recorder.scope.sessionId;
+    if (recorder.scope.frameUrl) entry.frameUrl = recorder.scope.frameUrl;
+    if (recorder.scope.source) entry.source = recorder.scope.source;
+  }
   if (typeof params.documentURL === "string") entry.documentURL = params.documentURL;
   if (typeof request.postData === "string") entry.requestBody = hideSecrets(request.postData);
   else if (request.hasPostData) entry.requestBodyPending = true;
@@ -216,12 +248,22 @@ function notifyWaiters(recorder: Recorder, entry: NetworkEntry): void {
 async function captureBodies(tabId: number, recorder: Recorder, entry: NetworkEntry) {
   const textual = TEXTUAL.test(entry.mimeType ?? "") || entry.type === "Fetch";
   if (entry.requestBodyPending) {
-    const post = await command(tabId, "Network.getRequestPostData", { requestId: entry.id });
+    const post = await command(
+      tabId,
+      "Network.getRequestPostData",
+      { requestId: entry.id },
+      entry.sessionId,
+    );
     if (typeof post?.postData === "string") entry.requestBody = hideSecrets(post.postData);
     delete entry.requestBodyPending;
   }
   if (!textual || (entry.size ?? 0) > recorder.maxBody * 2) return;
-  const result = await command(tabId, "Network.getResponseBody", { requestId: entry.id });
+  const result = await command(
+    tabId,
+    "Network.getResponseBody",
+    { requestId: entry.id },
+    entry.sessionId,
+  );
   if (typeof result?.body !== "string") return;
   const text = result.base64Encoded ? "" : result.body;
   if (result.base64Encoded) entry.bodyBase64 = true;
@@ -236,9 +278,10 @@ function command(
   tabId: number,
   method: string,
   params: Params,
+  sessionId?: string,
 ): Promise<{ body?: string; base64Encoded?: boolean; postData?: string } | undefined> {
   return chrome.debugger
-    .sendCommand({ tabId }, method, params)
+    .sendCommand(sessionId ? { tabId, sessionId } : { tabId }, method, params)
     .then((value) => value as { body?: string; base64Encoded?: boolean; postData?: string })
     .catch(() => undefined);
 }
@@ -329,16 +372,19 @@ onEngineInstall(() => {
   });
 });
 
-const NETWORK_BUFFERS = {
-  maxTotalBufferSize: 100_000_000,
-  maxResourceBufferSize: 10_000_000,
-  maxPostDataSize: 1_000_000,
-};
-
 async function enableNetwork(tabId: number): Promise<void> {
-  await withBrowserDebugger(tabId, (debuggee) =>
-    chrome.debugger.sendCommand(debuggee, "Network.enable", NETWORK_BUFFERS),
-  );
+  await withBrowserDebugger(tabId, async (debuggee) => {
+    await chrome.debugger.sendCommand(debuggee, "Network.enable", NETWORK_BUFFERS);
+    // Workers and out-of-process iframes attach as they appear, so their requests land in the
+    // same store as the top frame's (a player's resolver often runs in a service worker).
+    await chrome.debugger
+      .sendCommand(debuggee, "Target.setAutoAttach", {
+        autoAttach: true,
+        waitForDebuggerOnStart: false,
+        flatten: true,
+      })
+      .catch(() => undefined);
+  });
 }
 
 export async function networkCall(
@@ -367,7 +413,15 @@ export async function networkCall(
   }
   const recorder = recorders.get(tabId) ?? stopped.get(tabId);
   if (!recorder) throw new Error("Not recording: call page.network.start() first");
-  if (action === "list") return list(recorder, options);
+  if (action === "list") {
+    const rows = listEntries(recorder.entries.values(), options);
+    if (options.cursor !== true && options.since === undefined) return rows;
+    const cursor = rows.reduce<number>(
+      (last, entry) => Math.max(last, Number((entry as { startedAt?: number }).startedAt ?? 0)),
+      0,
+    );
+    return { entries: rows, cursor };
+  }
   if (action === "waitFor") return waitForRequest(tabId, recorder, options);
   if (action === "failures") {
     const match = typeof options.match === "string" ? options.match : "";
@@ -472,16 +526,6 @@ async function start(tabId: number, options: Params): Promise<unknown> {
   };
 }
 
-function list(recorder: Recorder, options: Params): unknown[] {
-  const match = typeof options.match === "string" && options.match ? options.match : undefined;
-  const method = typeof options.method === "string" ? options.method.toUpperCase() : undefined;
-  return [...recorder.entries.values()]
-    .filter((entry) => !match || entry.url.includes(match))
-    .filter((entry) => !method || entry.method === method)
-    .filter((entry) => typeof options.type !== "string" || entry.type === options.type)
-    .map(summarize);
-}
-
 /**
  * Why a list came back empty: the tab is recorded from its first request on, so an empty list
  * means the page loaded before this chat had the tab. Says so instead of leaving a bare [].
@@ -515,14 +559,6 @@ function stateOf(tabId: number): Record<string, unknown> {
 }
 
 /** The last few requests, for "nothing matched, but this is what happened". */
-function recentOf(entries: readonly NetworkEntry[]): string[] {
-  return entries
-    .slice(-3)
-    .map(
-      (entry) => entry.method + " " + pathOf(entry.url) + (entry.status ? " " + entry.status : ""),
-    );
-}
-
 const WAIT_TIMEOUT_MS = 15_000;
 const WAIT_MAX_MS = 120_000;
 
@@ -671,6 +707,10 @@ interface FailureGroup {
 
 function endpointOf(entry: NetworkEntry): string {
   return entry.method + " " + pathOf(entry.url);
+}
+
+export function recorderOf(tabId: number): { entries: Map<string, NetworkEntry> } | undefined {
+  return recorders.get(tabId) ?? stopped.get(tabId);
 }
 
 function pathOf(url: string): string {

@@ -10,9 +10,25 @@ import {
 } from "@browserkit/tools/browser-crawl";
 import { crawlTool, type CrawlToolInput } from "@browserkit/tools/definitions";
 import { flag, has, list, type Args } from "../args.js";
-import { cliModel } from "../host.js";
+import { BridgeClient } from "../client.js";
+import { cliHost, cliModel } from "../host.js";
 import { out, printJson, printRows } from "../output.js";
 import type { Command } from "../usage.js";
+
+const SESSION = "browserkit-cli";
+
+async function runInBrowser(code: string): Promise<unknown> {
+  const host = cliHost();
+  if (host) return host.runInBrowser(code, { session: SESSION });
+  const bridge = await BridgeClient.connect();
+  try {
+    const reply = await bridge.request("run", { code, session: SESSION });
+    if (reply.error) throw new Error(String(reply.error));
+    return reply.value;
+  } finally {
+    bridge.close();
+  }
+}
 
 // Reading the web: one page, a site or section, its URL list, a Google search, or a list built
 // from results. Plain HTTP first; the browser (with its logins) when a page needs one.
@@ -187,7 +203,8 @@ async function runCheck(args: Args): Promise<number> {
     { workspace: process.cwd() },
   )) as CheckReport;
   const saved = await saveCheck(report.results);
-  if (has(args, "json")) printJson(report);
+  const media = has(args, "media") ? await checkMedia(report.results) : undefined;
+  if (has(args, "json")) printJson(media ? { ...report, media } : report);
   else {
     printRows(Object.entries(report.counts).map(([verdict, count]) => [verdict, String(count)]));
     for (const line of report.paths ?? [])
@@ -195,9 +212,58 @@ async function runCheck(args: Args): Promise<number> {
     out(
       `spotCheck: ${report.spotCheck.checked} checked, ${report.spotCheck.disagreed.length} disagreed`,
     );
+    if (media)
+      out(
+        `media: ${media.found} of ${media.checked} alive sites had a manifest (${media.outcomes})`,
+      );
     out(`Saved evidence in ${saved}`);
   }
   return 0;
+}
+
+/** --media: the alive sites go through the sweep's per-item capture, for a manifest verdict. */
+async function checkMedia(results: readonly SiteCheck[]): Promise<{
+  checked: number;
+  found: number;
+  outcomes: string;
+  items: { url: string; outcome?: string; hasMedia: boolean; masters: number; playlists: number }[];
+}> {
+  const urls = results
+    .filter((result) => ["ok", "js-shell"].includes(result.verdict))
+    .slice(0, 50)
+    .map((result) => result.url);
+  if (!urls.length) return { checked: 0, found: 0, outcomes: "none alive", items: [] };
+  const answer = (await runInBrowser(
+    `await browser.sweep(${JSON.stringify(urls)}, ${JSON.stringify({
+      pilot: urls.length,
+      gate: true,
+      capture: "media",
+      play: true,
+      evidence: false,
+    })})`,
+  )) as {
+    results?: {
+      url: string;
+      outcome?: string;
+      media?: { masters?: unknown[]; playlists?: unknown[] };
+    }[];
+  };
+  const items = (answer.results ?? []).filter(Boolean).map((item) => ({
+    url: item.url,
+    ...(item.outcome ? { outcome: item.outcome } : {}),
+    hasMedia: Boolean(item.media?.masters?.length || item.media?.playlists?.length),
+    masters: item.media?.masters?.length ?? 0,
+    playlists: item.media?.playlists?.length ?? 0,
+  }));
+  const counts = new Map<string, number>();
+  for (const item of items)
+    counts.set(item.outcome ?? "?", (counts.get(item.outcome ?? "?") ?? 0) + 1);
+  return {
+    checked: items.length,
+    found: items.filter((item) => item.hasMedia).length,
+    outcomes: [...counts].map(([outcome, count]) => `${outcome} ${count}`).join(", "),
+    items,
+  };
 }
 
 async function saveCheck(results: readonly SiteCheck[]): Promise<string> {
@@ -233,6 +299,8 @@ export const checkCommand: Command = {
   --via http        never start Chrome; otherwise plain HTTP first, then Chrome for the rest
   --paths <paths>   paths to probe on every host, comma separated ('/api/x,/stream.m3u8')
   --expect <what>   what those paths should answer: json, html, m3u8, xml, text or a type
+  --media           also open each alive site with gates and a play click, and say whether a
+                    media manifest was found (the sweep's per-item capture)
   --json            the whole report as JSON
 
 Checks up to 5000 sites, prints the verdict counts and the spot-check line, and saves

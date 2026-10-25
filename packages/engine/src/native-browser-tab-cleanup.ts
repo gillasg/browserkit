@@ -193,6 +193,18 @@ export async function resetChatTabs(
   return { closed, remaining: chatTabs(chatId).length };
 }
 
+/**
+ * Close the tabs a site opened by itself (popups, ad tabs) during this session's run. They are
+ * parked while the run works, then let go; the agent's own tabs and kept tabs stay.
+ */
+export async function reapChatPopups(chatId: string, since = 0): Promise<number[]> {
+  await restore();
+  const popups = [...tracked].filter(
+    ([, entry]) => entry.chatId === chatId && entry.popup === true && entry.touched >= since,
+  );
+  return closeTabs(popups, { keepSeen: false, all: true });
+}
+
 /** The one-line count every browser_code result ends with. */
 export function agentTabSummary(chatId: string): {
   opened: number;

@@ -7,7 +7,7 @@ import type { Command } from "../usage.js";
 // covers the longer explanations.
 
 async function search(args: Args): Promise<number> {
-  const query = args.positional.join(" ").trim().toLowerCase();
+  const query = (flag(args, "find") ?? args.positional.join(" ")).trim().toLowerCase();
   // --summary is for a quick index: one line per command, nothing else.
   if (has(args, "summary")) {
     for (const command of COMMANDS) out(`${command.name}: ${command.summary}`);
@@ -36,7 +36,7 @@ export const commandsCommand: Command = {
   name: "commands",
   group: "Help",
   summary: "search every command by what it does",
-  help: `Usage: browserkit commands [query] [--json]
+  help: `Usage: browserkit commands [query] [--find <topic>] [--json]
 
 Searches command names, summaries and help text. With no query, lists every command with its
 group and summary. Topics with longer explanations: browserkit help <topic> (workflows, recipes,

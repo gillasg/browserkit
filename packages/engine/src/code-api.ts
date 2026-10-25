@@ -102,7 +102,10 @@ var browser = Object.freeze({
   // the session did not open still needs browser.attachTab(tab) first.
   tabs: Object.assign(async (query) => {
       var options = query && typeof query === 'object' ? query : (query ? {query: query} : {});
-      var result = await __step({op:'listTabs', ...(options.query ? {query: options.query} : {})});
+      var result = await __step({op:'listTabs',
+        ...(options.query ? {query: options.query} : {}),
+        ...(options.mine === true ? {mine:true} : {}),
+        ...(options.all === true ? {all:true} : {})});
       __focusedWindowId = result.focusedWindowId;
       var listed = result.tabs.map(tab => __listedTab(__compactTab(tab)));
       if (listed.length > 64) console.log('[warn] ' + listed.length + ' tabs are open; pass a query or {mine:true} to narrow the list. Every tool still works on one tab.');
@@ -172,11 +175,17 @@ var browser = Object.freeze({
     }
     const result = await __step({op:'openTab', clientInstanceId, url,
       foreground: options.foreground === true,
+      ...(options.referer ? {referer: String(options.referer)} : {}),
       ...(options.quiet === true ? {quiet:true} : {}),
       ...(options.present === false ? {present:false} : {}),
       ...(options.timeoutMs ? {timeoutMs: Math.max(500, Math.min(Number(options.timeoutMs) || 0, 120000))} : {}),
       ...(options.window ? {window: {width: Math.round(options.window.width ?? 1920), height: Math.round(options.window.height ?? 1080)}} : {})});
     if (!options.window) __opened.set(origin || url, result.tab.target);
+    // What an earlier session learned about this host (a gate, a required referer, a play click)
+    // arrives as one line, so a new run starts where the last one ended.
+    __call({learned:{url}}).then((note) => {
+      if (note && note.hint) console.log('[learned] ' + note.hint);
+    }).catch(() => {});
     await bu.use(result.tab.target);
     if (result.navigation === 'failed') {
       __noteNavError(result.tab.target, url, 'openTab', result.reason || 'navigation failed');
@@ -268,8 +277,15 @@ var browser = Object.freeze({
   pool: (items, worker, options = {}) => __pool(items, worker, options),
   // Close every tab this chat/session opened (page.keep tabs stay), returning {closed, remaining}.
   reset: () => __call({tabs:'reset'}),
+  // Everything this chat or session opened, closed: a failed run leaves no stray tabs.
+  session: Object.freeze({
+    close: () => __call({session:'close'}),
+    reap: () => __call({session:'reap'}),
+  }),
   // Many pages past the cell deadline: start a job, then check it in a later cell.
   job: __job,
+  // Bulk capture over many URLs (a job mode): browser.sweep(urls, {gate, capture, play, evidence}).
+  sweep: __sweep,
   // Stop a running job: browser.jobCancel(jobId), then browser.job(id) reports cancelled.
   jobCancel: (id) => __call({job:{action:'cancel', id:String(id)}}),
   downloads: Object.freeze({
@@ -373,6 +389,7 @@ var browser = Object.freeze({
       var destination = __absoluteUrl(url, target);
       try {
         var result = await __step({op:"navigate", target, url: destination,
+          ...(options.referer ? {referer: String(options.referer)} : {}),
           ...(options.present === false ? {present:false} : {}),
           ...(options.timeoutMs ? {timeoutMs: Math.max(500, Math.min(Number(options.timeoutMs) || 0, 120000))} : {})});
         __lastErrors.delete(__key(target));
@@ -480,14 +497,16 @@ var browser = Object.freeze({
       // list says why it is empty (it never is a bare []).
       list: async (options = {}) => {
         var filter = typeof options === 'string' ? {match: options} : options;
-        var entries;
-        try { entries = await __call({network:'list', target, ...filter}); }
+        var incremental = filter.cursor === true || filter.since !== undefined;
+        var reply;
+        try { reply = await __call({network:'list', target, ...filter}); }
         catch (error) {
           if (!/Not recording/.test(String(error && error.message))) throw error;
           await __call({network:'start', target});
           console.log('[ok] network capture started now (it was off, so nothing earlier was recorded); repeat the action or reload, then list again');
-          entries = [];
+          reply = incremental ? {entries: [], cursor: 0} : [];
         }
+        var entries = incremental ? (reply && reply.entries) || [] : reply;
         if (!entries.length) {
           var state = await __call({network:'state', target}).catch(() => ({}));
           var note = state.note;
@@ -498,7 +517,8 @@ var browser = Object.freeze({
             Object.defineProperty(entries, 'note', {value: note, enumerable: false});
           }
         }
-        return entries;
+        // {since: lastCursor} reads only what arrived: {entries, cursor} for the next poll.
+        return incremental ? {entries, cursor: (reply && reply.cursor) || 0} : entries;
       },
       // Resolves with the first request finishing after this call whose URL matches (substring or
       // /regex/), optionally a method and statuses: {url, status, headers, body}. Use it instead of

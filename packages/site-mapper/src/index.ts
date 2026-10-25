@@ -54,6 +54,7 @@ export { performFlow, editApi, nameOperations, type ModelLike } from "./agent.js
 export { explore, EXPLORE_BRIEF, type ExploreOptions, type ExploreResult } from "./explore.js";
 export { watch, type WatchOptions, type WatchResult } from "./watch.js";
 export * from "./recipes.js";
+export { readLearned, learnAbout, learnedHint, type LearnedNote } from "./learned.js";
 export {
   runRecipe,
   readFeed,

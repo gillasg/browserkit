@@ -4,6 +4,33 @@ export const browserMediaApi = `
 var __job = (items, fn, options = {}) => __call({job:{action:'start', items,
   fn: typeof fn === 'function' ? fn.toString() : String(fn), options}});
 __job.status = (id) => __call({job:{action:'status', id:String(id)}});
+__job.cancel = (id) => __call({job:{action:'cancel', id:String(id)}});
+__job.resume = (id) => __call({job:{action:'resume', id:String(id)}});
+__job.list = () => __call({job:{action:'list'}});
+// Bulk "open, get past the gate, wait, capture, read, close". A mode of the durable job runtime:
+// {jobId, total} at once, or the finished {results, summary} when pilot/wait asks it to block.
+var __sweep = async (urls, options = {}) => {
+  var items = (Array.isArray(urls) ? urls : [urls]).filter(Boolean).slice(0, 500);
+  if (!items.length) throw Error('browser.sweep needs at least one url');
+  var pilot = Math.max(0, Math.min(Number(options.pilot) || 0, items.length));
+  if (pilot) options = {...options, pilot};
+  var start = await __call({job:{action:'start', mode:'sweep', items: pilot ? items.slice(0, pilot) : items, options}});
+  if (!pilot && options.wait !== true) {
+    console.log('[ok] sweep ' + start.jobId + ' started for ' + start.total + ' urls; browser.job.status("' + start.jobId + '") or browser.sweep.result("' + start.jobId + '")');
+    return start;
+  }
+  var deadline = Date.now() + Math.min(600000, start.total * (Number(options.timeoutMs) || 45000) + 60000);
+  while (Date.now() < deadline) {
+    var state = await __call({job:{action:'status', id:start.jobId}});
+    if (state.status !== 'running') break;
+    await __sleep(1000);
+  }
+  return await __call({job:{action:'result', id:start.jobId}});
+};
+__sweep.result = (id) => browser.job.result(id);
+__sweep.status = (id) => browser.job.status(id);
+__sweep.cancel = (id) => browser.job.cancel(id);
+__sweep.resume = (id) => browser.job.resume(id);
 __job.result = async (id) => {
   var result = await __call({job:{action:'result', id:String(id)}});
   if (result && result.status === 'complete' && !result.artifact) {
