@@ -327,7 +327,7 @@ var browser = Object.freeze({
       return attached;
     } catch (error) {
       var url = [...__tabs.values()].find(tab => __key(tab.target) === __key(target))?.url;
-      if (!/CLAIM_CONFLICT/.test(String(error && error.message || error)) || !url) throw error;
+      if (!/CLAIM_CONFLICT|TAB_OWNED_ELSEWHERE/.test(String(error && error.message || error)) || !url) throw error;
       console.log('That tab is in use by another chat, so this chat opened its own copy: ' + url);
       return browser.openTab(url, {newTab: true});
     }
@@ -426,6 +426,16 @@ var browser = Object.freeze({
     },
     emulate: async (options = {}) => {
       var page = browser.page(target), device = __devices[String(options.device || '').toLowerCase()];
+      var apply = async () => {
+        if (device) {
+          await page.cdp('Emulation.setDeviceMetricsOverride', {width: device.width, height: device.height, deviceScaleFactor: device.scale, mobile: true});
+          await page.cdp('Emulation.setTouchEmulationEnabled', {enabled: true});
+          await page.cdp('Emulation.setUserAgentOverride', {userAgent: device.userAgent});
+        }
+        if (options.colorScheme) await page.cdp('Emulation.setEmulatedMedia', {features: [{name: 'prefers-color-scheme', value: options.colorScheme}]});
+        if (options.timezone) await page.cdp('Emulation.setTimezoneOverride', {timezoneId: options.timezone});
+        if (options.locale) await page.cdp('Emulation.setLocaleOverride', {locale: options.locale});
+      };
       if (options.reset) {
         await page.cdp('Emulation.clearDeviceMetricsOverride', {}).catch(() => {});
         await page.cdp('Emulation.setTouchEmulationEnabled', {enabled: false}).catch(() => {});
@@ -436,15 +446,10 @@ var browser = Object.freeze({
         return {reset: true};
       }
       if (options.device && !device) throw Error('Unknown device; use one of ' + Object.keys(__devices).join(', '));
-      if (device) {
-        await page.cdp('Emulation.setDeviceMetricsOverride', {width: device.width, height: device.height, deviceScaleFactor: device.scale, mobile: true});
-        await page.cdp('Emulation.setTouchEmulationEnabled', {enabled: true});
-        await page.cdp('Emulation.setUserAgentOverride', {userAgent: device.userAgent});
-      }
-      if (options.colorScheme) await page.cdp('Emulation.setEmulatedMedia', {features: [{name: 'prefers-color-scheme', value: options.colorScheme}]});
-      if (options.timezone) await page.cdp('Emulation.setTimezoneOverride', {timezoneId: options.timezone});
-      if (options.locale) await page.cdp('Emulation.setLocaleOverride', {locale: options.locale});
+      // Reload before emulating: a reload can reconnect the debugger, and a reconnected session
+      // starts without the overrides it had.
       if (device && options.reload !== false) await page.cdp('Page.reload', {});
+      await apply();
       return {device: options.device, colorScheme: options.colorScheme, timezone: options.timezone, locale: options.locale};
     },
     popups: () => __step({op:"popups", target}),

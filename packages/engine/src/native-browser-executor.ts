@@ -38,7 +38,6 @@ import {
   trackAgentTab,
 } from "./native-browser-tab-cleanup.js";
 import { currentFocusedWindowId } from "./native-inventory-client.js";
-import { browserSessionOwner } from "./native-browser-session.js";
 import { ownerTitle } from "./native-browser-owner.js";
 import { enableQuietTab } from "./native-browser-quiet.js";
 import { showAgentCaption } from "./native-browser-cursor.js";
@@ -547,14 +546,9 @@ async function listTabs(request: BrowserExecutorRequest): Promise<BrowserExecuto
   const mine = new Set(mineTabIds(request.chatId));
   const tabs = currentInventoryTabs()
     .filter((tab) => safePage(tab.url))
-    // Another session's tab is borrowed, not listed: attachTab says TAB_OWNED_ELSEWHERE.
-    // {all: true} lists them too; {mine: true} lists only this session's tabs.
-    .filter((tab) => {
-      if (step?.mine) return mine.has(tab.target.tabId);
-      if (step?.all) return true;
-      const owner = browserSessionOwner(tab.target.tabId);
-      return owner === undefined || owner === request.chatId;
-    });
+    // {mine:true} lists only this session's tabs; a tab another session drives is still listed
+    // (mine:false), and attaching it opens this session its own copy.
+    .filter((tab) => !step?.mine || mine.has(tab.target.tabId));
   const filtered = query
     ? tabs.filter((tab) => `${tab.title} ${tab.url}`.toLowerCase().includes(query.toLowerCase()))
     : tabs;

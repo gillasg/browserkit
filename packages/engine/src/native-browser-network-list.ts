@@ -39,9 +39,9 @@ export function recentOf(entries: readonly NetworkEntry[]): string[] {
 function pathOf(url: string): string {
   try {
     const parsed = new URL(url);
-    return parsed.pathname + (parsed.search ? "?" + parsed.search.slice(1, 40) : "");
+    return parsed.origin + parsed.pathname;
   } catch {
-    return url.slice(0, 60);
+    return url.split("?")[0] ?? url;
   }
 }
 

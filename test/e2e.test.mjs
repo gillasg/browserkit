@@ -584,7 +584,7 @@ test(
           const kept = await cell(
             `page = await browser.keepPage(${JSON.stringify(siteUrl + "?kept-warm")}); page.target.tabId`,
           );
-          const keptId = Number(/(\d+)\s*$/.exec(kept.stdout)?.[1]);
+          const keptId = Number(/(?:^|\n)\s*(?:→\s*)?(\d+)\s*(?:\n|$)/.exec(kept.stdout)?.[1]);
           assert.ok(Number.isInteger(keptId), kept.stdout);
           const again = await cell(
             `page = await browser.keepPage(${JSON.stringify(siteUrl + "?kept-warm")}); page.target.tabId`,
