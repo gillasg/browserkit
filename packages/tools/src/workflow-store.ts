@@ -4,15 +4,25 @@
 
 import { mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { registryRoot, siteDir } from "@browserkit/site-mapper";
 import { validateWorkflow, type WorkflowDefinition, type WorkflowRunRecord } from "./workflow.js";
 
 export interface WorkflowSummary {
   name: string;
   slug: string;
   description?: string;
+  /** The site whose pack holds this workflow; absent for a host-level workflow. */
+  site?: string;
   steps: number;
   inputs: string[];
   updatedAt: string;
+}
+
+export interface ResolvedWorkflow {
+  definition: WorkflowDefinition;
+  /** The site pack it came from, when it lives next to that site's recipes. */
+  site?: string;
+  path: string;
 }
 
 export interface WorkflowStoreOptions {
@@ -22,6 +32,8 @@ export interface WorkflowStoreOptions {
   runs?: string;
   /** Runs kept per workflow. Defaults to 50. */
   keepRuns?: number;
+  /** Look in this site's pack first. */
+  site?: string;
 }
 
 const KEEP_RUNS = 50;
@@ -47,11 +59,15 @@ function fileFor(directory: string, slug: string, options: WorkflowStoreOptions)
   return join(paths(directory, options).workflows, `${slug}.json`);
 }
 
-export async function listWorkflows(
-  directory: string,
-  options: WorkflowStoreOptions = {},
-): Promise<WorkflowSummary[]> {
-  const folder = paths(directory, options).workflows;
+/** Workflows that belong to a site live in that site's pack, next to its recipes. */
+async function siteWorkflowFolders(): Promise<{ site?: string; folder: string }[]> {
+  // Every pack folder, not only mapped sites: a workflow can be recorded before its model.
+  const root = join(registryRoot(), "sites");
+  const names = await readdir(root).catch(() => [] as string[]);
+  return names.map((name) => ({ folder: join(root, name, "workflows") }));
+}
+
+async function summariesIn(folder: string, site?: string): Promise<WorkflowSummary[]> {
   const files = await readdir(folder).catch(() => [] as string[]);
   const summaries: WorkflowSummary[] = [];
   for (const file of files.filter((name) => name.endsWith(".json")).sort()) {
@@ -63,10 +79,69 @@ export async function listWorkflows(
       steps: definition.steps.length,
       inputs: Object.keys(definition.inputs ?? {}),
       updatedAt: await modifiedAt(join(folder, file)),
+      ...((site ?? definition.site) ? { site: site ?? definition.site } : {}),
       ...(definition.description ? { description: definition.description } : {}),
     });
   }
   return summaries;
+}
+
+export async function listWorkflows(
+  directory: string,
+  options: WorkflowStoreOptions = {},
+): Promise<WorkflowSummary[]> {
+  const byName = new Map<string, WorkflowSummary>();
+  // A site's own workflow wins over a host-level one with the same name.
+  for (const { folder } of await siteWorkflowFolders())
+    for (const summary of await summariesIn(folder))
+      if (!byName.has(summary.name)) byName.set(summary.name, summary);
+  for (const summary of await summariesIn(paths(directory, options).workflows))
+    if (!byName.has(summary.name)) byName.set(summary.name, summary);
+  return [...byName.values()];
+}
+
+/**
+ * Finds a workflow by name or slug across one system: the named site's pack first, then the
+ * host's own folder, then any other site pack. This is the level order hosts show.
+ */
+export async function resolveWorkflow(
+  directory: string,
+  name: string,
+  options: WorkflowStoreOptions = {},
+): Promise<ResolvedWorkflow | undefined> {
+  const slug = workflowSlug(name);
+  const candidates: { path: string; site?: string }[] = [];
+  if (options.site)
+    candidates.push({
+      path: join(siteDir(options.site), "workflows", `${slug}.json`),
+      site: options.site,
+    });
+  candidates.push({ path: fileFor(directory, slug, options) });
+  for (const { folder } of await siteWorkflowFolders())
+    candidates.push({ path: join(folder, `${slug}.json`) });
+  for (const candidate of candidates) {
+    const definition = await readWorkflowFile(candidate.path);
+    if (definition)
+      return {
+        definition,
+        path: candidate.path,
+        ...((candidate.site ?? definition.site) ? { site: candidate.site ?? definition.site } : {}),
+      };
+  }
+  for (const summary of await listWorkflows(directory, options)) {
+    if (summary.name !== name && summary.slug !== slug) continue;
+    const folder = summary.site
+      ? join(siteDir(summary.site), "workflows")
+      : paths(directory, options).workflows;
+    const definition = await readWorkflowFile(join(folder, `${summary.slug}.json`));
+    if (definition)
+      return {
+        definition,
+        path: join(folder, `${summary.slug}.json`),
+        ...(summary.site ? { site: summary.site } : {}),
+      };
+  }
+  return undefined;
 }
 
 /** Finds a workflow by name or slug. */
@@ -75,12 +150,7 @@ export async function readWorkflow(
   name: string,
   options: WorkflowStoreOptions = {},
 ): Promise<WorkflowDefinition | undefined> {
-  const slug = workflowSlug(name);
-  const direct = await readWorkflowFile(fileFor(directory, slug, options));
-  if (direct) return direct;
-  for (const summary of await listWorkflows(directory, options))
-    if (summary.name === name) return readWorkflowFile(fileFor(directory, summary.slug, options));
-  return undefined;
+  return (await resolveWorkflow(directory, name, options))?.definition;
 }
 
 async function readWorkflowFile(path: string): Promise<WorkflowDefinition | undefined> {
@@ -99,9 +169,11 @@ export async function saveWorkflow(
   const checked = validateWorkflow(definition);
   const slug = workflowSlug(checked.name);
   if (!slug) throw new Error("A workflow name needs at least one letter or number");
-  const folder = paths(directory, options).workflows;
+  const folder = checked.site
+    ? join(siteDir(checked.site), "workflows")
+    : paths(directory, options).workflows;
   await mkdir(folder, { recursive: true });
-  const path = fileFor(directory, slug, options);
+  const path = join(folder, `${slug}.json`);
   await writeFile(path, JSON.stringify(checked, null, 2) + "\n", "utf8");
   return { slug, path };
 }
@@ -111,9 +183,10 @@ export async function deleteWorkflow(
   name: string,
   options: WorkflowStoreOptions = {},
 ): Promise<boolean> {
-  const definition = await readWorkflow(directory, name, options);
-  if (!definition) return false;
-  await rm(fileFor(directory, workflowSlug(definition.name), options), { force: true });
+  const resolved = await resolveWorkflow(directory, name, options);
+  if (!resolved) return false;
+  const definition = resolved.definition;
+  await rm(resolved.path, { force: true });
   await rm(join(paths(directory, options).runs, workflowSlug(definition.name)), {
     recursive: true,
     force: true,

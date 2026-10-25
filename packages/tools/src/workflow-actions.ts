@@ -60,7 +60,15 @@ const SAFE = new Set([
   "sleep",
 ]);
 
-export function workflowActions(run: BrowserRunner): WorkflowActions {
+export interface WorkflowActionHooks {
+  /** Run a site recipe (site + recipe + params) and return its records. */
+  recipe?: (args: Args) => Promise<unknown>;
+}
+
+export function workflowActions(
+  run: BrowserRunner,
+  hooks: WorkflowActionHooks = {},
+): WorkflowActions {
   const wrap =
     (name: string, build: (args: Args) => string | Record<string, unknown>): WorkflowAction =>
     async (args, context) => {
@@ -132,6 +140,19 @@ export function workflowActions(run: BrowserRunner): WorkflowActions {
       const params = args.params && typeof args.params === "object" ? args.params : {};
       return `return await siteMapper.call(${json(site)}, ${json(operation)}, ${json(params)});`;
     }),
+    // A site recipe (or anything a host resolves by site + name): the same recipes the
+    // `recipe` command runs, so a workflow is not a second way to describe a site call.
+    recipe: async (args, context) => {
+      if (context.dryRun)
+        return {
+          dryRun: true,
+          action: "recipe",
+          args,
+          would: `recipe ${String(args.site ?? "")}/${String(args.recipe ?? "")}`,
+        };
+      if (!hooks.recipe) throw new Error('"recipe" needs a host that can run site recipes');
+      return hooks.recipe(args);
+    },
     assert: wrap("assert", (args) => {
       const value = args.value;
       if ("equals" in args && JSON.stringify(value) !== JSON.stringify(args.equals))

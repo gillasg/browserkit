@@ -46,6 +46,12 @@ export interface RecipeHost {
   collect?: (input: CollectRecipe & { url?: string }) => Promise<unknown>;
   /** Runs in-page code for a script strategy. */
   script?: (code: string, input: unknown) => Promise<unknown>;
+  /** Runs a workflow (by name or inline) and returns its records. */
+  workflow?: (input: {
+    name?: string;
+    workflow?: unknown;
+    inputs: Record<string, unknown>;
+  }) => Promise<unknown>;
   /** Maps a recipe's operation name onto a real operation id; returns undefined when absent. */
   resolveOperation?: (wanted: string) => string | undefined;
 }
@@ -215,7 +221,49 @@ async function collectWith(
       return collectRows(strategy, inputs, host);
     case "script":
       return collectScript(strategy, inputs, host);
+    case "workflow":
+      return collectWorkflow(strategy, inputs, host);
   }
+}
+
+/**
+ * A recipe strategy that is a workflow. The workflow engine runs it; the recipe keeps the
+ * pagination, mapping and filters around it, so one flow serves both a workflow run and the
+ * recipe CLI.
+ */
+async function collectWorkflow(
+  strategy: Extract<RecipeStrategy, { kind: "workflow" }>,
+  inputs: Record<string, unknown>,
+  host: RecipeHost,
+): Promise<Collected> {
+  if (!host.workflow)
+    throw new RecipeSkip("No workflow engine is attached for a workflow strategy");
+  const params = strategy.params ? JSON.parse(fill(JSON.stringify(strategy.params), inputs)) : {};
+  const result = await host.workflow({
+    ...(strategy.name ? { name: strategy.name } : {}),
+    ...(strategy.workflow ? { workflow: strategy.workflow } : {}),
+    inputs: { ...inputs, ...(params as Record<string, unknown>) },
+  });
+  const items = workflowRecords(result, strategy.records?.find.exists);
+  if (!Array.isArray(items)) throw new Error("workflow returned no records");
+  return { items, pages: 1, truncated: false };
+}
+
+/** The records a workflow returned: an array, {records}, a run record, or its last step. */
+function workflowRecords(value: unknown, keys?: string[]): unknown[] {
+  if (Array.isArray(value)) return value;
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    if (Array.isArray(record.records)) return record.records;
+    if (record.value !== undefined && record.value !== value)
+      return workflowRecords(record.value, keys);
+    if (Array.isArray(record.steps) && record.steps.length) {
+      const last = record.steps[record.steps.length - 1] as Record<string, unknown> | undefined;
+      return workflowRecords(last?.result ?? last, keys);
+    }
+    if (keys?.length) return findRecords(value, keys);
+  }
+  return [];
 }
 
 async function collectRows(

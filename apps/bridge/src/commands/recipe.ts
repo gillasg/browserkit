@@ -19,8 +19,13 @@ import {
   validateRecipe,
   type SiteRecipe,
 } from "@browserkit/tools/site-to-api";
+import { runWorkflow, validateWorkflow } from "@browserkit/tools/workflow";
+import { workflowActions } from "@browserkit/tools/workflow-actions";
+import { resolveWorkflow } from "@browserkit/tools/workflow-store";
 import { flag, has, jsonValue, type Args } from "../args.js";
+import { BridgeClient } from "../client.js";
 import { printJson } from "../output.js";
+import { dataDirectory } from "../paths.js";
 import type { Command } from "../usage.js";
 
 // Site recipes: the named, reusable way to read one site. A recipe lives in the site's pack and
@@ -28,6 +33,48 @@ import type { Command } from "../usage.js";
 // are mapped, de-duplicated, optionally rendered as a feed, and written recipes keep receipts.
 
 const SESSION = "browserkit-cli";
+
+async function runCell(code: string): Promise<unknown> {
+  const bridge = await BridgeClient.connect();
+  try {
+    const reply = await bridge.request("run", { code, session: SESSION });
+    if (reply.error) throw new Error(String(reply.error));
+    return reply.value;
+  } finally {
+    bridge.close();
+  }
+}
+
+/**
+ * The recipe host, plus the workflow engine: a recipe's workflow strategy and a workflow's
+ * recipe action are the two directions of one system, so both resolve names the same way.
+ */
+async function recipeHost(site: string) {
+  const host = await browserRecipeHost(site, { session: SESSION });
+  return {
+    ...host,
+    workflow: async (request: {
+      name?: string;
+      workflow?: unknown;
+      inputs: Record<string, unknown>;
+    }) => {
+      const resolved = request.name
+        ? await resolveWorkflow(dataDirectory(), request.name, { site: siteName(site) })
+        : undefined;
+      const definition = request.workflow
+        ? validateWorkflow(request.workflow)
+        : resolved?.definition;
+      if (!definition)
+        throw new Error(`No workflow ${JSON.stringify(request.name ?? "")} for ${siteName(site)}`);
+      const record = await runWorkflow(definition, {
+        inputs: request.inputs,
+        actions: workflowActions(runCell),
+      });
+      const last = record.steps[record.steps.length - 1];
+      return last?.result ?? record;
+    },
+  };
+}
 
 function inputsFrom(args: Args): Record<string, unknown> {
   const raw = flag(args, "inputs");
@@ -122,7 +169,7 @@ async function run(args: Args): Promise<number> {
     );
   const recipe = await readRecipe(site, name);
   if (!recipe) throw new Error(`No recipe ${JSON.stringify(name)} for ${site}`);
-  const host = await browserRecipeHost(site, { session: SESSION });
+  const host = await recipeHost(site);
   const inputs = inputsFrom(args);
   const limit = flag(args, "limit") ? Number(flag(args, "limit")) : undefined;
   const result = has(args, "feed")
@@ -296,6 +343,10 @@ export const recipeCommand: Command = {
        browserkit recipe import <file.json> [--site <site>]
        browserkit recipe install <site>
        browserkit recipe delete <site> <name>
+
+A strategy can be a workflow: {"kind": "workflow", "name": "shop-search"} (found in the site's
+pack first, then the host's workflows) or an inline definition. A workflow step can call a recipe
+with its "recipe" action. One store, one name lookup, both commands.
        browserkit recipe pack <file.zip>
 
 A recipe is one named way to read (or write) a site, stored in the site's pack. Strategies run

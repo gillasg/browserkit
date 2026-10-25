@@ -41,6 +41,7 @@ import { currentFocusedWindowId } from "./native-inventory-client.js";
 import { ownerTitle } from "./native-browser-owner.js";
 import { enableQuietTab } from "./native-browser-quiet.js";
 import { showAgentCaption } from "./native-browser-cursor.js";
+import { openTab } from "./native-browser-open-tab.js";
 
 function hostOf(url: string): string {
   try {
@@ -524,9 +525,23 @@ async function dispatchStep(
   throw new Error("UNSUPPORTED");
 }
 
+// Chrome only reports activation for a focused window, so a tab opened in a background or
+// headless window can sit in the inventory as inactive. Ask each window which tab is active at
+// list time, so browser.tabs() and browser.activeTab() both describe Chrome as it is now.
+async function refreshActiveTabs(): Promise<void> {
+  const windowIds = [...new Set(currentInventoryTabs().map((tab) => tab.windowId))];
+  await Promise.all(
+    windowIds.map(async (windowId) => {
+      const [live] = await chrome.tabs.query({ active: true, windowId }).catch(() => []);
+      if (live?.id !== undefined) await refreshInventoryTab(live.id);
+    }),
+  );
+}
+
 async function listTabs(request: BrowserExecutorRequest): Promise<BrowserExecutorResult> {
   const query = request.step.op === "listTabs" ? request.step.query : undefined;
   await ensureAgentTabsRestored();
+  await refreshActiveTabs();
   const tabs = currentInventoryTabs().filter((tab) => safePage(tab.url));
   const filtered = query
     ? tabs.filter((tab) => `${tab.title} ${tab.url}`.toLowerCase().includes(query.toLowerCase()))
@@ -545,89 +560,6 @@ function attachTab(target: BrowserTargetKey): BrowserExecutorResult {
   const tab = currentInventoryTabs().find((known) => sameTarget(known.target, target));
   if (!tab || !safePage(tab.url)) throw new Error("TARGET_LOST");
   return BrowserExecutorResultSchema.parse({ kind: "tab", tab });
-}
-
-async function openTab(
-  identity: BrowserIdentity,
-  request: BrowserExecutorRequest,
-): Promise<BrowserExecutorResult> {
-  const step = validOpenTab(request, identity);
-  const created = await createTab(step);
-  if (created.id === undefined) throw new Error("TARGET_LOST");
-  trackAgentTab(created.id, request.chatId, { url: step.url });
-  bindBrowserSession(created.id, request.chatId);
-  markAgentTabGrouped(created.id);
-  claimAgentTab(created.id);
-  await groupAgentTab(
-    created.id,
-    created.windowId,
-    request.chatId,
-    step.ownerTitle ?? ownerTitle(request.chatId),
-  );
-  if (step.quiet) await enableQuietTab(created.id);
-  const navigation = await navigateOpenedTab(created.id, step.url, step.timeoutMs);
-  assertRequestActive(request);
-  const tab = await refreshInventoryTab(created.id);
-  if (!tab || !sameIdentity(tab.target, identity)) throw new Error("TARGET_LOST");
-  bindBrowserSession(created.id, request.chatId);
-  return BrowserExecutorResultSchema.parse({
-    kind: "tab",
-    tab,
-    ...(navigation ? { navigation: "failed" as const, reason: navigation } : {}),
-  });
-}
-
-/**
- * Opens the tab's page, recording it from its first request. A page that will not load leaves a
- * tab behind: it belongs to this run, so it is reported (navigation: "failed", reason) rather
- * than thrown away as an untracked stray.
- */
-async function navigateOpenedTab(
-  tabId: number,
-  url: string,
-  timeoutMs?: number,
-): Promise<string | undefined> {
-  try {
-    await withBrowserDebugger(tabId, async () => {
-      await captureFromTabStart(tabId);
-      await navigateReady(tabId, url, timeoutMs);
-    });
-    return undefined;
-  } catch (error) {
-    return (error instanceof Error ? error.message : String(error)).slice(0, 400);
-  }
-}
-
-// A window of its own is focused and normal-sized, so Chrome keeps painting it (screencasts and
-// screenshots of a minimized or hidden window stall).
-async function createTab(step: Extract<BrowserStep, { op: "openTab" }>): Promise<chrome.tabs.Tab> {
-  if (!step.window) {
-    const front = step.foreground || (await engineConfig.agentInFront().catch(() => false));
-    return chrome.tabs.create({ url: "about:blank", active: front });
-  }
-  const window = await chrome.windows.create({
-    url: "about:blank",
-    focused: true,
-    type: "normal",
-    width: step.window.width,
-    height: step.window.height,
-  });
-  const tab = window?.tabs?.[0];
-  if (!tab) throw new Error("TARGET_LOST");
-  return tab;
-}
-
-function validOpenTab(
-  request: BrowserExecutorRequest,
-  identity: BrowserIdentity,
-): Extract<BrowserStep, { op: "openTab" }> {
-  if (
-    request.step.op !== "openTab" ||
-    request.step.clientInstanceId !== identity.clientInstanceId ||
-    !safePage(request.step.url)
-  )
-    throw new Error("INVALID_TARGET");
-  return request.step;
 }
 
 async function assertTarget(request: BrowserExecutorRequest): Promise<chrome.tabs.Tab> {

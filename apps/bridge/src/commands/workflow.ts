@@ -22,6 +22,7 @@ import { flag, has, jsonValue, type Args } from "../args.js";
 import { dataDirectory } from "../paths.js";
 import { printJson } from "../output.js";
 import { workflowActions } from "@browserkit/tools/workflow-actions";
+import { browserRecipeHost, readRecipe, runRecipe, siteName } from "@browserkit/tools/site-to-api";
 import type { Command } from "../usage.js";
 
 // Workflows: a saved, declarative sequence an agent or a person can run again. Steps use a small
@@ -42,6 +43,24 @@ async function runInBrowser(code: string): Promise<unknown> {
   } finally {
     bridge.close();
   }
+}
+
+/** A step's "recipe" action: the same recipes (and strategies) the recipe command runs. */
+async function runRecipeStep(args: Record<string, unknown>): Promise<unknown> {
+  const site = String(args.site ?? "");
+  const name = String(args.recipe ?? "");
+  if (!site || !name) throw new Error('"recipe" needs site and recipe');
+  const recipe = await readRecipe(site, name);
+  if (!recipe) throw new Error(`No recipe ${JSON.stringify(name)} at ${siteName(site)}`);
+  const host = await browserRecipeHost(site, { session: SESSION });
+  const params =
+    args.params && typeof args.params === "object" ? (args.params as Record<string, unknown>) : {};
+  const result = await runRecipe({ site: siteName(site), recipe, inputs: params, host });
+  return result.records;
+}
+
+function actions() {
+  return workflowActions(runInBrowser, { recipe: runRecipeStep });
 }
 
 function home(): string {
@@ -187,7 +206,7 @@ async function execute(
   dryRun: boolean,
   verbose: boolean,
 ): Promise<WorkflowRunRecord> {
-  const actions = workflowActions(runInBrowser);
+  const actions = workflowActions(runInBrowser, { recipe: runRecipeStep });
   return runWorkflow(definition, {
     inputs,
     actions,
@@ -207,7 +226,7 @@ async function check(args: Args): Promise<number> {
   const file = args.positional[1];
   if (!file) throw new Error("Usage: browserkit workflow check <file.json>");
   const definition = validateWorkflow(JSON.parse(await readText(file)));
-  const known = workflowActions(runInBrowser);
+  const known = workflowActions(runInBrowser, { recipe: runRecipeStep });
   const unknown = definition.steps.map((step) => step.do).filter((name) => !(name in known));
   if (unknown.length) throw new Error(`Unknown actions: ${[...new Set(unknown)].join(", ")}`);
   process.stdout.write(`OK: ${definition.name}, ${definition.steps.length} steps.\n`);
@@ -248,6 +267,11 @@ export const workflowCommand: Command = {
        browserkit workflow export <name> --out <file.json>
        browserkit workflow import <file.json>
        browserkit workflow delete <name>
+
+A workflow with "site" in its JSON is stored in that site's pack, next to its recipes, and found
+by name from either store. A step can call a site recipe: {"do": "recipe", "with": {"site":
+"shop.example", "recipe": "search", "params": {}}}. Recipes also list workflows as a strategy (a
+"workflow" entry, by name or inline), so the two commands describe one system.
 
 A workflow is a saved sequence of steps with declared inputs, templated arguments
 ({{inputs.x}}, {{steps.<id>.field}}), repeats (times, each, until, while), retries and

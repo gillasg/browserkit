@@ -1,12 +1,9 @@
 // One chat's browser_code realm. Runs in a manifest sandbox page, where eval is allowed and
 // no extension APIs exist; every browser or workspace request goes to the parent document.
 import { toReplScript } from "./code-repl.js";
-import {
-  browserCapabilityApi,
-  browserCodeApi,
-  browserDocumentApi,
-  browserFastApi,
-} from "./code-api.js";
+import { browserCodeApi } from "./code-api.js";
+import { browserFastApi } from "./code-api-page.js";
+import { browserCapabilityApi, browserDocumentApi } from "./code-api-hooks.js";
 import { browserPlaywrightApi } from "./code-api-playwright.js";
 import { browserDataApi } from "./code-api-data.js";
 import { browserListApi } from "./code-api-list.js";

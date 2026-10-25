@@ -68,6 +68,8 @@ export interface WorkflowStep {
 export interface WorkflowDefinition {
   name: string;
   description?: string;
+  /** Set when the workflow belongs to a site and is stored in that site's pack. */
+  site?: string;
   version?: 1;
   inputs?: { [name: string]: WorkflowInputSpec };
   steps: WorkflowStep[];

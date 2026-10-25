@@ -6,7 +6,7 @@
   "scripts": {
     "build": "pnpm --filter site-boosts build && pnpm --filter @browserkit/protocol build && pnpm --filter @browserkit/credentials build && pnpm --filter @browserkit/site-mapper build && pnpm --filter browser-crawl build && pnpm --filter @browserkit/tools build && pnpm --filter @browserkit/engine build && pnpm exec tsc -p apps/bridge && pnpm --filter @browserkit/extension build",
     "typecheck": "pnpm --filter @browserkit/protocol build && pnpm --filter @browserkit/credentials build && pnpm --filter @browserkit/site-mapper build && pnpm --filter browser-crawl build && pnpm --filter @browserkit/tools build && pnpm --filter @browserkit/engine build && pnpm exec tsc -p packages/engine --noEmit && pnpm exec tsc -p apps/extension --noEmit && pnpm exec tsc -p apps/bridge --noEmit && pnpm --filter site-boosts typecheck",
-    "lint": "pnpm --filter site-boosts lint && pnpm --filter @browserkit/site-mapper lint && pnpm --filter browser-crawl lint",
+    "lint": "pnpm --filter site-boosts lint && pnpm --filter @browserkit/site-mapper lint && pnpm --filter browser-crawl lint && node scripts/check-source-limits.mjs",
     "format": "prettier --write \"apps/**/*.{ts,mjs,json,html}\" \"packages/**/*.{ts,mjs,json,html,css}\" \"test/*.mjs\" \"*.{json,yaml}\"",
     "format:check": "prettier --check \"apps/**/*.{ts,mjs,json,html}\" \"packages/**/*.{ts,mjs,json,html,css}\" \"test/*.mjs\" \"*.{json,yaml}\"",
     "test": "pnpm build && node --test --test-timeout=180000 test/*.test.mjs",

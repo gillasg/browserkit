@@ -18,9 +18,11 @@ import {
   listWorkflows,
   readRun,
   readWorkflow,
+  resolveWorkflow,
   saveWorkflow,
   writeRun,
 } from "../dist/workflow-store.js";
+import { workflowActions } from "../dist/workflow-actions.js";
 
 test("inputs apply defaults, coerce types and reject the unknown", () => {
   const definition = {
@@ -278,5 +280,57 @@ test("the store saves, lists, reads, exports, imports and deletes", async () => 
     assert.equal((await listRuns(dir, "Example flow")).length, 0);
   } finally {
     await rm(dir, { recursive: true, force: true });
+  }
+});
+test("a workflow step can call a site recipe", async () => {
+  const actions = workflowActions(async () => undefined, {
+    recipe: async (args) => [{ site: args.site, recipe: args.recipe }],
+  });
+  const record = await runWorkflow(
+    validateWorkflow({
+      name: "from a recipe",
+      steps: [{ id: "records", do: "recipe", with: { site: "shop.example", recipe: "search" } }],
+    }),
+    { inputs: {}, actions },
+  );
+  assert.equal(record.status, "completed");
+  assert.deepEqual(record.steps[0].result, [{ site: "shop.example", recipe: "search" }]);
+});
+
+test("a site workflow lives in its pack and resolves site first, then the host folder", async () => {
+  const home = await mkdtemp(join(tmpdir(), "bk-workflows-"));
+  const siteHome = await mkdtemp(join(tmpdir(), "bk-sites-"));
+  const previous = process.env.SITE_TO_API_HOME;
+  process.env.SITE_TO_API_HOME = siteHome;
+  try {
+    const saved = await saveWorkflow(
+      home,
+      validateWorkflow({
+        name: "Shop search",
+        site: "shop.example",
+        steps: [{ do: "goto", with: { url: "https://shop.example/" } }],
+      }),
+    );
+    assert.match(saved.path, /shop\.example[\\/]workflows[\\/]/);
+    const site = await resolveWorkflow(home, "Shop search", { site: "shop.example" });
+    assert.equal(site?.site, "shop.example");
+    const listed = await listWorkflows(home);
+    assert.equal(
+      listed.some((workflow) => workflow.site === "shop.example"),
+      true,
+    );
+    // A host-level workflow with the same name is shadowed by the site's one for that site,
+    // and still found when no site is named.
+    await saveWorkflow(
+      home,
+      validateWorkflow({ name: "Shop search", steps: [{ do: "sleep", with: { ms: 1 } }] }),
+    );
+    const host = await resolveWorkflow(home, "Shop search");
+    assert.equal(host?.site, undefined);
+  } finally {
+    if (previous === undefined) delete process.env.SITE_TO_API_HOME;
+    else process.env.SITE_TO_API_HOME = previous;
+    await rm(home, { recursive: true, force: true });
+    await rm(siteHome, { recursive: true, force: true });
   }
 });

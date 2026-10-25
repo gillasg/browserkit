@@ -81,6 +81,19 @@ export type RecipeStrategy =
       records?: { find: { exists: string[] } };
     }
   | { kind: "collect"; collect: CollectRecipe }
+  // A saved or inline workflow, run by the host's workflow engine. The workflow returns the
+  // records (an array, {records}, or its last step does). This is the same system as the
+  // `workflow` command: a recipe is a web-shaped strategy list around workflows it can reuse.
+  | {
+      kind: "workflow";
+      /** A workflow name, resolved by the host across site packs and the host folder. */
+      name?: string;
+      /** An inline workflow definition instead of a name. */
+      workflow?: unknown;
+      params?: JsonObject;
+      /** Records buried in the workflow result: every object with all of these keys. */
+      records?: { find: { exists: string[] } };
+    }
   | { kind: "script"; code: string; input?: Json };
 
 export type RecipeFieldRule = import("./recipe-map.js").FieldRule;
@@ -285,6 +298,8 @@ function validateStrategy(name: string, strategy: RecipeStrategy): void {
     throw new Error(`Recipe ${name}: a collect strategy needs a row selector`);
   if (strategy.kind === "script" && !strategy.code)
     throw new Error(`Recipe ${name}: a script strategy needs code`);
+  if (strategy.kind === "workflow" && !strategy.name && !strategy.workflow)
+    throw new Error(`Recipe ${name}: a workflow strategy needs a workflow name or definition`);
 }
 
 function strategyPagination(recipe: SiteRecipe): RecipePagination | undefined {

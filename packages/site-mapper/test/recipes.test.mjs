@@ -698,3 +698,44 @@ test("a recipe can be drafted from a mapped operation's sample", () => {
   assert.equal(draft.map.author_handle, "author.handle");
   assert.equal(draft.source.kind, "activity");
 });
+test("a workflow strategy runs through the host's workflow engine", async () => {
+  const seen = [];
+  const result = await runRecipe({
+    site: "example.com",
+    recipe: {
+      name: "via-workflow",
+      strategies: [{ kind: "workflow", name: "search", params: { q: "{{term}}" } }],
+    },
+    inputs: { term: "lamps" },
+    trackHealth: false,
+    host: {
+      workflow: async (request) => {
+        seen.push(request);
+        return [{ id: 1 }];
+      },
+    },
+  });
+  assert.equal(result.count, 1);
+  assert.equal(seen[0].name, "search");
+  assert.equal(seen[0].inputs.q, "lamps");
+});
+
+test("a recipe workflow that the host cannot run falls through to the next strategy", async () => {
+  const result = await runRecipe({
+    site: "example.com",
+    recipe: {
+      name: "fallback",
+      strategies: [
+        { kind: "workflow", name: "missing" },
+        { kind: "script", code: "return []" },
+      ],
+    },
+    trackHealth: false,
+    host: { script: async () => [{ id: 2 }] },
+  });
+  assert.equal(result.count, 1);
+  assert.equal(
+    result.attempts.some((attempt) => attempt.skipped),
+    true,
+  );
+});
