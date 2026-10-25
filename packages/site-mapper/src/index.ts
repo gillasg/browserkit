@@ -53,6 +53,22 @@ export { runMcpServer } from "./mcp.js";
 export { performFlow, editApi, nameOperations, type ModelLike } from "./agent.js";
 export { explore, EXPLORE_BRIEF, type ExploreOptions, type ExploreResult } from "./explore.js";
 export { watch, type WatchOptions, type WatchResult } from "./watch.js";
+export * from "./recipes.js";
+export {
+  runRecipe,
+  readFeed,
+  RecipeError,
+  RecipeSkip,
+  resolveParams,
+  resolveOperationInModel,
+  type FeedResult,
+  type RecipeHost,
+  type RecipeRunOptions,
+  type RecipeRunResult,
+  type StrategyAttempt,
+} from "./runtime/recipe.js";
+export { browserRecipeHost, runSiteRecipe, type RecipeHostOptions } from "./runtime/recipe-host.js";
+export { collectExpression, type CollectInput } from "./runtime/collect.js";
 export { readDocs } from "./docs.js";
 export { code, type SiteCodeOptions, type SiteCodeResult, type SiteCodeMatch } from "./code.js";
 export {

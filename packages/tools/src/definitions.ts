@@ -238,6 +238,7 @@ export const SITE_MAPPER_TOOL_ACTIONS = [
   "docs",
   "actions",
   "action",
+  "recipe",
   "channel",
   "session",
   "export",
@@ -332,7 +333,7 @@ const siteMapperParameters: JsonObjectSchema = {
 export const siteMapperTool: AgentToolDefinition<SiteMapperToolInput> = {
   name: "site_mapper",
   description:
-    "Call the API a site learned while you used it (actions: code, sites, operations, call, watch, action, channel), see its published docs, keep it working (heal, coverage, edit, name, describe, signing, session, export), or map sites you haven't used: by name (explore) or from capture files (import). code reads routes, chunks, source maps, robots and sitemap before guessing URLs. Calls use the user's logins.",
+    "Call the API a site learned while you used it (actions: code, sites, operations, call, watch, action, recipe, channel), see its published docs, keep it working (heal, coverage, edit, name, describe, signing, session, export), or map sites you haven't used: by name (explore) or from capture files (import). recipe lists or runs the site's named recipes (API first, then the page). code reads routes, chunks, source maps, robots and sitemap before guessing URLs. Calls use the user's logins.",
   actions: [
     { name: "sites", params: [] },
     { name: "code", params: ["url", "grep", "maxFiles", "maxBytes"] },
@@ -345,6 +346,7 @@ export const siteMapperTool: AgentToolDefinition<SiteMapperToolInput> = {
     { name: "docs", params: ["site"] },
     { name: "actions", params: ["site", "name", "steps", "description"] },
     { name: "action", params: ["site", "name", "params"] },
+    { name: "recipe", params: ["site", "name", "params"] },
     { name: "channel", params: ["site", "name", "params"] },
     { name: "session", params: ["site"] },
     { name: "export", params: ["site", "folder"] },

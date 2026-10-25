@@ -1280,6 +1280,49 @@ test(
         assert.match(result.missing, /not mapped/);
       });
 
+      await t.test("a saved workflow runs its browser steps from the CLI", async () => {
+        const file = join(home, "read-shop.workflow.json");
+        await writeFile(
+          file,
+          JSON.stringify(
+            {
+              name: "read-shop",
+              inputs: { url: { required: true } },
+              steps: [
+                { id: "open", do: "goto", with: { url: "{{inputs.url}}" } },
+                { id: "page", do: "read", with: { max: 2000 } },
+                { do: "assert", with: { value: "{{steps.open.url}}", contains: "127.0.0.1" } },
+              ],
+            },
+            null,
+            2,
+          ),
+        );
+        await run(process.execPath, [cli, "workflow", "save", file], { env });
+        const { stdout } = await run(
+          process.execPath,
+          [
+            cli,
+            "workflow",
+            "run",
+            "read-shop",
+            "--inputs",
+            JSON.stringify({ url: siteUrl }),
+            "--json",
+          ],
+          { env },
+        );
+        const result = JSON.parse(stdout);
+        assert.equal(result.status, "completed", stdout);
+        assert.equal(result.steps[0].status, "completed");
+        assert.equal(result.steps[1].status, "completed");
+        assert.equal(typeof result.steps[1].result, "object");
+        const runs = await run(process.execPath, [cli, "workflow", "runs", "read-shop", "--json"], {
+          env,
+        });
+        assert.equal(JSON.parse(runs.stdout).length, 1);
+      });
+
       await t.test("a saved boost applies on every visit until it is removed", async () => {
         const repl = (code) =>
           run(process.execPath, [cli, "repl", "--session", "boosts", code], { env });

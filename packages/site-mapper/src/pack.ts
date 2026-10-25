@@ -20,6 +20,7 @@ const TOP_FILES = [
   "client.ts",
   "overrides.json",
   "actions.json",
+  "recipes.json",
   "health.json",
   "docs.md",
 ];

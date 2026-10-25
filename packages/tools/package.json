@@ -32,6 +32,10 @@
     "./workflow-store": {
       "types": "./dist/workflow-store.d.ts",
       "import": "./dist/workflow-store.js"
+    },
+    "./jobs": {
+      "types": "./dist/jobs.d.ts",
+      "import": "./dist/jobs.js"
     }
   },
   "scripts": {

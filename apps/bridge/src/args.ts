@@ -12,6 +12,7 @@ const BOOLEAN = new Set([
   "actions",
   "dry-run",
   "explore",
+  "feed",
   "first-wins",
   "help",
   "include-actions",

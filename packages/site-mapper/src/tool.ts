@@ -10,6 +10,7 @@ import { toYaml } from "./emit/yaml.js";
 import { checkHealth, repair } from "./health.js";
 import { loadCapture } from "./load/index.js";
 import { loadModel, readOverrides, siteName, writeOverrides } from "./registry.js";
+import { listRecipes as listSiteRecipes, type RecipeSummary } from "./recipes.js";
 import type { ChannelOptions } from "./runtime/channels.js";
 import type { Params } from "./runtime/request.js";
 import { exportSession } from "./runtime/session-export.js";
@@ -24,6 +25,7 @@ export const SITE_TOOL_ACTIONS = [
   "docs",
   "actions",
   "action",
+  "recipe",
   "channel",
   "session",
   "export",
@@ -64,6 +66,7 @@ export const SITE_TOOL_HELP = [
   "how a site works (routes, endpoints): code(url) before guessing URLs.",
   "docs: the site's published API documents (OpenAPI/Swagger) and GraphQL schemas, read with the user's session: operations nobody clicked yet. Saved in the site's folder.",
   "actions: list saved multi-step actions, or save one with name, steps (operation ids in order) and description. action runs one by name with params as inputs; each step's result feeds the next.",
+  "recipe: with no name, lists the site's recipes (API-then-page strategies, fields, health); with name and params, runs one and returns its mapped records. Recipes live in the site pack; a write recipe records a receipt so a repeat is skipped.",
   "channel: the site's live WebSocket/event streams (operations lists them); with name, listens on one from the site's page (params: send [messages], seconds, match) and returns what arrived.",
   "session: export the user's session so calls run without the browser (renewed from the browser when it expires). export: OpenAPI, AsyncAPI, a typed client and reports into folder.",
   "heal: probe every read operation and report broken or drifted ones (repair: true re-records them). coverage: what to capture next to widen the API. edit: change the API in plain English (change). name: AI names and descriptions. describe: an agent performs a flow in plain English (flow, url) while it is recorded, then rebuilds. signing: how a signed operation is signed.",
@@ -136,6 +139,11 @@ export async function signingInfo(site: string, operationId: string): Promise<un
   };
 }
 
+/** Site recipes: named reads/writes that live in the site pack. */
+export async function listRecipes(site: string): Promise<RecipeSummary[]> {
+  return listSiteRecipes(site);
+}
+
 async function savedActions(input: SiteToolInput): Promise<unknown> {
   const overrides = await readOverrides(input.site);
   if (input.name && input.steps?.length) {
@@ -187,6 +195,11 @@ const HANDLERS: Record<SiteToolAction, (input: SiteToolInput) => Promise<unknown
       require(input.name, "name: the action to run"),
       (input.params ?? {}) as Params,
     ),
+  recipe: async (input) => {
+    if (!input.name) return listRecipes(input.site);
+    const { runSiteRecipe } = await import("./runtime/recipe-host.js");
+    return runSiteRecipe(input.site, input.name, input.params ?? {});
+  },
   channel,
   session: async (input) => {
     const model = await loadModel(input.site);

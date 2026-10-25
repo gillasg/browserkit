@@ -55,3 +55,18 @@ export {
 } from "./request.js";
 export type { SessionFile, SessionCookie } from "./session.js";
 export type { PaginateOptions } from "./paginate.js";
+export {
+  runRecipe,
+  readFeed,
+  RecipeError,
+  RecipeSkip,
+  resolveParams,
+  resolveOperationInModel,
+  type FeedResult,
+  type RecipeHost,
+  type RecipeRunOptions,
+  type RecipeRunResult,
+  type StrategyAttempt,
+} from "./recipe.js";
+export { browserRecipeHost, runSiteRecipe, type RecipeHostOptions } from "./recipe-host.js";
+export { collectExpression, type CollectInput } from "./collect.js";

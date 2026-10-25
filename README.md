@@ -90,6 +90,13 @@ browserkit federate shop.example:searchProducts other.example:search
 browserkit heal shop.example
 browserkit rest                                   # local REST API over every mapped site
 browserkit boosts list
+browserkit workflow save flows/read-thread.json
+browserkit workflow run read-thread --inputs '{"url":"https://x.com/a/status/1"}'
+browserkit recipe install x.com
+browserkit recipe run x.com thread --inputs '{"url":"https://x.com/a/status/1"}' --feed
+browserkit recipe draft shop.example --save
+browserkit recipe list x.com
+browserkit workflow runs read-thread
 ```
 
 Every command prints what it needs with `--help`, and takes `--json` where the answer is data.
@@ -99,6 +106,26 @@ Run `browserkit mcp` for the MCP server and `browserkit rest` for a local REST A
 mapped site.
 
 Agents bring their own model: this extension does not sign in to model providers and does not provide a model to other extensions. A companion asking for one is told that none is available.
+
+## Workflows and recipes
+
+Three layers, one recipe system:
+
+- **Site pack**: everything about one site. Its mapped API, named **recipes**, field mappings,
+  health and the browser skills and boosts written for it. A recipe runs in order: the captured
+  API with cursor paging, then the page (rows by selector, with expand buttons and scrolling),
+  then a script. Records are mapped, filtered and de-duplicated; a write recipe keeps receipts so
+  a repeat is skipped. `browserkit recipe install x.com` adds the built-in thread and feed
+  recipes; `recipe draft <site>` turns a mapped operation and its sample into a recipe.
+- **Workflow**: a saved, reusable sequence that can span sites. Typed inputs with defaults,
+  templated arguments (`{{steps.<id>.field}}`), repeat/each/until, retries, delays, timeouts,
+  conditional steps, dry-run and on-error handling. Runs are recorded per step and kept under the
+  data folder (`browserkit workflow runs <name>`). The workflow engine is host-agnostic: browserkit
+  supplies the browser actions, and other hosts can supply their own.
+- **Skill**: the code escape hatch when a recipe or a workflow is not enough.
+
+Recipes are carried in site packs (`browserkit pack export/import`); workflows and recipes move
+with `workflow export/import` and `recipe export/import`.
 
 ## How it fits together
 
