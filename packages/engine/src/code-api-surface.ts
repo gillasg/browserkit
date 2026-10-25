@@ -382,8 +382,12 @@ function __extendPageSurface(target, base) {
       var events = [];
       var complete;
       var done = new Promise((resolve) => { complete = resolve; });
+      // One subscription is set up at a time: two concurrent subscribe steps for the same tab
+      // reach Chrome out of order and the second is rejected as a claim conflict.
       var data = page.onCdp('Tracing.dataCollected', (params) => { for (var item of (params.value || [])) events.push(item); });
+      await data.ready;
       var finished = page.onCdp('Tracing.tracingComplete', () => { complete(); });
+      await finished.ready;
       await page.cdp('Tracing.start', { categories: options.categories || 'devtools.timeline,v8,blink.user_timing,loading', transferMode: 'ReportEvents' });
       await __sleep(Math.min(Math.max(Number(options.seconds) || 2, 0.5), 30) * 1000);
       await page.cdp('Tracing.end', {});

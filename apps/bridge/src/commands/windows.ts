@@ -88,6 +88,31 @@ resizing a user window is visible, so prefer the agent's own.`,
   run: windows,
 };
 
+async function tabGroups(args: Args): Promise<number> {
+  const wanted = args.positional[0] ?? "status";
+  if (!["on", "off", "status"].includes(wanted))
+    throw new Error("Usage: browserkit tab-groups on|off|status [--json]");
+  const call =
+    wanted === "status" ? "browser.tabGrouping()" : `browser.tabGrouping(${wanted === "on"})`;
+  const enabled = Boolean(await inBrowser(call));
+  if (has(args, "json")) out(JSON.stringify({ enabled }));
+  else out(`Agent tab grouping is ${enabled ? "on" : "off"}.`);
+  return 0;
+}
+
+export const tabGroupsCommand: Command = {
+  name: "tab-groups",
+  group: "Browser",
+  summary: "show or change whether agent tabs are grouped",
+  help: `Usage: browserkit tab-groups on|off|status [--json]
+
+Tabs an agent opens are kept in one group per chat so they can be seen, collapsed or closed
+together. Turning grouping off takes back every tab an agent had grouped; tabs opened later are
+left alone. Only tabs the agent creates are ever grouped: a popup, a link opened from an agent
+tab, or the chat tab itself stays out of the group.`,
+  run: tabGroups,
+};
+
 export const zoomCommand: Command = {
   name: "zoom",
   group: "Browser",

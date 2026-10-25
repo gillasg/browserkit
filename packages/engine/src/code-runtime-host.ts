@@ -32,6 +32,7 @@ import { disableQuietTab, enableQuietTab } from "./native-browser-quiet.js";
 import { networkCall } from "./native-browser-network.js";
 import { isLibraryRequest, libraryCall } from "./native-browser-library.js";
 import { windowsCall } from "./native-browser-windows.js";
+import { tabGroupsCall } from "./native-browser-groups.js";
 import { closeTabCall } from "./code-tab-close.js";
 import { rulesCall } from "./native-browser-rules.js";
 import { permissionCall } from "./native-browser-permissions.js";
@@ -262,6 +263,7 @@ function serveCall(cell: Cell, value: Record<string, unknown> | null): Promise<u
   if (value && typeof value.rules === "string")
     return rulesCall(authorizedTarget(cell, value.target).tabId, value);
   if (value && typeof value.windows === "string") return windowsCall(value);
+  if (value && typeof value.tabGroups === "string") return tabGroupsCall(value);
   if (value && value.permission === "set")
     return permissionCall(authorizedTarget(cell, value.target).tabId, value);
   if (value && isLibraryRequest(value)) return libraryCall(value);

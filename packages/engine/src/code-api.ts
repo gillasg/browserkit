@@ -101,11 +101,16 @@ var browser = Object.freeze({
   // Listed tabs work as pages too (agents call tab.locator(...) or use tab.id); acting on one
   // the session did not open still needs browser.attachTab(tab) first.
   tabs: Object.assign(async (query) => {
-      var result = await __step({op:'listTabs', ...(query ? {query} : {})});
+      var options = query && typeof query === 'object' ? query : (query ? {query: query} : {});
+      var result = await __step({op:'listTabs', ...(options.query ? {query: options.query} : {})});
       __focusedWindowId = result.focusedWindowId;
-      return result.tabs.map(tab => __listedTab(__compactTab(tab)));
+      var listed = result.tabs.map(tab => __listedTab(__compactTab(tab)));
+      // mine: only the tabs this chat or session opened (the same set browser.closeTab accepts).
+      return options.mine === true ? listed.filter(tab => tab.mine) : listed;
     },
     {list: async (query) => browser.tabs(query)}),
+  // The tabs this chat or session opened; browser.tabs({mine:true}) answers the same list.
+  myTabs: () => browser.tabs({mine:true}),
   // Close one tab this chat/session opened. A user tab, another session's tab or a hand-off tab
   // throws instead of doing nothing; a tab in Split View is unsplit first.
   closeTab: async (tab) => {
@@ -208,6 +213,14 @@ var browser = Object.freeze({
   // Windows and zoom: the browser's own window list, resizing, and per-tab zoom.
   windows: __windows,
   setZoom: (factor, tabId) => __zoom(factor, tabId),
+  // Whether tabs an agent opens are grouped. browser.tabGrouping(false) turns grouping off and
+  // takes back every tab an agent had grouped; browser.tabGrouping() reads the setting.
+  tabGrouping: async (enabled) => {
+    var result = await __call(typeof enabled === 'boolean'
+      ? {tabGroups:'set', enabled}
+      : {tabGroups:'get'});
+    return result.enabled === true;
+  },
   pool: (items, worker, options = {}) => __pool(items, worker, options),
   // Close every tab this chat/session opened (page.keep tabs stay), returning {closed, remaining}.
   reset: () => __call({tabs:'reset'}),

@@ -307,6 +307,108 @@ test(
         });
       });
 
+      await t.test("only the agent's own tabs join its group", async () => {
+        const cell = (code) =>
+          run(process.execPath, [cli, "repl", "--session", "tab-groups", code], { env });
+        const opened = await cell(
+          `page = await browser.openTab(${JSON.stringify(siteUrl + "?grouped")}, { newTab: true }); console.log("AGENT " + page.target.tabId)`,
+        );
+        const agentId = Number(/AGENT (\d+)/.exec(opened.stdout)[1]);
+        const info = async (id) =>
+          (
+            await worker("Runtime.evaluate", {
+              expression: `chrome.tabs.get(${id}).then((t) => ({ groupId: t.groupId, windowId: t.windowId }))`,
+              awaitPromise: true,
+              returnByValue: true,
+            })
+          ).result.result.value;
+        const agent = await info(agentId);
+        assert.ok(agent.groupId >= 0, opened.stdout);
+
+        // A tab Chrome creates for a link or window.open: it inherits the opener's group on its
+        // own, and the guard has to take it back out.
+        const linked = (
+          await worker("Runtime.evaluate", {
+            expression: `chrome.tabs.create({ windowId: ${agent.windowId}, openerTabId: ${agentId}, url: ${JSON.stringify(siteUrl + "?linked")}, active: false }).then((t) => t.id)`,
+            awaitPromise: true,
+            returnByValue: true,
+          })
+        ).result.result.value;
+        await new Promise((done) => setTimeout(done, 600));
+        assert.equal((await info(linked)).groupId, -1, "a link tab stays out of the group");
+
+        // A real target=_blank click and window.open from the agent's page.
+        const popups = await cell(`
+          const before = new Set((await browser.tabs()).map((tab) => tab.id));
+          await page.evaluate(() => {
+            const a = document.createElement("a");
+            a.id = "blank-link"; a.href = "/next"; a.target = "_blank"; a.textContent = "next";
+            const b = document.createElement("button");
+            b.id = "win-button"; b.textContent = "win";
+            b.onclick = () => window.open("/next2", "_blank");
+            document.body.append(a, b);
+          });
+          // A real click carries user activation, so Chrome opens the tab.
+          await page.locator("#blank-link").click();
+          await new Promise((done) => setTimeout(done, 900));
+          await page.locator("#win-button").click();
+          await new Promise((done) => setTimeout(done, 900));
+          const fresh = (await browser.tabs()).filter((tab) => !before.has(tab.id));
+          console.log("NEW " + JSON.stringify({
+            tabs: fresh.map((tab) => ({ id: tab.id, groupId: tab.groupId, url: tab.url })),
+          }));`);
+        const fresh = JSON.parse(/NEW (.*)/.exec(popups.stdout)[1]);
+        assert.ok(fresh.tabs.length >= 2, popups.stdout);
+        for (const tab of fresh.tabs) assert.equal(tab.groupId, -1, popups.stdout);
+
+        // A plain new tab in the same window (Ctrl+T) is not the agent's.
+        const plain = (
+          await worker("Runtime.evaluate", {
+            expression: `chrome.tabs.create({ windowId: ${agent.windowId}, active: false }).then((t) => t.id)`,
+            awaitPromise: true,
+            returnByValue: true,
+          })
+        ).result.result.value;
+        await new Promise((done) => setTimeout(done, 300));
+        assert.equal((await info(plain)).groupId, -1);
+
+        // The user's own group is left alone.
+        const user = (
+          await worker("Runtime.evaluate", {
+            expression: `(async () => {
+              const windowId = ${agent.windowId};
+              const a = await chrome.tabs.create({ windowId, url: ${JSON.stringify(siteUrl + "?user-a")}, active: false });
+              const b = await chrome.tabs.create({ windowId, url: ${JSON.stringify(siteUrl + "?user-b")}, active: false });
+              const groupId = await chrome.tabs.group({ tabIds: [a.id, b.id], createProperties: { windowId } });
+              await chrome.tabGroups.update(groupId, { title: "User picks" });
+              return { groupId, tabs: [a.id, b.id] };
+            })()`,
+            awaitPromise: true,
+            returnByValue: true,
+          })
+        ).result.result.value;
+        await cell(`await page.getByRole("button", { name: "Buy" }).click(); null`);
+        await new Promise((done) => setTimeout(done, 400));
+        for (const id of user.tabs) assert.equal((await info(id)).groupId, user.groupId);
+
+        // The setting turns grouping off for tabs opened afterwards.
+        const off = await cell(`
+          const before = await browser.tabGrouping();
+          await browser.tabGrouping(false);
+          const tab = await browser.openTab(${JSON.stringify(siteUrl + "?ungrouped")}, { newTab: true });
+          const grouped = (await browser.tabs()).find((item) => item.id === tab.target.tabId)?.groupId;
+          await browser.tabGrouping(true);
+          console.log("OFF " + JSON.stringify({ before, grouped }));`);
+        const setting = JSON.parse(/OFF (.*)/.exec(off.stdout)[1]);
+        assert.equal(setting.before, true, off.stdout);
+        assert.equal(setting.grouped, -1, off.stdout);
+
+        await worker("Runtime.evaluate", {
+          expression: `chrome.tabs.remove([${user.tabs.join(",")}, ${linked}, ${plain}])`,
+          awaitPromise: true,
+        });
+      });
+
       await t.test(
         "browser results count the tabs a run owns, and reset keeps only kept tabs",
         async () => {
@@ -426,10 +528,12 @@ test(
         });
       });
 
-      await t.test("popups park in the run's group, and a quiet tab blocks them", async () => {
-        const cell = (code) =>
-          run(process.execPath, [cli, "repl", "--session", "popups", code], { env });
-        const parked = await cell(`
+      await t.test(
+        "popups park without joining the agent group, and a quiet tab blocks them",
+        async () => {
+          const cell = (code) =>
+            run(process.execPath, [cli, "repl", "--session", "popups", code], { env });
+          const parked = await cell(`
           page = await browser.openTab(${JSON.stringify(siteUrl + "popunder")}, { newTab: true });
           await page.getByRole("button", { name: "open" }).click();
           await new Promise((done) => setTimeout(done, 1200));
@@ -439,13 +543,13 @@ test(
             popups: popups.map((tab) => ({ id: tab.target.tabId, url: tab.url, groupId: tab.groupId, active: tab.active })),
             active: tabs.filter((tab) => tab.active).map((tab) => tab.url),
           }));`);
-        const seen = JSON.parse(/POPUPS (.*)/.exec(parked.stdout)[1]);
-        assert.equal(seen.popups.length, 1, parked.stdout);
-        assert.match(seen.popups[0].url, /popup/, parked.stdout);
-        assert.equal(seen.popups[0].active, false, parked.stdout);
-        assert.ok(seen.popups[0].groupId >= 0, parked.stdout);
+          const seen = JSON.parse(/POPUPS (.*)/.exec(parked.stdout)[1]);
+          assert.equal(seen.popups.length, 1, parked.stdout);
+          assert.match(seen.popups[0].url, /popup/, parked.stdout);
+          assert.equal(seen.popups[0].active, false, parked.stdout);
+          assert.equal(seen.popups[0].groupId, -1, parked.stdout);
 
-        const quiet = await cell(`
+          const quiet = await cell(`
           page = await browser.openTab(${JSON.stringify(siteUrl + "popunder")}, { newTab: true, quiet: true });
           await page.getByRole("button", { name: "open" }).click();
           await new Promise((done) => setTimeout(done, 800));
@@ -454,9 +558,10 @@ test(
             paused: item.paused, muted: item.muted, autoplay: item.autoplay,
           })));
           console.log("QUIET " + JSON.stringify({ popups: popups.length, media }));`);
-        const quietSeen = JSON.parse(/QUIET (.*)/.exec(quiet.stdout)[1]);
-        assert.equal(quietSeen.popups, 0, quiet.stdout);
-      });
+          const quietSeen = JSON.parse(/QUIET (.*)/.exec(quiet.stdout)[1]);
+          assert.equal(quietSeen.popups, 0, quiet.stdout);
+        },
+      );
 
       await t.test("a quiet autoplay page is paused and muted", async () => {
         const { stdout } = await run(
@@ -1521,6 +1626,24 @@ test(
           (await run(process.execPath, [cli, "zoom", "reset", "--json"], { env })).stdout,
         );
         assert.equal(reset.factor, 1);
+      });
+
+      await t.test("a performance trace is saved as an artifact", async () => {
+        const { stdout } = await run(
+          process.execPath,
+          [cli, "record", "trace", siteUrl, "--seconds", "1", "--out", "traces/e2e.json", "--json"],
+          { env },
+        );
+        const result = JSON.parse(stdout);
+        assert.equal(result.saved, "traces/e2e.json");
+        assert.ok(result.events > 0, JSON.stringify(result));
+        const directories = await readdir(join(home, "workspaces"));
+        const path = directories
+          .map((directory) => join(home, "workspaces", directory, "traces", "e2e.json"))
+          .find((candidate) => existsSync(candidate));
+        assert.ok(path, "trace artifact is in a session workspace");
+        const trace = JSON.parse(await readFile(path, "utf8"));
+        assert.ok(Array.isArray(trace.traceEvents));
       });
 
       await t.test("recording without an encoder fails with install instructions", async () => {

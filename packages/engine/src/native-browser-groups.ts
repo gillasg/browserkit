@@ -4,9 +4,15 @@ import { onEngineInstall } from "./native-engine-install.js";
 
 // Tabs an agent opens are kept together in one tab group per chat, per window, so the user can
 // see, collapse or close an agent's work at once. Grouping is presentation only: it never fails a
-// step. The owner→group map is persisted in session storage because the MV3 worker sleeps; when
+// step. The owner-group map is persisted in session storage because the MV3 worker sleeps; when
 // it is gone, the invisible owner marker in the group title lets a later tab rejoin its group
 // instead of making one more "Aeon" group.
+//
+// Only a tab the agent asked for (openTab, a job's own tab) belongs in the group. Chrome copies a
+// group on its own in places we do not control (a link from a grouped tab, window.open, a new tab
+// opened while a grouped one is in front), so every new tab is checked once it settles: a tab in
+// an agent group that no agent step claimed is taken back out. A user's own groups are never
+// touched.
 const COLORS = [
   "blue",
   "purple",
@@ -26,14 +32,20 @@ interface GroupRecord {
   color: Color;
 }
 const STORAGE_KEY = "browserkit-agent-groups";
+const SETTING_KEY = "browserkit-agent-tab-groups";
 const MARK = "\u2063";
 const MAX_TITLE = 24;
 const groups = new Map<string, Map<number, GroupRecord>>();
+// Tabs an agent step explicitly put in its group. Anything else found in an agent group is an
+// intruder (a popup or a link that inherited the group) and is taken back out.
+const claimed = new Set<number>();
+let groupingSetting: boolean | undefined;
 // Tabs opened together (Promise.all) would each see "no group yet" and make their own; grouping
 // for one owner runs in order so the first creates the group and the rest join it.
 const pending = new Map<string, Promise<void>>();
 let restored: Promise<void> | undefined;
 let ready = false;
+export const AGENT_TAB_GROUPS_SETTING = SETTING_KEY;
 
 export function groupAgentTab(
   tabId: number,
@@ -41,9 +53,11 @@ export function groupAgentTab(
   owner: string,
   ownerTitle?: string,
 ): Promise<void> {
-  if (!engineConfig.tabGroups || typeof chrome.tabGroups === "undefined") return Promise.resolve();
+  if (engineConfig.tabGroups !== true) return Promise.resolve();
   const run = (pending.get(owner) ?? Promise.resolve()).then(async () => {
+    if (!(await agentTabGroupingEnabled())) return;
     await restore();
+    claimed.add(tabId);
     const prior = groups.get(owner)?.get(windowId)?.title;
     const inherited = prior?.includes(MARK) ? prior.slice(0, prior.indexOf(MARK)) : prior;
     await joinGroup(tabId, windowId, owner, ownerTitle ?? storedOwnerTitle(owner) ?? inherited);
@@ -53,6 +67,62 @@ export function groupAgentTab(
     if (pending.get(owner) === run) pending.delete(owner);
   });
   return run;
+}
+
+/** A tab the agent created and will group: claim it before Chrome can inherit a group. */
+export function claimAgentTab(tabId: number): void {
+  claimed.add(tabId);
+}
+
+/**
+ * Takes a tab back out of an agent group when no agent step claimed it. Checks right away and
+ * once after the group has had time to appear; a tab the user dragged somewhere later is not
+ * watched, so their own grouping stays as they left it.
+ */
+export async function ungroupAgentIntruder(tabId: number): Promise<void> {
+  if (claimed.has(tabId)) return;
+  await restore();
+  for (const delay of [0, 75, 250]) {
+    if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
+    const tab = await chrome.tabs.get(tabId).catch(() => undefined);
+    if (!tab) return;
+    if (claimed.has(tabId)) return;
+    if (tab.groupId === undefined || tab.groupId < 0) continue;
+    if (isAgentGroupId(tab.groupId)) await chrome.tabs.ungroup(tabId).catch(() => undefined);
+  }
+}
+
+/** Whether agent tab grouping is on: the host's setting, plus the user's stored switch. */
+export async function agentTabGroupingEnabled(): Promise<boolean> {
+  if (engineConfig.tabGroups !== true) return false;
+  if (groupingSetting === undefined)
+    groupingSetting = await chrome.storage?.local
+      ?.get(SETTING_KEY)
+      .then((stored) => stored[SETTING_KEY] !== false)
+      .catch(() => true);
+  return groupingSetting !== false;
+}
+
+/** The user's switch. Turning it off takes back every tab an agent had grouped. */
+export async function setAgentTabGrouping(enabled: boolean): Promise<boolean> {
+  groupingSetting = enabled;
+  await chrome.storage?.local?.set({ [SETTING_KEY]: enabled }).catch(() => undefined);
+  if (!enabled) await releaseAgentGroups();
+  return enabled;
+}
+
+async function releaseAgentGroups(): Promise<void> {
+  await restore();
+  for (const byWindow of groups.values()) {
+    for (const record of [...byWindow.values()]) {
+      const tabs = await chrome.tabs.query({ groupId: record.groupId }).catch(() => []);
+      for (const tab of tabs)
+        if (tab.id !== undefined) await chrome.tabs.ungroup(tab.id).catch(() => undefined);
+      byWindow.delete(record.windowId);
+    }
+  }
+  claimed.clear();
+  await save();
 }
 
 async function joinGroup(
@@ -69,6 +139,7 @@ async function joinGroup(
         ? { tabIds: tabId, createProperties: { windowId } }
         : { tabIds: tabId, groupId: existing },
     );
+    claimed.add(tabId);
     const record: GroupRecord = {
       windowId,
       groupId,
@@ -122,7 +193,7 @@ function setRecord(owner: string, record: GroupRecord): void {
 function groupTitle(owner: string, ownerTitle: string | undefined): string {
   const configured = engineConfig.tabGroupTitle(owner, ownerTitle);
   const visible = configured.replace(/\s+/g, " ").trim() || "Agent";
-  const short = visible.length > MAX_TITLE ? visible.slice(0, MAX_TITLE - 1) + "…" : visible;
+  const short = visible.length > MAX_TITLE ? visible.slice(0, MAX_TITLE - 1) + "." : visible;
   return short + MARK + owner.slice(0, 8);
 }
 
@@ -144,7 +215,29 @@ export async function collapseAgentGroups(owner: string): Promise<void> {
       .catch(() => undefined);
     if (!updated) byWindow.delete(record.windowId);
   }
+  await pruneEmptyGroups();
   await save();
+}
+
+/** An empty agent group is not useful to anyone: drop its record (Chrome removes the group). */
+export async function pruneEmptyGroups(): Promise<void> {
+  for (const [owner, byWindow] of groups) {
+    for (const [windowId, record] of [...byWindow]) {
+      const tabs = await chrome.tabs.query({ groupId: record.groupId }).catch(() => undefined);
+      if (tabs === undefined) continue;
+      if (tabs.length === 0) byWindow.delete(windowId);
+    }
+    if (byWindow.size === 0) groups.delete(owner);
+  }
+  await save();
+}
+
+/** browser.tabGrouping(): read or change whether agent tabs are grouped. */
+export async function tabGroupsCall(value: Record<string, unknown>): Promise<{ enabled: boolean }> {
+  if (value.tabGroups === "get") return { enabled: await agentTabGroupingEnabled() };
+  if (value.tabGroups === "set")
+    return { enabled: await setAgentTabGrouping(value.enabled === true) };
+  throw new Error("UNSUPPORTED");
 }
 
 /** Whether a Chrome tab group belongs to an agent session. */
@@ -154,7 +247,7 @@ export function isAgentGroupId(groupId: number): boolean {
   );
 }
 
-/** Whether the persisted owner→group map has loaded (so an unknown group is not just missing). */
+/** Whether the persisted owner-group map has loaded (so an unknown group is not just missing). */
 export function agentGroupsReady(): boolean {
   return ready;
 }
@@ -206,10 +299,17 @@ function hash(text: string): number {
 
 onEngineInstall(() => {
   void restore();
+  chrome.storage?.onChanged?.addListener((change, area) => {
+    if (area === "local" && change[SETTING_KEY])
+      groupingSetting = change[SETTING_KEY].newValue !== false;
+  });
   chrome.tabGroups?.onRemoved?.addListener((group) => {
     for (const byWindow of groups.values())
       for (const [windowId, record] of byWindow)
         if (record.groupId === group.id) byWindow.delete(windowId);
     void save();
+  });
+  chrome.tabs.onRemoved.addListener((tabId) => {
+    if (claimed.delete(tabId)) void save();
   });
 });

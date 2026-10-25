@@ -7,8 +7,8 @@ import {
 } from "./native-browser-session.js";
 import { publishBrowserEvent } from "./native-browser-events.js";
 import { engineConfig } from "./engine-config.js";
-import { groupAgentTab, isAgentGroupId } from "./native-browser-groups.js";
-import { markAgentTabGrouped, trackAgentTab } from "./native-browser-tab-cleanup.js";
+import { ungroupAgentIntruder } from "./native-browser-groups.js";
+import { trackAgentTab } from "./native-browser-tab-cleanup.js";
 import { isQuietTab } from "./native-browser-quiet.js";
 import { onEngineInstall } from "./native-engine-install.js";
 const children = new Map<number, Set<number>>();
@@ -37,12 +37,11 @@ onEngineInstall(() => {
   });
   chrome.tabs.onCreated.addListener((tab) => {
     if (tab.id === undefined) return;
-    // Chrome carries a group over to a new tab opened from a grouped tab. The new-tab page is
-    // the user's tab, not a popup, so detach it from an agent group and never adopt it.
-    if (isNewTabPage(tab) || !(tab.pendingUrl ?? tab.url ?? "")) {
-      void ungroupAgentNewTab(tab.id);
-      return;
-    }
+    // Chrome carries a group over to a new tab opened from a grouped tab, in places we do not
+    // control (a link, window.open, the new-tab page). Only a tab the agent claimed stays in
+    // its group; everything else is taken back out, and the user's own groups are untouched.
+    void ungroupAgentIntruder(tab.id);
+    if (isNewTabPage(tab) || !(tab.pendingUrl ?? tab.url ?? "")) return;
     if (tab.openerTabId !== undefined) void adopt(tab.id, tab.openerTabId);
   });
   chrome.webNavigation.onCreatedNavigationTarget.addListener(
@@ -63,19 +62,6 @@ function isNewTabPage(tab: chrome.tabs.Tab): boolean {
   );
 }
 
-async function ungroupAgentNewTab(tabId: number): Promise<void> {
-  // The group can be attached just after onCreated. Check once immediately and once after a
-  // short settle, and leave user groups alone.
-  for (const delay of [0, 50]) {
-    if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
-    const tab = await chrome.tabs.get(tabId).catch(() => undefined);
-    if (!tab) return;
-    if (tab.groupId === undefined || tab.groupId < 0) continue;
-    if (isAgentGroupId(tab.groupId)) await chrome.tabs.ungroup(tabId).catch(() => undefined);
-    return;
-  }
-}
-
 async function adopt(tabId: number, openerId: number): Promise<void> {
   try {
     const owner = browserSessionOwner(openerId);
@@ -94,11 +80,10 @@ async function adopt(tabId: number, openerId: number): Promise<void> {
     set.add(tabId);
     children.set(openerId, set);
     bindBrowserSession(tabId, owner);
+    // A popup is tracked and parked for its opener, but it is not the agent's own tab: it never
+    // joins the agent group, even when Chrome copied the opener's group onto it.
     trackAgentTab(tabId, owner, { popup: true, url: tab.url ?? "" });
-    if (tab.windowId !== undefined) {
-      markAgentTabGrouped(tabId);
-      await groupAgentTab(tabId, tab.windowId, owner);
-    }
+    await ungroupAgentIntruder(tabId);
     publishBrowserEvent(openerId, "popup", { tabId, openerId });
     await publishPopup(tabId, openerId, owner, connection);
   } catch {

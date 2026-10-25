@@ -1,4 +1,5 @@
 import { engineConfig } from "./engine-config.js";
+import { isAgentGroupId } from "./native-browser-groups.js";
 
 type SplitTab = chrome.tabs.Tab & { splitViewId?: number };
 type SplitTabs = typeof chrome.tabs & {
@@ -72,12 +73,11 @@ async function alignTabs(tabs: SplitTabs, chat: SplitTab, target: SplitTab): Pro
     await tabs.move(target.id, { windowId: chat.windowId, index: -1 });
   if (target.pinned !== chat.pinned) await tabs.update(target.id, { pinned: chat.pinned });
   const current = await tabs.get(target.id);
-  // Split View needs both tabs in one group. The chat joins its agent's group rather than
-  // pulling the agent tab out, so a chat and the tabs it works in stay together.
-  if (current.groupId !== chat.groupId) {
-    if (current.groupId >= 0) await tabs.group({ tabIds: [chat.id], groupId: current.groupId });
-    else await tabs.group({ tabIds: [target.id], groupId: chat.groupId });
-  }
+  // Split View pairs the chat with the agent's tab; it does not need either tab in a group, and
+  // the chat never joins the agent's group (a tab opened from the chat would inherit it). If an
+  // older run left the chat in an agent group, take it out.
+  if (isAgentGroupId(chat.groupId)) await tabs.ungroup(chat.id).catch(() => undefined);
+  if (isAgentGroupId(current.groupId)) await tabs.ungroup(target.id).catch(() => undefined);
   await makeAdjacent(tabs, chat.id, target.id);
 }
 async function makeAdjacent(tabs: SplitTabs, chatId: number, targetId: number): Promise<void> {

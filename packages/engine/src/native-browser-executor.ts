@@ -30,7 +30,7 @@ import {
   readDiagnostics,
 } from "./native-browser-events.js";
 import { executeDownload } from "./native-browser-downloads.js";
-import { groupAgentTab } from "./native-browser-groups.js";
+import { claimAgentTab, groupAgentTab } from "./native-browser-groups.js";
 import {
   ensureAgentTabsRestored,
   markAgentTabGrouped,
@@ -557,6 +557,7 @@ async function openTab(
   trackAgentTab(created.id, request.chatId, { url: step.url });
   bindBrowserSession(created.id, request.chatId);
   markAgentTabGrouped(created.id);
+  claimAgentTab(created.id);
   await groupAgentTab(
     created.id,
     created.windowId,
