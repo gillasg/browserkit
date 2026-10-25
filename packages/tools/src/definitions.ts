@@ -77,6 +77,8 @@ export type CrawlToolInput = {
   via?: "auto" | "http";
   paths?: string[];
   expect?: string;
+  /** Also open each site and report typed readiness (ready, empty, loading, login, challenge, not-found, error). */
+  readiness?: boolean;
   api?: { site: string; operation: string; params?: Record<string, unknown>; maxItems?: number };
 };
 
@@ -135,6 +137,11 @@ const crawlParameters: JsonObjectSchema = {
       description:
         "For check: what those paths should answer (json, html, m3u8, xml, text or a content type); the body's real shape is checked.",
     },
+    readiness: {
+      type: "boolean",
+      description:
+        "For check: open each site and report typed readiness (ready, empty, loading, login, challenge, not-found, error) with evidence.",
+    },
     api: {
       type: "object",
       description: "For crawl: read a mapped site operation instead of crawling pages.",
@@ -174,7 +181,7 @@ export const crawlTool: AgentToolDefinition<CrawlToolInput> = {
     { name: "map", params: ["url", "query", "limit"] },
     { name: "search", params: ["query", "limit"] },
     { name: "find", params: ["query", "criteria", "columns", "limit"] },
-    { name: "check", params: ["urls", "file", "limit", "via", "paths", "expect"] },
+    { name: "check", params: ["urls", "file", "limit", "via", "paths", "expect", "readiness"] },
   ],
   parameters: crawlParameters,
   async run(input, context) {
@@ -189,6 +196,7 @@ export const crawlTool: AgentToolDefinition<CrawlToolInput> = {
         via: input.via ?? "auto",
         ...(input.paths?.length ? { paths: input.paths.slice(0, 20) } : {}),
         ...(input.expect ? { expect: input.expect } : {}),
+        ...(input.readiness === true ? { readiness: true } : {}),
       });
     }
     if (input.action === "find")

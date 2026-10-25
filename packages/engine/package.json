@@ -18,7 +18,8 @@
     "./boosts-build": "./boosts-build.mjs"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json"
+    "build": "tsc -p tsconfig.build.json",
+    "test": "node --test test/*.test.mjs"
   },
   "dependencies": {
     "acorn": "8.18.0",

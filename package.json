@@ -14,10 +14,11 @@
     "test:boosts:e2e": "pnpm --filter site-boosts test:e2e",
     "test:site-mapper": "pnpm --filter @browserkit/site-mapper test:unit",
     "test:workflows": "pnpm --filter @browserkit/tools test",
+    "test:engine": "pnpm --filter @browserkit/engine test",
     "test:crawl": "pnpm --filter browser-crawl test",
     "agent-text": "node scripts/build-agent-text.mjs",
     "agent-text:check": "node scripts/build-agent-text.mjs --check",
-    "check": "pnpm format:check && pnpm typecheck && pnpm test && pnpm test:workflows && pnpm agent-text:check",
+    "check": "pnpm format:check && pnpm typecheck && pnpm test && pnpm test:workflows && pnpm test:engine && pnpm agent-text:check",
     "links": "node scripts/link-repos.mjs"
   },
   "devDependencies": {

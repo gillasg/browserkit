@@ -85,6 +85,43 @@ export const browserExtraSteps = [
     .strict(),
   z.object({ op: z.literal("diagnostics"), target, clear: z.boolean().default(false) }).strict(),
   z.object({ op: z.literal("popups"), target }).strict(),
+  z.object({ op: z.literal("readiness"), target }).strict(),
+  z.object({ op: z.literal("scheduler"), target }).strict(),
+  z
+    .object({
+      op: z.literal("cookies"),
+      target,
+      action: z.enum(["list", "get", "set", "remove", "clear"]),
+      url: z.string().url().max(8192).optional(),
+      domain: z.string().min(1).max(253).optional(),
+      name: z.string().min(1).max(512).optional(),
+      value: z.string().max(8192).optional(),
+      path: z.string().max(2048).optional(),
+      secure: z.boolean().optional(),
+      httpOnly: z.boolean().optional(),
+      sameSite: z.enum(["no_restriction", "lax", "strict", "unspecified"]).optional(),
+      expirationDate: z.number().optional(),
+      values: z.boolean().optional(),
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("networkStore"),
+      target,
+      action: z.enum(["list", "get", "body", "curl", "origins", "stats", "clear", "har"]),
+      id: z.string().max(160).optional(),
+      match: z.string().max(2048).optional(),
+      origin: z.string().max(2048).optional(),
+      method: z.string().max(16).optional(),
+      type: z.string().max(40).optional(),
+      status: z.number().int().min(0).max(999).optional(),
+      static: z.enum(["static", "dynamic"]).optional(),
+      since: z.number().optional(),
+      until: z.number().optional(),
+      limit: z.number().int().min(1).max(1000).optional(),
+      secrets: z.boolean().optional(),
+    })
+    .strict(),
   z
     .object({
       op: z.literal("siteScript"),

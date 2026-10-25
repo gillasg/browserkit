@@ -27,6 +27,7 @@
     "alarms",
     "history",
     "bookmarks",
+    "cookies",
     "declarativeNetRequest",
     "contentSettings"
   ],

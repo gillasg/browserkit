@@ -38,6 +38,12 @@ export interface SiteCheck {
   paths?: PathProbe[];
   /** Why: the status, the bot-check vendor, the network error, or what made it parked. */
   reason?: string;
+  /** What the page is, when a browser opened it: ready, empty, loading, login, challenge, not-found, error. */
+  readiness?: {
+    state: string;
+    evidence: string[];
+    textLength?: number;
+  };
 }
 
 /** What a body really is: parsed JSON, a page, the site's catch-all page, nothing, or something else. */
@@ -69,6 +75,8 @@ export interface CheckOptions {
   paths?: readonly string[];
   /** What those paths should answer: "json", "html", "m3u8", "xml", "text" or a content type. */
   expect?: string;
+  /** Also open each site and report its typed readiness (needs the browser). */
+  readiness?: boolean;
   onProgress?(done: number, total: number): void;
 }
 
@@ -130,6 +138,7 @@ export async function checkSites(
         result.reason = `${result.reason ?? result.verdict}; not checked in Chrome (${options.via === "http" ? "via http" : "no browser"})`;
       }
   const paths = await probeEveryHost(results, options);
+  await addReadinessIfAsked(results, options, browserUsed);
   return {
     results,
     counts: countVerdicts(results),
@@ -138,6 +147,59 @@ export async function checkSites(
     chromePages,
     ...(paths.length ? { paths } : {}),
   };
+}
+
+async function addReadinessIfAsked(
+  results: SiteCheck[],
+  options: CheckOptions,
+  browserUsed: boolean,
+): Promise<void> {
+  if (options.readiness !== true || !browserUsed) return;
+  await addReadiness(results);
+}
+
+/**
+ * Opens each site in its own tab and asks what the page is, then closes it. The check already
+ * knows whether a site answers; readiness says whether the answer is a usable page, a sign-in
+ * wall, a bot check, an empty shell or a not-found. Best effort: a site that will not open keeps
+ * its verdict without readiness.
+ */
+async function addReadiness(results: SiteCheck[]): Promise<void> {
+  if (!results.length) return;
+  const bridge = await sharedBridge();
+  const answers = (await bridge
+    .run(readinessCode(results.map((result) => result.finalUrl ?? result.url)), {
+      session: "browser-crawl-check",
+      timeoutMs: 120_000,
+    })
+    .catch(() => [])) as ({ state?: string; evidence?: string[]; textLength?: number } | null)[];
+  results.forEach((result, index) => {
+    const answer = answers[index];
+    if (!answer || typeof answer !== "object" || !answer.state) return;
+    result.readiness = {
+      state: String(answer.state),
+      evidence: (answer.evidence ?? []).map((line) => String(line)).slice(0, 8),
+      ...(answer.textLength === undefined ? {} : { textLength: Number(answer.textLength) }),
+    };
+  });
+}
+
+/** One cell that visits each URL, waits out loading, records readiness, and closes the tab. */
+function readinessCode(urls: readonly string[]): string {
+  return `(async () => {
+  const urls = ${JSON.stringify(urls)};
+  const answers = [];
+  for (const url of urls) {
+    try {
+      await browser.openTab(url, { newTab: true, quiet: true });
+      answers.push(await page.waitReady({ timeoutMs: 8000 }));
+    } catch (error) {
+      answers.push({ state: "error", evidence: [String((error && error.message) || error)] });
+    }
+    try { await page.close(); } catch {}
+  }
+  return answers;
+})()`;
 }
 
 /**

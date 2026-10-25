@@ -87,6 +87,15 @@ function __withOptions(element, options = {}) {
 }
 function __withFilter(element, filter) { return {...element, filters: [...(element.filters || []), filter]}; }
 function __originOf(url) { try { return new URL(url).origin; } catch { return ''; } }
+// Host-wide calls (cookies, the network store, the scheduler) still need a live tab to answer on.
+function __hostTarget() {
+  if (!__lastTarget) throw Error('NO_TAB: open or attach a tab first (browser.openTab / bu.use)');
+  return __lastTarget;
+}
+function __netFilter(value) {
+  if (value === undefined || value === null) return {};
+  return typeof value === 'string' ? {match: value} : value;
+}
 var browser = Object.freeze({
   waitFor: (event, options = {}) => __event(options.target || __lastTarget,event,options),
   // Listed tabs work as pages too (agents call tab.locator(...) or use tab.id); acting on one
@@ -173,6 +182,29 @@ var browser = Object.freeze({
     try { return await __call({fetch: {...init, url: String(url)}}); }
     catch (error) { throw __fetchFailure(error); }
   },
+  // Cookies for the whole browser: filtered by url or domain. Values stay hidden unless asked,
+  // so listing never carries a token into a trace.
+  cookies: Object.freeze({
+    list: async (filter = {}) => (await __step({op:'cookies', target:__hostTarget(), action:'list', ...filter})).data,
+    get: async (name, filter = {}) => (await __step({op:'cookies', target:__hostTarget(), action:'get', name:String(name), ...filter})).data,
+    set: async (cookie) => (await __step({op:'cookies', target:__hostTarget(), action:'set', ...cookie})).data,
+    remove: async (name, filter = {}) => (await __step({op:'cookies', target:__hostTarget(), action:'remove', name:String(name), ...filter})).data,
+    clear: async (filter = {}) => (await __step({op:'cookies', target:__hostTarget(), action:'clear', ...filter})).data,
+  }),
+  // Every tab the session worked in, after the fact: a bounded store that survives a tab closing.
+  network: Object.freeze({
+    list: async (filter = {}) => (await __step({op:'networkStore', target:__hostTarget(), action:'list', ...__netFilter(filter)})).data,
+    get: async (id) => (await __step({op:'networkStore', target:__hostTarget(), action:'get', id:String(id)})).data,
+    body: async (id) => (await __step({op:'networkStore', target:__hostTarget(), action:'body', id:String(id)})).data,
+    curl: async (id, options = {}) => (await __step({op:'networkStore', target:__hostTarget(), action:'curl', id:String(id), ...(options.secrets ? {secrets:true} : {})})).data,
+    origins: async () => (await __step({op:'networkStore', target:__hostTarget(), action:'origins'})).data,
+    stats: async () => (await __step({op:'networkStore', target:__hostTarget(), action:'stats'})).data,
+    har: async (filter = {}) => (await __step({op:'networkStore', target:__hostTarget(), action:'har', ...__netFilter(filter)})).data,
+    save: async (name = 'network.har', filter = {}) => { var har = await browser.network.har(filter); await artifact(name, JSON.stringify(har)); return {saved: name}; },
+    clear: async () => (await __step({op:'networkStore', target:__hostTarget(), action:'clear'})).data,
+  }),
+  // What is queued or running: per-tab queues and the browser-wide write lock.
+  scheduler: async () => (await __step({op:'scheduler', target:__hostTarget()})).data,
   pool: (items, worker, options = {}) => __pool(items, worker, options),
   // Close every tab this chat/session opened (page.keep tabs stay), returning {closed, remaining}.
   reset: () => __call({tabs:'reset'}),
@@ -258,6 +290,18 @@ var browser = Object.freeze({
       ...(options.limit !== undefined ? {limit: __clamp(options.limit, 1, 100)} : {}),
       ...(options.textLimit !== undefined ? {textLimit: __clamp(options.textLimit, 1, 4000)} : {}),
       ...(Array.isArray(options.attributes) ? {attributes: options.attributes.filter(a => /^[\\w-]{1,80}$/.test(a)).slice(0, 10)} : {})}),
+    // What this page is: ready, empty, loading, login, challenge, not-found or error, with why.
+    readiness: async () => (await __step({op:'readiness', target})).data,
+    // Waits out loading, then returns the readiness it settled on (or the last one, timedOut).
+    waitReady: async (options = {}) => {
+      var deadline = Date.now() + (options.timeoutMs ?? 15000);
+      while (true) {
+        var state = (await __step({op:'readiness', target})).data;
+        if (state.state !== 'loading') return state;
+        if (Date.now() >= deadline) return {...state, timedOut: true};
+        await __sleep(Math.min(500, Math.max(100, options.intervalMs ?? 250)));
+      }
+    },
     // A number waits that many milliseconds; a selector waits for it (timeouts above the engine cap keep polling).
     wait: (selector, options = {}) => typeof selector === 'number' ? __sleep(selector) : __waitSelector(target, selector, options),
     navigate: (url, options = {}) => __step({op:"navigate", target, url: __absoluteUrl(url, target),

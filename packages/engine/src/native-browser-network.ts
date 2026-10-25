@@ -15,6 +15,7 @@ import {
 import { isTrackerUrl, takeLearned } from "./native-browser-network-learn.js";
 import { rememberSessionHeaders, sessionHeadersFor } from "./native-browser-session-headers.js";
 import { hideSecrets } from "./native-browser-secrets.js";
+import { recordGlobalEntry } from "./network-store.js";
 
 // Network recording for learning a site's own APIs. While a tab records, its API traffic is
 // kept with full headers (cookies included), the script that made each call, request and
@@ -86,11 +87,12 @@ const HANDLERS: Record<string, (recorder: Recorder, params: Params, tabId: numbe
   "Network.responseReceivedExtraInfo": (recorder, params) =>
     mergeHeaders(recorder, params, "responseHeaders"),
   "Network.loadingFinished": loadingFinished,
-  "Network.loadingFailed": (recorder, params) => {
+  "Network.loadingFailed": (recorder, params, tabId) => {
     const entry = recorder.entries.get(String(params.requestId));
     if (!entry) return;
     entry.failed = String(params.errorText ?? "failed");
     entry.done = true;
+    recordGlobalEntry(tabId, entry, entry.documentURL);
     notifyWaiters(recorder, entry);
   },
   "Network.webSocketCreated": (recorder, params) =>
@@ -191,7 +193,10 @@ function loadingFinished(recorder: Recorder, params: Params, tabId: number): voi
   entry.durationMs = Math.max(0, Date.now() - entry.startedAt);
   entry.done = true;
   const captured = recorder.bodies ? captureBodies(tabId, recorder, entry) : Promise.resolve();
-  void captured.finally(() => notifyWaiters(recorder, entry));
+  void captured.finally(() => {
+    recordGlobalEntry(tabId, entry, entry.documentURL);
+    notifyWaiters(recorder, entry);
+  });
 }
 
 /** A finished request wakes the page.network.waitFor calls that were waiting for it. */

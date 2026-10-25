@@ -83,6 +83,24 @@ import {
 import { executeSiteScript, handleScriptSync } from "./site-script-runtime.js";
 import { browserPopups } from "./native-browser-popup.js";
 import { captureFromTabStart } from "./native-browser-network.js";
+import { executeCookies, type CookieStep } from "./native-browser-cookies.js";
+import {
+  classifyReadiness,
+  readinessSnapshotExpression,
+  type ReadinessSnapshot,
+} from "./readiness.js";
+import {
+  bodyGlobal,
+  clearGlobal,
+  curlGlobal,
+  getGlobal,
+  harGlobal,
+  originsGlobal,
+  queryGlobal,
+  statsGlobal,
+  type StoreFilter,
+} from "./network-store.js";
+import { scheduleStep, schedulerStatus } from "./native-browser-scheduler.js";
 import type { BrowserIdentity } from "./native-worker-identity.js";
 
 type Capability = Extract<
@@ -178,6 +196,10 @@ type ExtraRequest = BrowserExecutorRequest & {
         | "popups"
         | "evaluate"
         | "cdp"
+        | "readiness"
+        | "cookies"
+        | "networkStore"
+        | "scheduler"
         | "waitFor";
     }
   >;
@@ -187,39 +209,44 @@ export async function performExtra(
   revalidate: (request: BrowserExecutorRequest, tabId: number) => Promise<void>,
 ): Promise<BrowserExecutorResult> {
   const tabId = request.step.target.tabId;
+  const step = request.step;
   let data: unknown;
-  if (request.step.op === "siteScript") {
+  if (step.op === "cookies") {
+    // Host-wide, and never requires a debugger: no page is touched.
     await revalidate(request, tabId);
-    data = await executeSiteScript(
-      request.step.action,
-      tabId,
-      request.step.definition,
-      request.step.scriptId,
-      () => revalidate(request, tabId),
+    data = await executeCookies(step as CookieStep);
+  } else if (step.op === "networkStore") {
+    await revalidate(request, tabId);
+    data = networkStoreAction(step);
+  } else if (step.op === "scheduler") {
+    await revalidate(request, tabId);
+    data = schedulerStatus();
+  } else if (step.op === "siteScript") {
+    await revalidate(request, tabId);
+    data = await executeSiteScript(step.action, tabId, step.definition, step.scriptId, () =>
+      revalidate(request, tabId),
     );
   } else
     data = await withBrowserDebugger(tabId, async (debuggee) => {
       await revalidate(request, tabId);
-      if (
-        request.step.op === "evaluate" ||
-        request.step.op === "cdp" ||
-        request.step.op === "waitFor"
-      )
-        return executePageCode(debuggee, { ...request, step: request.step }, () =>
-          revalidate(request, tabId),
+      if (step.op === "readiness")
+        return classifyReadiness(
+          ((await evaluate(debuggee, readinessSnapshotExpression)) ?? {}) as ReadinessSnapshot,
         );
-      if (request.step.op === "press")
+      if (step.op === "evaluate" || step.op === "cdp" || step.op === "waitFor")
+        return executePageCode(debuggee, { ...request, step }, () => revalidate(request, tabId));
+      if (step.op === "press")
         return pressElement(debuggee, request, () => revalidate(request, tabId));
-      if (request.step.op === "navigate") {
+      if (step.op === "navigate") {
         // Recorded from the first request, so page.network.list() has the new page's calls.
         await captureFromTabStart(tabId);
-        return navigateReady(tabId, request.step.url);
+        return navigateReady(tabId, step.url);
       }
-      if (request.step.op === "diagnostics") {
+      if (step.op === "diagnostics") {
         await enableConsoleCapture(tabId);
-        return readDiagnostics(tabId, request.step.clear);
+        return readDiagnostics(tabId, step.clear);
       }
-      if (request.step.op === "popups") return { tabs: await browserPopups(tabId) };
+      if (step.op === "popups") return { tabs: await browserPopups(tabId) };
       return readOrWait(debuggee, request, () => revalidate(request, tabId));
     });
   const tab = await refreshInventoryTab(tabId);
@@ -242,6 +269,51 @@ export async function performExtra(
     data,
   };
 }
+type NetworkStoreStep = Extract<BrowserStep, { op: "networkStore" }>;
+
+/** Only the fields the store filters on, so undefined options never reach it. */
+function storeFilterOf(step: NetworkStoreStep): StoreFilter {
+  return {
+    ...(step.match ? { match: step.match } : {}),
+    ...(step.origin ? { origin: step.origin } : {}),
+    ...(step.method ? { method: step.method } : {}),
+    ...(step.type ? { type: step.type } : {}),
+    ...(step.status === undefined ? {} : { status: step.status }),
+    ...(step.static ? { static: step.static } : {}),
+    ...(step.since === undefined ? {} : { since: step.since }),
+    ...(step.until === undefined ? {} : { until: step.until }),
+    ...(step.limit === undefined ? {} : { limit: step.limit }),
+  };
+}
+
+function networkStoreAction(step: NetworkStoreStep): unknown {
+  const filter = storeFilterOf(step);
+  switch (step.action) {
+    case "list": {
+      const entries = queryGlobal(filter);
+      return { entries, count: entries.length };
+    }
+    case "get":
+      return step.id
+        ? (getGlobal(step.id) ?? { id: step.id, found: false })
+        : { error: "get needs an id" };
+    case "body":
+      return step.id ? bodyGlobal(step.id) : { error: "body needs an id" };
+    case "curl":
+      return step.id
+        ? { curl: curlGlobal(step.id, step.secrets === true) }
+        : { error: "curl needs an id" };
+    case "origins":
+      return { origins: originsGlobal() };
+    case "stats":
+      return statsGlobal();
+    case "clear":
+      return clearGlobal();
+    case "har":
+      return harGlobal(filter);
+  }
+}
+
 async function readOrWait(
   debuggee: chrome.debugger.Debuggee,
   request: ExtraRequest,
@@ -416,6 +488,16 @@ async function executeStep(
   activateClaim(request);
   const tab = await assertTarget(request);
   bindBrowserSession(step.target.tabId, request.chatId);
+  // One step per tab at a time, and writes one at a time browser-wide: two sessions cannot type
+  // into each other's page, and a session's own steps keep their order.
+  return scheduleStep(step, step.target.tabId, () => dispatchStep(request, step, tab));
+}
+
+async function dispatchStep(
+  request: BrowserExecutorRequest,
+  step: BrowserStep,
+  tab: chrome.tabs.Tab,
+): Promise<BrowserExecutorResult> {
   if (isCapabilityStep(step)) return performCapability({ ...request, step }, revalidateTarget);
   if (step.op === "observe" || step.op === "navigate")
     showAgentCaption(
@@ -622,6 +704,10 @@ function isExtraStep(step: BrowserStep): step is Extract<
       | "popups"
       | "evaluate"
       | "cdp"
+      | "readiness"
+      | "cookies"
+      | "networkStore"
+      | "scheduler"
       | "waitFor";
   }
 > {
@@ -635,6 +721,10 @@ function isExtraStep(step: BrowserStep): step is Extract<
     "popups",
     "evaluate",
     "cdp",
+    "readiness",
+    "cookies",
+    "networkStore",
+    "scheduler",
     "waitFor",
   ].includes(step.op);
 }
