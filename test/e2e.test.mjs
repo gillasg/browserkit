@@ -121,7 +121,13 @@ test(
         request.on("data", (chunk) => (body += chunk));
         request.on("end", () => {
           response.setHeader("content-type", "application/json");
-          response.end(JSON.stringify({ method: request.method, body }));
+          response.end(
+            JSON.stringify({
+              method: request.method,
+              body,
+              csrf: request.headers["x-csrf-token"] ?? null,
+            }),
+          );
         });
         return;
       }
@@ -596,7 +602,7 @@ test(
             "repl",
             "--session",
             "provider-ui",
-            `page = await browser.openTab(${JSON.stringify(siteUrl + "provider")}); await page.waitForTimeout(300); ${script}`,
+            `page = await browser.openTab(${JSON.stringify(siteUrl + "provider")}, { foreground: true }); await page.waitForTimeout(300); ${script}`,
           ],
           { env },
         );
