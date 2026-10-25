@@ -221,6 +221,7 @@ export async function collapseAgentGroups(owner: string): Promise<void> {
 
 /** An empty agent group is not useful to anyone: drop its record (Chrome removes the group). */
 export async function pruneEmptyGroups(): Promise<void> {
+  if (typeof chrome.tabs?.query !== "function") return;
   for (const [owner, byWindow] of groups) {
     for (const [windowId, record] of [...byWindow]) {
       const tabs = await chrome.tabs.query({ groupId: record.groupId }).catch(() => undefined);

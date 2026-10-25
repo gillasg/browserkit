@@ -29,6 +29,10 @@
       "types": "./dist/workflow.d.ts",
       "import": "./dist/workflow.js"
     },
+    "./workflow-actions": {
+      "types": "./dist/workflow-actions.d.ts",
+      "import": "./dist/workflow-actions.js"
+    },
     "./workflow-store": {
       "types": "./dist/workflow-store.d.ts",
       "import": "./dist/workflow-store.js"

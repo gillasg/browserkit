@@ -21,7 +21,7 @@ import { cliHost } from "../host.js";
 import { flag, has, jsonValue, type Args } from "../args.js";
 import { dataDirectory } from "../paths.js";
 import { printJson } from "../output.js";
-import { workflowActions } from "./workflow-actions.js";
+import { workflowActions } from "@browserkit/tools/workflow-actions";
 import type { Command } from "../usage.js";
 
 // Workflows: a saved, declarative sequence an agent or a person can run again. Steps use a small

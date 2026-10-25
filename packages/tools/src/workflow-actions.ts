@@ -3,7 +3,7 @@
 // ({{steps.<id>.url}}) and recorded in the run. Locator-style actions accept the same target
 // shapes as the browser API: {role, name}, {text}, {label}, {placeholder} or {css}.
 
-import type { WorkflowAction, WorkflowActions } from "@browserkit/tools/workflow";
+import type { WorkflowAction, WorkflowActions } from "./workflow.js";
 
 export type BrowserRunner = (code: string) => Promise<unknown>;
 
