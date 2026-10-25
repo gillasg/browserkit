@@ -218,8 +218,17 @@ var browser = Object.freeze({
   // The chat's workspace, read as well as written: a path is relative to the session's folder and
   // can never leave it. write is artifact().
   workspace: Object.freeze({
-    read: async (name) => (await __call({workspace:'read', name:String(name)})).data?.text,
-    list: async (folder = '') => (await __call({workspace:'list', name:String(folder)})).data?.entries ?? [],
+    // A host answers the request itself, or wraps it in {data}; both shapes read the same.
+    read: async (name) => {
+      var reply = await __call({workspace:'read', name:String(name)});
+      var data = reply && reply.data !== undefined ? reply.data : reply;
+      return data ? data.text : undefined;
+    },
+    list: async (folder = '') => {
+      var reply = await __call({workspace:'list', name:String(folder)});
+      var data = reply && reply.data !== undefined ? reply.data : reply;
+      return (data && data.entries) || [];
+    },
     write: (name, data) => artifact(name, data),
   }),
   // Cookies for the whole browser: filtered by url or domain. Values stay hidden unless asked,
