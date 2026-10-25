@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { BridgeClient } from "../client.js";
+import { spillText } from "../spill.js";
 import { startBridge } from "../bridge-server.js";
 import { runDoctor } from "../doctor.js";
 import { formatResult } from "../format.js";
@@ -45,7 +46,10 @@ async function repl(args: Args): Promise<number> {
       session: flag(args, "session") ?? "cli",
       ...(timeout ? { timeoutMs: Number(timeout) } : {}),
     });
-    if (!has(args, "quiet")) process.stdout.write(formatResult(result).text + "\n");
+    if (!has(args, "quiet")) {
+      const text = await spillText(formatResult(result).text, flag(args, "session") ?? "cli");
+      process.stdout.write(text + "\n");
+    }
     return result.error ? 1 : 0;
   } finally {
     bridge.close();

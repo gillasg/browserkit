@@ -184,6 +184,8 @@ function responseReceived(recorder: Recorder, params: Params): void {
   entry.mimeType = String(response.mimeType ?? "");
   entry.responseHeaders = { ...headers(response.headers), ...entry.responseHeaders };
   if (typeof response.protocol === "string") entry.protocol = response.protocol;
+  if (typeof response.remoteIPAddress === "string")
+    entry.remoteIPAddress = response.remoteIPAddress;
 }
 
 function loadingFinished(recorder: Recorder, params: Params, tabId: number): void {

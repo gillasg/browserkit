@@ -26,6 +26,8 @@ import { tabGroupsCommand, windowsCommand, zoomCommand } from "./windows.js";
 import { recordCommand } from "./record.js";
 import { askCommand, providersCommand } from "./ask.js";
 import { mediaCommand } from "./media.js";
+import { dnsCommand } from "./dns.js";
+import { profileCommand } from "./profile.js";
 
 // Every capability the MCP tools and the bundled packages have, as a command.
 export const COMMANDS: Command[] = [
@@ -56,5 +58,7 @@ export const COMMANDS: Command[] = [
   askCommand,
   providersCommand,
   mediaCommand,
+  dnsCommand,
+  profileCommand,
   commandsCommand,
 ];

@@ -105,6 +105,7 @@ var browser = Object.freeze({
       var result = await __step({op:'listTabs', ...(options.query ? {query: options.query} : {})});
       __focusedWindowId = result.focusedWindowId;
       var listed = result.tabs.map(tab => __listedTab(__compactTab(tab)));
+      if (listed.length > 64) console.log('[warn] ' + listed.length + ' tabs are open; pass a query or {mine:true} to narrow the list. Every tool still works on one tab.');
       // mine: only the tabs this chat or session opened (the same set browser.closeTab accepts).
       return options.mine === true ? listed.filter(tab => tab.mine) : listed;
     },
@@ -173,6 +174,7 @@ var browser = Object.freeze({
       foreground: options.foreground === true,
       ...(options.quiet === true ? {quiet:true} : {}),
       ...(options.present === false ? {present:false} : {}),
+      ...(options.timeoutMs ? {timeoutMs: Math.max(500, Math.min(Number(options.timeoutMs) || 0, 120000))} : {}),
       ...(options.window ? {window: {width: Math.round(options.window.width ?? 1920), height: Math.round(options.window.height ?? 1080)}} : {})});
     if (!options.window) __opened.set(origin || url, result.tab.target);
     await bu.use(result.tab.target);
@@ -182,13 +184,44 @@ var browser = Object.freeze({
     }
     return __openResult(result.tab, false, result.navigation === 'failed' ? result.reason : undefined);
   },
+  // A tab kept for later: an open tab on the URL is reused (and attached to this session), else a
+  // new one opens and is kept. Kept tabs survive the run's tidy-up, so a later session finds them.
+  keepPage: async (url, options = {}) => {
+    var wanted = String(url);
+    var tabs = await browser.tabs();
+    var match = tabs.find(tab => tab.url === wanted) || tabs.find(tab => tab.url.split('#')[0] === wanted.split('#')[0]);
+    if (match) {
+      var kept = await browser.attachTab(match.target);
+      await kept.keep();
+      console.log('[ok] keepPage reused tab ' + match.id + ' for ' + wanted);
+      return kept;
+    }
+    var page = await browser.openTab(wanted, {...options, ...(options.newTab === undefined ? {newTab:true} : {})});
+    await page.keep();
+    return page;
+  },
   // Fetch without a tab: from the extension, with the user's cookies (credentials: 'omit' to skip).
   // A failed fetch carries why it failed: kind (dns, tls, refused, reset, timeout, cors,
   // blocked-page), host, and networkBlock for a name that resolves to a block or sinkhole page.
   fetch: async (url, init = {}) => {
-    try { return await __call({fetch: {...init, url: String(url)}}); }
+    // asOrigin: the request carries the URL's own origin as Referer and Origin, the shorthand for
+    // an API that refuses a bare call. An explicit referer/origin header wins.
+    var request = {...init};
+    if (request.asOrigin) {
+      var origin = new URL(String(url)).origin;
+      request.headers = {referer: origin + '/', origin, ...(request.headers || {})};
+      delete request.asOrigin;
+    }
+    try { return await __call({fetch: {...request, url: String(url)}}); }
     catch (error) { throw __fetchFailure(error); }
   },
+  // The chat's workspace, read as well as written: a path is relative to the session's folder and
+  // can never leave it. write is artifact().
+  workspace: Object.freeze({
+    read: async (name) => (await __call({workspace:'read', name:String(name)})).text,
+    list: async (folder = '') => (await __call({workspace:'list', name:String(folder)})).entries,
+    write: (name, data) => artifact(name, data),
+  }),
   // Cookies for the whole browser: filtered by url or domain. Values stay hidden unless asked,
   // so listing never carries a token into a trace.
   cookies: Object.freeze({
@@ -331,7 +364,8 @@ var browser = Object.freeze({
       var destination = __absoluteUrl(url, target);
       try {
         var result = await __step({op:"navigate", target, url: destination,
-          ...(options.present === false ? {present:false} : {})});
+          ...(options.present === false ? {present:false} : {}),
+          ...(options.timeoutMs ? {timeoutMs: Math.max(500, Math.min(Number(options.timeoutMs) || 0, 120000))} : {})});
         __lastErrors.delete(__key(target));
         return result;
       } catch (error) {
@@ -340,6 +374,15 @@ var browser = Object.freeze({
       }
     },
     diagnostics: (clear = false) => __step({op:"diagnostics", target, clear}),
+    // The address the browser connected to for this page, i.e. what its resolver returned.
+    dns: async () => {
+      var entries = await browser.page(target).network.list().catch(() => []);
+      var hit = entries.find((entry) => entry.remoteIPAddress);
+      if (!hit) return null;
+      var host = '';
+      try { host = new URL(hit.url).hostname; } catch (error) {}
+      return {host, address: hit.remoteIPAddress, url: hit.url};
+    },
     console: async (options = {}) => {
       var entries = (await __step({op:"diagnostics", target, clear: !!options.clear})).data.console || [];
       return options.errors ? entries.filter((entry) => /error|exception/i.test(entry.level || '')) : entries;
@@ -394,6 +437,10 @@ var browser = Object.freeze({
     fill: (element, value) => __step({op:'fill',target,element:__wire(__element(target,element)),value:String(value),observe:false}),
     evaluate: async (fn, arg) => (await __step({op:'evaluate',target,expression:__expression(fn,arg)})).data.value,
     inspect: async (fn, arg) => (await __step({op:'evaluate',target,expression:__expression(fn,arg)},true)).data.value,
+    // Functions the page exposes on window, with their arity: what a page script can be built on.
+    functions: async () => browser.page(target).inspect(__pageFunctions),
+    // Extra request headers for this tab (delegates to page.rules.headers).
+    setExtraHTTPHeaders: (headers) => __call({rules:'headers', target, headers}),
     pdfText: (options = {}) => browser.page(target).inspect(__readPdfText,options),
     cdp: async (method, params = {}) => (await __step({op:'cdp',target,method,params})).data.value,
     permissions: Object.freeze({
@@ -454,6 +501,35 @@ var browser = Object.freeze({
         return __call({network:'waitFor', target, ...filter});
       },
       get: (id) => __call({network:'get', target, id}),
+      // Every captured request as a Node fetch script would need it: method, url, headers,
+      // cookies and postData. {requests, script} — script is runnable Node (fetch + a body loop).
+      export: async (filter = {}) => {
+        var entries;
+        try { entries = await __call({network:'list', target, ...filter}); }
+        catch (error) {
+          if (!/Not recording/.test(String(error && error.message))) throw error;
+          await __call({network:'start', target});
+          entries = [];
+        }
+        var requests = [];
+        for (var entry of entries.slice(0, 200)) {
+          var full = await __call({network:'get', target, id:entry.id});
+          var headers = full.requestHeaders || {};
+          var cookieName = Object.keys(headers).find((name) => name.toLowerCase() === 'cookie');
+          requests.push({
+            method: full.method,
+            url: full.url,
+            headers,
+            cookies: cookieName ? headers[cookieName] : '',
+            postData: full.requestBody === undefined ? null : full.requestBody,
+            status: full.status,
+            responseHeaders: full.responseHeaders || {},
+          });
+        }
+        var script = '// Captured requests; fetch with the same method, headers and body.\n' +
+          'globalThis.requests = ' + JSON.stringify(requests, null, 2) + ';\n';
+        return {requests, script};
+      },
       // Failed requests grouped by endpoint: statuses, sizes, timing, block headers and the last
       // success. Repeated probes of the same limit collapse into one entry.
       failures: async (options = {}) => {
@@ -916,6 +992,17 @@ var finish_from_js=({expression})=>{__deliveryValue=eval(expression);__hasDelive
 var reconnect=()=>browser.page(__lastTarget).reconnect();
 `;
 export const browserDocumentApi = `
+function __pageFunctions() {
+  var out = [];
+  for (var key of Object.getOwnPropertyNames(window)) {
+    try {
+      var value = window[key];
+      if (typeof value === 'function' && key !== 'window' && key.indexOf('__') !== 0)
+        out.push({name: key, arity: value.length});
+    } catch (error) {}
+  }
+  return out.sort((left, right) => left.name.localeCompare(right.name));
+}
 async function __readPdfText(options = {}) {
   var root=window;
   if(options.selector) {

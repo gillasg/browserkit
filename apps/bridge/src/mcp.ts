@@ -2,6 +2,7 @@ import { createInterface } from "node:readline";
 import { BridgeClient } from "./client.js";
 import { browserCodeDescription } from "./guidance.js";
 import { formatResult } from "./format.js";
+import { spillText } from "./spill.js";
 import { callWebTool, webTools } from "./web-tools.js";
 import {
   browserActionCode,
@@ -108,10 +109,11 @@ async function handle(message: Json, bridge: () => Promise<BridgeClient>): Promi
       ...(timeoutMs ? { timeoutMs } : {}),
     });
     const formatted = formatResult(result);
+    const text = await spillText(formatted.text, session);
     const place = where.error ? null : (where.value as Json | null);
     return {
       content: [
-        { type: "text", text: formatted.text },
+        { type: "text", text },
         ...(place ? [{ type: "text", text: JSON.stringify(place) }] : []),
         ...formatted.images.map((image) => ({
           type: "image",
@@ -123,15 +125,17 @@ async function handle(message: Json, bridge: () => Promise<BridgeClient>): Promi
     };
   }
   if (params.name !== "browser_code") throw new Error(`Unknown tool: ${String(params.name)}`);
+  const session = typeof args.session === "string" ? args.session : "mcp";
   const result = await client.request("run", {
     code: String(args.code ?? ""),
-    session: typeof args.session === "string" ? args.session : "mcp",
+    session,
     ...(typeof args.timeoutMs === "number" ? { timeoutMs: args.timeoutMs } : {}),
   });
   const formatted = formatResult(result);
+  const text = await spillText(formatted.text, session);
   return {
     content: [
-      { type: "text", text: formatted.text },
+      { type: "text", text },
       ...formatted.images.map((image) => ({
         type: "image",
         data: image.data,

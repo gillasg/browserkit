@@ -8,6 +8,7 @@ import {
   type FetchDiagnosis,
   type Probe,
 } from "./native-browser-fetch-errors.js";
+import { HostBudget } from "./native-browser-rate.js";
 
 const MAX_TEXT = 5_000_000;
 const MAX_BINARY = 16_000_000;
@@ -18,6 +19,8 @@ const FETCH_RULE_BASE = 690_000;
 const PROBE_TIMEOUT_MS = 8_000;
 const RESERVED_NAME = /\.(invalid|test|example|localhost)$/i;
 let ruleSequence = 0;
+// 30 requests per host per 10 s, spaced when a caller goes faster.
+const hostBudget = new HostBudget(30, 10_000);
 
 interface FetchRequest {
   url: string;
@@ -48,6 +51,8 @@ export async function fetchCall(value: Record<string, unknown>): Promise<unknown
     body = JSON.stringify(request.json);
     if (!split.headers.has("content-type")) split.headers.set("content-type", "application/json");
   }
+  const rateWaitMs = hostBudget.take(url.host);
+  if (rateWaitMs) await new Promise((resolve) => setTimeout(resolve, rateWaitMs));
   let response: Response;
   try {
     response = await withFetchHeaders(url, split, () =>
@@ -68,6 +73,7 @@ export async function fetchCall(value: Record<string, unknown>): Promise<unknown
     ok: response.ok,
     url: response.url,
     headers: Object.fromEntries(response.headers),
+    ...(rateWaitMs ? { rateWaitMs } : {}),
   };
   if (response.status === 401 || response.status === 403)
     result.hint =

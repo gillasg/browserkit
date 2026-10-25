@@ -2,6 +2,7 @@ import {
   appendFile,
   mkdir,
   readFile,
+  readdir,
   writeFile,
   rename,
   realpath,
@@ -20,7 +21,24 @@ export function isWorkspaceRequest(value: unknown): value is Request {
   return typeof value === "object" && value !== null && "workspace" in value;
 }
 export async function workspaceCall(root: string, request: Request): Promise<unknown> {
+  if (request.workspace === "list") {
+    const base = await realpath(root).catch(() => root);
+    const folder = request.name ? await workspacePath(root, request.name) : base;
+    const entries = await readdir(folder, { withFileTypes: true });
+    return {
+      name: request.name || ".",
+      entries: entries
+        .slice(0, 500)
+        .map((entry) => ({ name: entry.name, dir: entry.isDirectory() }))
+        .sort(
+          (left, right) =>
+            Number(right.dir) - Number(left.dir) || left.name.localeCompare(right.name),
+        ),
+    };
+  }
   const path = await workspacePath(root, request.name);
+  if (request.workspace === "read")
+    return { name: request.name, text: await boundedRead(path, true) };
   if (request.workspace === "load") return JSON.parse(await boundedRead(path, true));
   if (request.workspace === "loadHelper") return boundedRead(path, true);
   if (request.workspace === "image") {

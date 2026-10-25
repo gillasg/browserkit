@@ -105,6 +105,57 @@ test(
         );
         return;
       }
+      if (request.url?.startsWith("/api/origin")) {
+        response.setHeader("content-type", "application/json");
+        response.end(
+          JSON.stringify({
+            referer: request.headers.referer ?? null,
+            origin: request.headers.origin ?? null,
+          }),
+        );
+        return;
+      }
+      if (request.url?.startsWith("/api/echo")) {
+        let body = "";
+        request.on("data", (chunk) => (body += chunk));
+        request.on("end", () => {
+          response.setHeader("content-type", "application/json");
+          response.end(JSON.stringify({ method: request.method, body }));
+        });
+        return;
+      }
+      if (request.url?.startsWith("/slow")) {
+        setTimeout(() => {
+          response.setHeader("content-type", "text/html");
+          response.end("<title>Slow</title>slow");
+        }, 3000);
+        return;
+      }
+      if (request.url?.startsWith("/media/stream.m3u8")) {
+        response.setHeader("content-type", "application/vnd.apple.mpegurl");
+        response.end("#EXTM3U\n#EXT-X-VERSION:3\n");
+        return;
+      }
+      if (request.url?.startsWith("/hls")) {
+        response.setHeader("content-type", "text/html");
+        response.end(
+          `<title>HLS</title><video id="v" muted></video>
+          <script>fetch("/media/stream.m3u8").catch(() => {}); window.publicFunction = (a, b) => a + b;</script>`,
+        );
+        return;
+      }
+      if (request.url?.startsWith("/provider")) {
+        response.setHeader("content-type", "text/html");
+        response.end(
+          `<title>Provider</title>
+          <div class="ql-editor" contenteditable="true"></div>
+          <button aria-label="Send message" onclick="setTimeout(() => {
+            document.querySelector('message-content').textContent = 'answer: ' + document.querySelector('.ql-editor').innerText;
+          }, 200)">Send</button>
+          <model-response><message-content></message-content></model-response>`,
+        );
+        return;
+      }
       if (request.url?.startsWith("/api/language")) {
         response.setHeader("content-type", "application/json");
         response.end(JSON.stringify({ language: request.headers["accept-language"] }));
@@ -474,6 +525,66 @@ test(
         );
         assert.match(unknown, /PROVIDER_UNKNOWN/);
       });
+
+      await t.test(
+        "the browser surfaces answer DNS, media, functions and workspace reads",
+        async () => {
+          const cell = (code) =>
+            run(process.execPath, [cli, "repl", "--session", "surfaces", code], { env });
+          const { stdout } = await cell(`
+          page = await browser.openTab(${JSON.stringify(siteUrl + "hls")});
+          await page.waitForTimeout(1200);
+          const manifest = await page.media.manifest();
+          const funcs = await page.functions();
+          const dns = await page.dns();
+          await page.setExtraHTTPHeaders({ "accept-language": "fr-FR" });
+          const language = await page.evaluate(() => fetch("/api/language").then((reply) => reply.json()));
+          const origin = await browser.fetch(${JSON.stringify(siteUrl + "api/origin")}, { asOrigin: true }).then((reply) => reply.json);
+          const echo = await browser.fetch(${JSON.stringify(siteUrl + "api/echo")}, { method: "POST", json: { hello: "world" } }).then((reply) => reply.json);
+          const exported = await page.network.export({ match: "stream.m3u8" });
+          await artifact("hello.txt", "from the workspace");
+          const read = await browser.workspace.read("hello.txt");
+          const listed = await browser.workspace.list("");
+          const slow = await page.navigate(${JSON.stringify(siteUrl + "slow")}, { timeoutMs: 900 });
+          console.log("SURFACES " + JSON.stringify({
+            manifest,
+            funcs: funcs.filter((fn) => fn.name === "publicFunction"),
+            dns,
+            language,
+            origin,
+            echo,
+            exported: exported.requests.map((item) => ({ method: item.method, url: item.url })),
+            read,
+            listed: listed.map((entry) => entry.name),
+            slow,
+          }));`);
+          const value = JSON.parse(/SURFACES (.*)/.exec(stdout)[1]);
+          assert.equal(value.manifest.kind, "hls", stdout);
+          assert.match(value.manifest.url, /stream\.m3u8/, stdout);
+          assert.deepEqual(value.funcs, [{ name: "publicFunction", arity: 2 }], stdout);
+          assert.equal(value.dns.address, "127.0.0.1", stdout);
+          assert.equal(value.language.language, "fr-FR", stdout);
+          assert.match(String(value.origin.referer), /127\.0\.0\.1/, stdout);
+          assert.equal(value.echo.body, JSON.stringify({ hello: "world" }), stdout);
+          assert.ok(
+            value.exported.some((item) => item.url.includes("stream.m3u8")),
+            stdout,
+          );
+          assert.equal(value.read, "from the workspace", stdout);
+          assert.ok(value.listed.includes("hello.txt"), stdout);
+          assert.ok(value.slow?.timedOut === true || value.slow?.data?.timedOut === true, stdout);
+
+          const kept = await cell(
+            `page = await browser.keepPage(${JSON.stringify(siteUrl + "?kept-warm")}); page.target.tabId`,
+          );
+          const keptId = Number(/(\d+)\s*$/.exec(kept.stdout)?.[1]);
+          assert.ok(Number.isInteger(keptId), kept.stdout);
+          const again = await cell(
+            `page = await browser.keepPage(${JSON.stringify(siteUrl + "?kept-warm")}); page.target.tabId`,
+          );
+          assert.match(again.stdout, new RegExp(`\\b${keptId}\\b`), again.stdout);
+        },
+      );
 
       await t.test(
         "browser results count the tabs a run owns, and reset keeps only kept tabs",

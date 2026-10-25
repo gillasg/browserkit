@@ -250,7 +250,7 @@ export async function performExtra(
       if (step.op === "navigate") {
         // Recorded from the first request, so page.network.list() has the new page's calls.
         await captureFromTabStart(tabId);
-        return navigateReady(tabId, step.url);
+        return navigateReady(tabId, step.url, step.timeoutMs);
       }
       if (step.op === "diagnostics") {
         await enableConsoleCapture(tabId);
@@ -565,7 +565,7 @@ async function openTab(
     step.ownerTitle ?? ownerTitle(request.chatId),
   );
   if (step.quiet) await enableQuietTab(created.id);
-  const navigation = await navigateOpenedTab(created.id, step.url);
+  const navigation = await navigateOpenedTab(created.id, step.url, step.timeoutMs);
   assertRequestActive(request);
   const tab = await refreshInventoryTab(created.id);
   if (!tab || !sameIdentity(tab.target, identity)) throw new Error("TARGET_LOST");
@@ -582,11 +582,15 @@ async function openTab(
  * tab behind: it belongs to this run, so it is reported (navigation: "failed", reason) rather
  * than thrown away as an untracked stray.
  */
-async function navigateOpenedTab(tabId: number, url: string): Promise<string | undefined> {
+async function navigateOpenedTab(
+  tabId: number,
+  url: string,
+  timeoutMs?: number,
+): Promise<string | undefined> {
   try {
     await withBrowserDebugger(tabId, async () => {
       await captureFromTabStart(tabId);
-      await navigateReady(tabId, url);
+      await navigateReady(tabId, url, timeoutMs);
     });
     return undefined;
   } catch (error) {

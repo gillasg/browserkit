@@ -489,6 +489,22 @@ function __pageMedia() {
   var meta = navigator.mediaSession && navigator.mediaSession.metadata;
   return {title: document.title, ...(meta ? {session: {title: meta.title, artist: meta.artist, album: meta.album, state: navigator.mediaSession.playbackState}} : {}), media: media.slice(0, 20)};
 }
+async function __mediaManifest(target) {
+  for (var [extension, kind] of [['.m3u8', 'hls'], ['.mpd', 'dash']]) {
+    var entries = await __call({network:'list', target, match: extension}).catch(() => []);
+    var hit = entries.find((entry) => String(entry.url || '').toLowerCase().includes(extension));
+    if (!hit) continue;
+    var full = await __call({network:'get', target, id:hit.id}).catch(() => undefined);
+    return {
+      kind,
+      url: (full && full.url) || hit.url,
+      mimeType: (full && full.mimeType) || hit.mimeType || null,
+      requestHeaders: (full && full.requestHeaders) || {},
+      responseHeaders: (full && full.responseHeaders) || {},
+    };
+  }
+  return null;
+}
 async function __mediaInspect(target) {
   var result = await browser.page(target).inspect(__pageMedia);
   // Embedded players (YouTube, Vimeo, Spotify) play inside their own iframe.
@@ -563,7 +579,11 @@ function __extendPageControls(target, base) {
     }),
     batch: (steps, options = {}) => __batch(target, steps, options),
     overlays: Object.freeze({dismiss: (options = {}) => __dismissOverlays(target, options)}),
-    media: Object.freeze({inspect: () => __mediaInspect(target)}),
+    media: Object.freeze({
+      inspect: () => __mediaInspect(target),
+      // The first HLS (.m3u8) or DASH (.mpd) manifest this tab requested, with its headers.
+      manifest: () => __mediaManifest(target),
+    }),
     challenges: () => __challenges(target),
   });
 }

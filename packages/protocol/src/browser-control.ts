@@ -28,6 +28,8 @@ export const BrowserStepSchema = z.discriminatedUnion("op", [
       present: z.boolean().optional(),
       /** What the host calls the owner's tab group (a chat title, "Routine · …", "Mapping"). */
       ownerTitle: z.string().min(1).max(120).optional(),
+      /** How long to wait for the page to load; a slow page is reported, not waited on forever. */
+      timeoutMs: z.number().int().min(500).max(120000).optional(),
       // A separate, visible window of this size (e.g. for recording); otherwise a tab in the current window.
       window: z
         .object({
