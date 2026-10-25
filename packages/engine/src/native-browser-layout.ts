@@ -78,6 +78,15 @@ async function alignTabs(tabs: SplitTabs, chat: SplitTab, target: SplitTab): Pro
   // older run left the chat in an agent group, take it out.
   if (isAgentGroupId(chat.groupId)) await tabs.ungroup(chat.id).catch(() => undefined);
   if (isAgentGroupId(current.groupId)) await tabs.ungroup(target.id).catch(() => undefined);
+  // Chrome pairs tabs in one group. A chat that has its own group keeps it and the agent tab
+  // joins that group; a chat with no group never joins the agent's — the agent tab is taken out
+  // instead, so a tab opened from the chat cannot inherit an agent group.
+  const chatNow = await tabs.get(chat.id);
+  const targetNow = await tabs.get(target.id);
+  if (chatNow.groupId >= 0 && targetNow.groupId !== chatNow.groupId)
+    await tabs.group({ tabIds: [target.id], groupId: chatNow.groupId }).catch(() => undefined);
+  else if (chatNow.groupId < 0 && targetNow.groupId >= 0)
+    await tabs.ungroup(target.id).catch(() => undefined);
   await makeAdjacent(tabs, chat.id, target.id);
 }
 async function makeAdjacent(tabs: SplitTabs, chatId: number, targetId: number): Promise<void> {
