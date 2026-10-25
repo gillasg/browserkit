@@ -289,17 +289,32 @@ export function validateRecipe(value: unknown): SiteRecipe {
   return { ...recipe, version: 1, createdAt: recipe.createdAt ?? now(), updatedAt: now() };
 }
 
+const STRATEGY_CHECKS: Record<
+  RecipeStrategy["kind"],
+  (name: string, strategy: RecipeStrategy) => void
+> = {
+  api: (name, strategy) => {
+    if (strategy.kind === "api" && !strategy.operation)
+      throw new Error(`Recipe ${name}: an api strategy needs an operation`);
+  },
+  collect: (name, strategy) => {
+    if (strategy.kind === "collect" && !strategy.collect?.row)
+      throw new Error(`Recipe ${name}: a collect strategy needs a row selector`);
+  },
+  script: (name, strategy) => {
+    if (strategy.kind === "script" && !strategy.code)
+      throw new Error(`Recipe ${name}: a script strategy needs code`);
+  },
+  workflow: (name, strategy) => {
+    if (strategy.kind === "workflow" && !strategy.name && !strategy.workflow)
+      throw new Error(`Recipe ${name}: a workflow strategy needs a workflow name or definition`);
+  },
+};
+
 function validateStrategy(name: string, strategy: RecipeStrategy): void {
   if (!strategy || typeof strategy !== "object")
     throw new Error(`Recipe ${name} has an invalid strategy`);
-  if (strategy.kind === "api" && !strategy.operation)
-    throw new Error(`Recipe ${name}: an api strategy needs an operation`);
-  if (strategy.kind === "collect" && !strategy.collect?.row)
-    throw new Error(`Recipe ${name}: a collect strategy needs a row selector`);
-  if (strategy.kind === "script" && !strategy.code)
-    throw new Error(`Recipe ${name}: a script strategy needs code`);
-  if (strategy.kind === "workflow" && !strategy.name && !strategy.workflow)
-    throw new Error(`Recipe ${name}: a workflow strategy needs a workflow name or definition`);
+  STRATEGY_CHECKS[strategy.kind]?.(name, strategy);
 }
 
 function strategyPagination(recipe: SiteRecipe): RecipePagination | undefined {

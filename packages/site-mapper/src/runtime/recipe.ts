@@ -252,18 +252,22 @@ async function collectWorkflow(
 /** The records a workflow returned: an array, {records}, a run record, or its last step. */
 function workflowRecords(value: unknown, keys?: string[]): unknown[] {
   if (Array.isArray(value)) return value;
-  if (value && typeof value === "object") {
-    const record = value as Record<string, unknown>;
-    if (Array.isArray(record.records)) return record.records;
-    if (record.value !== undefined && record.value !== value)
-      return workflowRecords(record.value, keys);
-    if (Array.isArray(record.steps) && record.steps.length) {
-      const last = record.steps[record.steps.length - 1] as Record<string, unknown> | undefined;
-      return workflowRecords(last?.result ?? last, keys);
-    }
-    if (keys?.length) return findRecords(value, keys);
-  }
+  if (!value || typeof value !== "object") return [];
+  const record = value as Record<string, unknown>;
+  if (Array.isArray(record.records)) return record.records;
+  if (record.value !== undefined && record.value !== value)
+    return workflowRecords(record.value, keys);
+  const last = lastStepResult(record);
+  if (last !== undefined) return workflowRecords(last, keys);
+  if (keys?.length) return findRecords(value, keys);
   return [];
+}
+
+/** The result of the last step of a run record, if this is one. */
+function lastStepResult(record: Record<string, unknown>): unknown {
+  if (!Array.isArray(record.steps) || !record.steps.length) return undefined;
+  const last = record.steps[record.steps.length - 1] as Record<string, unknown> | undefined;
+  return last?.result ?? last;
 }
 
 async function collectRows(
