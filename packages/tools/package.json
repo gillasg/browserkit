@@ -24,10 +24,19 @@
     "./definitions": {
       "types": "./dist/definitions.d.ts",
       "import": "./dist/definitions.js"
+    },
+    "./workflow": {
+      "types": "./dist/workflow.d.ts",
+      "import": "./dist/workflow.js"
+    },
+    "./workflow-store": {
+      "types": "./dist/workflow-store.d.ts",
+      "import": "./dist/workflow-store.js"
     }
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json"
+    "build": "tsc -p tsconfig.json",
+    "test": "node --test test/*.test.mjs"
   },
   "dependencies": {
     "browser-crawl": "workspace:*",

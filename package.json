@@ -13,6 +13,7 @@
     "test:boosts": "pnpm --filter site-boosts test:unit",
     "test:boosts:e2e": "pnpm --filter site-boosts test:e2e",
     "test:site-mapper": "pnpm --filter @browserkit/site-mapper test:unit",
+    "test:workflows": "pnpm --filter @browserkit/tools test",
     "test:crawl": "pnpm --filter browser-crawl test",
     "agent-text": "node scripts/build-agent-text.mjs",
     "agent-text:check": "node scripts/build-agent-text.mjs --check",

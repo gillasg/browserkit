@@ -10,6 +10,7 @@ export interface Args {
 const BOOLEAN = new Set([
   "all",
   "actions",
+  "dry-run",
   "explore",
   "first-wins",
   "help",

@@ -16,6 +16,7 @@ import { blockGroup } from "./block-sites.js";
 import { signinCommand } from "./signin.js";
 import { packCommand } from "./pack.js";
 import { useGroup } from "./site-use.js";
+import { workflowCommand } from "./workflow.js";
 
 // Every capability the MCP tools and the bundled packages have, as a command.
 export const COMMANDS: Command[] = [
@@ -34,4 +35,5 @@ export const COMMANDS: Command[] = [
   signinCommand,
   boostsCommand,
   packCommand,
+  workflowCommand,
 ];
