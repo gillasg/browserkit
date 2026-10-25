@@ -37,6 +37,14 @@
       "types": "./dist/providers.d.ts",
       "import": "./dist/providers.js"
     },
+    "./providers-run": {
+      "types": "./dist/providers-run.d.ts",
+      "import": "./dist/providers-run.js"
+    },
+    "./action": {
+      "types": "./dist/action.d.ts",
+      "import": "./dist/action.js"
+    },
     "./jobs": {
       "types": "./dist/jobs.d.ts",
       "import": "./dist/jobs.js"

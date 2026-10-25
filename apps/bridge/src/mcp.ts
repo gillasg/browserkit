@@ -3,6 +3,11 @@ import { BridgeClient } from "./client.js";
 import { browserCodeDescription } from "./guidance.js";
 import { formatResult } from "./format.js";
 import { callWebTool, webTools } from "./web-tools.js";
+import {
+  browserActionCode,
+  browserActionDescription,
+  browserActionSchema,
+} from "@browserkit/tools/action";
 
 // A stdio MCP server (JSON-RPC 2.0, one message per line) exposing the browser to any MCP client.
 type Json = Record<string, unknown>;
@@ -36,94 +41,10 @@ const tools = [
   },
   {
     name: "browser_action",
-    description:
-      'One browser action without writing code: navigate, click, type, press, scroll, wait, extract, screenshot, evaluate, back, forward, reload or tabs. Use browser_code for anything that needs several steps or its own logic; this tool does not replace it. Example: {"action":"click","selector":"button[type=submit]"}. Returns the page title and URL after the action, plus the read text or the saved screenshot.',
-    inputSchema: {
-      type: "object",
-      properties: {
-        action: {
-          type: "string",
-          enum: [
-            "navigate",
-            "click",
-            "type",
-            "press",
-            "scroll",
-            "wait",
-            "extract",
-            "screenshot",
-            "evaluate",
-            "back",
-            "forward",
-            "reload",
-            "tabs",
-          ],
-          description: "What to do.",
-        },
-        url: { type: "string", description: "For navigate: the page to open." },
-        selector: {
-          type: "string",
-          description:
-            "For click, type, press, wait, extract and screenshot: a CSS selector (or text=label).",
-        },
-        text: {
-          type: "string",
-          description: "For type: the text to enter. For press: a key name. For scroll: pixels.",
-        },
-        code: { type: "string", description: "For evaluate: JavaScript to run in the page." },
-        tab: { type: "integer", description: "Optional tab id from browser_tabs." },
-        session: { type: "string", description: "Optional REPL session name." },
-        timeoutMs: { type: "integer", minimum: 1000, maximum: 600000 },
-      },
-      required: ["action"],
-      additionalProperties: false,
-    },
+    description: browserActionDescription,
+    inputSchema: browserActionSchema,
   },
 ];
-
-function actionCode(args: Json): string {
-  const action = String(args.action ?? "");
-  const selector = args.selector === undefined ? "" : String(args.selector);
-  const text = args.text === undefined ? "" : String(args.text);
-  const choose =
-    args.tab === undefined ? "" : `page = await browser.getTab(${Number(args.tab)});\n`;
-  const target = selector ? `page.locator(${JSON.stringify(selector)})` : "page";
-  switch (action) {
-    case "navigate":
-      if (!args.url) throw new Error("navigate needs url");
-      return `page = await browser.openTab(${JSON.stringify(String(args.url))});`;
-    case "click":
-      if (!selector) throw new Error("click needs selector");
-      return `${choose}await page.locator(${JSON.stringify(selector)}).first().click();`;
-    case "type":
-      if (!selector) throw new Error("type needs selector");
-      return `${choose}await page.locator(${JSON.stringify(selector)}).first().fill(${JSON.stringify(text)});`;
-    case "press":
-      if (!text) throw new Error("press needs text (a key name)");
-      return `${choose}await page.keyboard.press(${JSON.stringify(text)});`;
-    case "scroll":
-      return `${choose}await page.scroll({ deltaY: ${Number(text) || 600} });`;
-    case "wait":
-      return `${choose}${selector ? `await page.locator(${JSON.stringify(selector)}).first().waitFor({ timeout: ${Number(args.timeoutMs) || 20000} });` : `await page.waitForTimeout(${Number(text) || 1000});`}`;
-    case "extract":
-      return `${choose}const values = await page.locator(${JSON.stringify(selector || "body")}).allTextContents();\nvalues.map((item) => item.trim()).filter(Boolean)`;
-    case "screenshot":
-      return `${choose}const shot = await page.screenshot({ fullPage: true });\nawait artifact("browser-action.png", shot);\n"saved browser-action.png";`;
-    case "evaluate":
-      if (!args.code) throw new Error("evaluate needs code");
-      return `${choose}await page.evaluate(${JSON.stringify(String(args.code))});`;
-    case "back":
-      return `${choose}await page.goBack();`;
-    case "forward":
-      return `${choose}await page.goForward();`;
-    case "reload":
-      return `${choose}await page.reload();`;
-    case "tabs":
-      return "browser.tabs().then((tabs) => tabs.map((tab) => ({ id: tab.id, title: tab.title, url: tab.url, mine: tab.mine })))";
-    default:
-      throw new Error(`unknown action: ${action}`);
-  }
-}
 
 export async function runMcpServer(): Promise<void> {
   let client: BridgeClient | undefined;
@@ -173,7 +94,7 @@ async function handle(message: Json, bridge: () => Promise<BridgeClient>): Promi
     return { content: [{ type: "text", text: JSON.stringify(reply.tabs ?? [], null, 2) }] };
   }
   if (params.name === "browser_action") {
-    const code = actionCode(args);
+    const code = browserActionCode(args as never);
     const session = typeof args.session === "string" ? args.session : "mcp";
     const timeoutMs = typeof args.timeoutMs === "number" ? args.timeoutMs : undefined;
     const result = await client.request("run", {

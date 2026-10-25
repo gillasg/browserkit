@@ -2,7 +2,11 @@ import { BridgeClient } from "../client.js";
 import { flag, has, type Args } from "../args.js";
 import { out } from "../output.js";
 import type { Command } from "../usage.js";
-import { imagePrompt, imageScript, youtubePrompt } from "@browserkit/tools/providers";
+import {
+  analyseYoutubeWith,
+  generateImageWith,
+  type CodeRunner,
+} from "@browserkit/tools/providers-run";
 
 // Gemini media: an image to generate or edit, and a YouTube video to analyse. Both are the same
 // page: the prompt is typed into Gemini, and the answer is either an image saved into the
@@ -21,6 +25,8 @@ async function inBrowser(code: string, timeoutMs = 240_000): Promise<unknown> {
   }
 }
 
+const run: CodeRunner = (code, options) => inBrowser(code, options?.timeoutMs ?? 240_000);
+
 async function image(args: Args): Promise<number> {
   const prompt = args.positional.slice(1).join(" ");
   if (!prompt)
@@ -31,15 +37,13 @@ async function image(args: Args): Promise<number> {
         .map((item) => item.trim())
         .filter(Boolean)
     : [];
-  const outName = String(flag(args, "out") ?? "gemini-image.png");
-  const timeoutMs = Math.min(Math.max(Number(flag(args, "timeout") ?? 180_000), 10_000), 300_000);
-  const text = imagePrompt(prompt, { edit: images.length > 0, images });
-  const code = `page = await browser.openTab("https://gemini.google.com/app", { newTab: true });
-await page.waitForTimeout(1200);
-${imageScript(text, { out: outName, images, timeoutMs })}`;
-  const result = (await inBrowser(code, timeoutMs + 30_000)) as { saved?: string };
-  if (!result?.saved) throw new Error("MEDIA_EMPTY: Gemini returned no image");
-  if (has(args, "json")) out(JSON.stringify({ saved: result.saved, prompt: text }));
+  const timeout = flag(args, "timeout");
+  const result = await generateImageWith(run, prompt, {
+    images,
+    ...(flag(args, "out") ? { out: String(flag(args, "out")) } : {}),
+    ...(timeout ? { timeoutMs: Number(timeout) } : {}),
+  });
+  if (has(args, "json")) out(JSON.stringify(result));
   else out(`Saved ${result.saved}.`);
   return 0;
 }
@@ -50,27 +54,12 @@ async function youtube(args: Args): Promise<number> {
   const question = String(
     flag(args, "ask") ?? "Summarise the video with timestamps for the key points.",
   );
-  const prompt = youtubePrompt(url, question);
-  const timeoutMs = Math.min(Math.max(Number(flag(args, "timeout") ?? 180_000), 10_000), 300_000);
-  const code = `page = await browser.openTab("https://gemini.google.com/app", { newTab: true });
-await page.waitForTimeout(1200);
-const prompt = ${JSON.stringify(prompt)};
-const composer = page.locator(".ql-editor[contenteditable='true']").first();
-await composer.click();
-await composer.fill(prompt);
-await page.locator("button[aria-label*='Send']").first().click();
-let last = "", stable = 0;
-const deadline = Date.now() + ${timeoutMs};
-while (Date.now() < deadline) {
-  await page.waitForTimeout(1000);
-  const text = (await page.locator("model-response message-content, .model-response-text").allTextContents()).join("\\n").trim();
-  if (text && text === last) { if (++stable >= 3) break; } else { last = text; stable = 0; }
-}
-if (!last) throw new Error("PROVIDER_TIMEOUT: Gemini returned no analysis; the page may have changed");
-last`;
-  const text = await inBrowser(code, timeoutMs + 30_000);
-  if (has(args, "json")) out(JSON.stringify({ url, question, text }));
-  else out(String(text));
+  const timeout = flag(args, "timeout");
+  const result = await analyseYoutubeWith(run, url, question, {
+    ...(timeout ? { timeoutMs: Number(timeout) } : {}),
+  });
+  if (has(args, "json")) out(JSON.stringify({ url, question, ...result }));
+  else out(result.text);
   return 0;
 }
 

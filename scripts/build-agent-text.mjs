@@ -86,8 +86,8 @@ function commonSections(sections) {
   return ["02-which-way", "03-browser-code", "04-reading", "05-forms", "06-signin"]
     .map((name) => sections.get(name))
     .concat(
-      ["07-blocked", "08-sites", "09-sessions", "10-habits", "11-pack"].map((name) =>
-        sections.get(name),
+      ["07-blocked", "08-sites", "09-sessions", "10-habits", "11-pack", "12-providers"].map(
+        (name) => sections.get(name),
       ),
     );
 }

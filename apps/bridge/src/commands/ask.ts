@@ -6,15 +6,11 @@ import type { Command } from "../usage.js";
 import {
   PROVIDER_IDS,
   PROVIDERS,
-  askDirect,
-  cookieHeader,
   isProviderId,
-  providerFor,
   transportSummary,
-  uiScript,
   validateModel,
-  type ProviderAnswer,
 } from "@browserkit/tools/providers";
+import { askProviderWith, type CodeRunner } from "@browserkit/tools/providers-run";
 
 // Asking a chat provider: the direct request first (the user's cookies, no page), then the page
 // itself. Cookies never leave this process except in the provider request; nothing prints them.
@@ -32,18 +28,8 @@ async function inBrowser(code: string, timeoutMs = 180_000): Promise<unknown> {
   }
 }
 
-async function providerCookies(host: string, domains: string[]): Promise<string> {
-  const code = `(async () => {
-  const domains = ${JSON.stringify(domains)};
-  const all = [];
-  for (const domain of domains) {
-    const listed = await browser.cookies.list({ domain, values: true }).catch(() => ({ cookies: [] }));
-    for (const cookie of listed.cookies || []) if (cookie.value !== undefined) all.push({ name: cookie.name, value: cookie.value });
-  }
-  return all;
-})()`;
-  return cookieHeader((await inBrowser(code, 60_000)) as { name: string; value: string }[]);
-}
+/** The host side of a provider call: one browser_code cell in this session. */
+const run: CodeRunner = (code, options) => inBrowser(code, options?.timeoutMs ?? 180_000);
 
 async function promptFrom(args: Args): Promise<string> {
   const given = flag(args, "prompt");
@@ -56,65 +42,6 @@ async function promptFrom(args: Args): Promise<string> {
   return joined;
 }
 
-async function uiAnswer(
-  provider: ReturnType<typeof providerFor>,
-  prompt: string,
-  timeoutMs: number,
-): Promise<string> {
-  const code = `page = await browser.openTab(${JSON.stringify(provider.chatUrl)}, { newTab: true });
-await page.waitForTimeout(1200);
-${uiScript(provider.id, prompt, { timeoutMs })}`;
-  const text = await inBrowser(code, Math.min(timeoutMs + 30_000, 330_000));
-  return typeof text === "string" ? text : JSON.stringify(text);
-}
-
-export async function askProvider(
-  providerId: string,
-  prompt: string,
-  options: { model?: string; timeoutMs?: number; transport?: "auto" | "direct" | "ui" } = {},
-): Promise<ProviderAnswer> {
-  const provider = providerFor(providerId);
-  const model = validateModel(provider.id, options.model).model;
-  const timeoutMs = Math.min(Math.max(options.timeoutMs ?? 120_000, 5000), 300_000);
-  if (options.transport !== "ui") {
-    const cookies = await providerCookies(provider.host, provider.cookieDomains);
-    if (!cookies)
-      return {
-        ok: false,
-        provider: provider.id,
-        transport: "direct",
-        text: "",
-        model,
-        reason: "signed-out",
-        elapsedMs: 0,
-      };
-    const direct = await askDirect(provider.id, { prompt, model, cookies, timeoutMs });
-    if (direct.ok || options.transport === "direct") return direct;
-    if (options.transport === "auto") {
-      const text = await uiAnswer(provider, prompt, timeoutMs);
-      return {
-        ok: true,
-        provider: provider.id,
-        transport: "ui",
-        text,
-        model,
-        elapsedMs: direct.elapsedMs,
-        ...(direct.reason ? { detail: direct.reason } : {}),
-      };
-    }
-  }
-  const started = Date.now();
-  const text = await uiAnswer(provider, prompt, timeoutMs);
-  return {
-    ok: true,
-    provider: provider.id,
-    transport: "ui",
-    text,
-    model,
-    elapsedMs: Date.now() - started,
-  };
-}
-
 async function ask(args: Args): Promise<number> {
   const providerId = args.positional[0];
   if (!providerId) throw new Error(`Usage: browserkit ask <${PROVIDER_IDS.join("|")}> "<prompt>"`);
@@ -124,7 +51,7 @@ async function ask(args: Args): Promise<number> {
   const transport = has(args, "ui") ? "ui" : has(args, "direct") ? "direct" : "auto";
   const model = flag(args, "model");
   const timeout = flag(args, "timeout");
-  const answer = await askProvider(providerId, prompt, {
+  const answer = await askProviderWith(run, providerId, prompt, {
     ...(model ? { model } : {}),
     ...(timeout ? { timeoutMs: Number(timeout) } : {}),
     transport,
