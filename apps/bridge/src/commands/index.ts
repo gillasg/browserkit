@@ -22,6 +22,8 @@ import { cookiesCommand } from "./cookies.js";
 import { networkCommand } from "./network.js";
 import { sessionCommand } from "./session.js";
 import { commandsCommand } from "./help.js";
+import { windowsCommand, zoomCommand } from "./windows.js";
+import { recordCommand } from "./record.js";
 
 // Every capability the MCP tools and the bundled packages have, as a command.
 export const COMMANDS: Command[] = [
@@ -45,5 +47,8 @@ export const COMMANDS: Command[] = [
   cookiesCommand,
   networkCommand,
   sessionCommand,
+  windowsCommand,
+  zoomCommand,
+  recordCommand,
   commandsCommand,
 ];

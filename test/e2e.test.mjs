@@ -6,7 +6,7 @@ import { createServer } from "node:http";
 import { dataRoutes } from "./data-site.mjs";
 import { LOGIN, fakeBitwarden, loginRoutes } from "./login-site.mjs";
 import { existsSync } from "node:fs";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -1444,6 +1444,108 @@ test(
         assert.equal(typeof result.perf.metrics.TaskDuration, "number");
         assert.equal(Array.isArray(result.animations.animations), true);
         assert.ok(result.windows.windows.length >= 1);
+      });
+
+      await t.test("auto screenshots, diffs and saved HTML respond to the repl flags", async () => {
+        const { stdout } = await run(
+          process.execPath,
+          [
+            cli,
+            "repl",
+            "--session",
+            "phase3b",
+            "--screenshot",
+            "--settle",
+            "300",
+            "--full",
+            `page = await browser.openTab(${JSON.stringify(siteUrl + "catalog")});
+            await page.locator("#q").fill("alpha");
+            await page.locator("#q").fill("beta");
+            const auto = page.autoState();
+            const saved = await page.saveHtml("snapshot.html");
+            console.log("RESULT " + JSON.stringify({ auto, saved }))`,
+          ],
+          { env },
+        );
+        const result = JSON.parse(/RESULT (.*)/.exec(stdout)?.[1] ?? "null");
+        assert.ok(result, stdout);
+        assert.equal(result.auto.on, true);
+        assert.ok(result.auto.shots.length >= 2, JSON.stringify(result.auto));
+        assert.ok(result.auto.shots.every((shot) => typeof shot.name === "string"));
+        assert.ok(
+          result.auto.shots.some((shot) => shot.diff && shot.diff.changedPixels > 0),
+          JSON.stringify(result.auto),
+        );
+        assert.equal(result.saved.saved, "snapshot.html");
+        const directories = await readdir(join(home, "workspaces"));
+        const file = directories
+          .map((directory) => join(home, "workspaces", directory, "snapshot.html"))
+          .find((candidate) => existsSync(candidate));
+        assert.ok(file, "saved HTML is a workspace file");
+        const html = await readFile(file, "utf8");
+        assert.match(html, /Catalog/);
+      });
+
+      await t.test("no-screenshot and no-diff switch the automatic work off", async () => {
+        const { stdout } = await run(
+          process.execPath,
+          [
+            cli,
+            "repl",
+            "--session",
+            "phase3b-off",
+            "--screenshot",
+            "--no-screenshot",
+            "--no-diff",
+            `page = await browser.openTab(${JSON.stringify(siteUrl)}); await page.getByRole("button", { name: "Buy" }).click(); console.log("RESULT " + JSON.stringify(page.autoState()))`,
+          ],
+          { env },
+        );
+        const result = JSON.parse(/RESULT (.*)/.exec(stdout)?.[1] ?? "null");
+        assert.ok(result, stdout);
+        assert.equal(result.screenshots, false);
+        assert.equal(result.diff, false);
+        assert.equal(result.shots.length, 0);
+      });
+
+      await t.test("windows and zoom answer from the CLI", async () => {
+        const listed = JSON.parse(
+          (await run(process.execPath, [cli, "windows", "list", "--json"], { env })).stdout,
+        );
+        assert.ok(listed.windows.length >= 1, JSON.stringify(listed));
+        const zoom = JSON.parse(
+          (await run(process.execPath, [cli, "zoom", "1.2", "--json"], { env })).stdout,
+        );
+        assert.equal(zoom.factor, 1.2);
+        const reset = JSON.parse(
+          (await run(process.execPath, [cli, "zoom", "reset", "--json"], { env })).stdout,
+        );
+        assert.equal(reset.factor, 1);
+      });
+
+      await t.test("recording without an encoder fails with install instructions", async () => {
+        const failure = await run(
+          process.execPath,
+          [
+            cli,
+            "record",
+            "gif",
+            siteUrl,
+            "--seconds",
+            "2",
+            "--fps",
+            "2",
+            "--out",
+            join(home, "phase3b.gif"),
+          ],
+          { env: { ...env, FFMPEG_PATH: "no-such-ffmpeg-binary" } },
+        ).then(
+          () => undefined,
+          (error) => error,
+        );
+        assert.ok(failure, "the command fails without an encoder");
+        const message = String(failure.stdout ?? "") + String(failure.stderr ?? "");
+        assert.match(message, /ENCODER_MISSING|ffmpeg/i, message);
       });
 
       await t.test("a saved workflow runs its browser steps from the CLI", async () => {

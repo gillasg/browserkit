@@ -178,6 +178,37 @@ function __bytesFromBase64(base64) {
   return bytes;
 }
 
+// ---------- automatic screenshots and diffs after actions ----------
+var __auto = { on: false, screenshots: true, diff: true, save: true, full: false, settleMs: 0, shots: [], last: new Map(), busy: false };
+function __options(config = {}) {
+  for (var key of ['on', 'screenshots', 'diff', 'save', 'full']) if (config[key] !== undefined) __auto[key] = config[key] === true;
+  if (config.settleMs !== undefined) __auto.settleMs = Math.max(0, Math.min(Number(config.settleMs) || 0, 60000));
+  return { on: __auto.on, screenshots: __auto.screenshots, diff: __auto.diff, save: __auto.save, full: __auto.full, settleMs: __auto.settleMs };
+}
+async function __autoAfter(target, step) {
+  if (!__auto.on || __auto.busy) return;
+  __auto.busy = true;
+  try {
+    if (__auto.settleMs) { try { await browser.page(target).settle({quietMs: __auto.settleMs, timeoutMs: 10000}); } catch {} }
+    if (!__auto.screenshots) return;
+    var shot = await __step({op:'observe', target, kind:'screenshot'});
+    var data = shot && (shot.data || shot);
+    if (!data || !data.dataBase64) return;
+    var stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    var name = 'screens/' + stamp + '-after-' + String(step.op) + (__auto.full ? '-full' : '') + '.jpg';
+    if (__auto.save) await artifact(name, __bytesFromBase64(data.dataBase64));
+    var previous = __auto.last.get(__key(target));
+    var diff;
+    if (__auto.diff && previous) {
+      try { diff = await __diffScreenshot(target, previous, {}); }
+      catch (error) { diff = { error: String((error && error.message) || error) }; }
+    }
+    __auto.last.set(__key(target), data.dataBase64);
+    __auto.shots.push({ step: step.op, name: __auto.save ? name : null, at: new Date().toISOString(),
+      ...(diff ? { diff: { changedRatio: diff.changedRatio, changedPixels: diff.changedPixels, ...(diff.error ? { error: diff.error } : {}) } } : {}) });
+  } finally { __auto.busy = false; }
+}
+
 // ---------- page additions ----------
 function __extendPageSurface(target, base) {
   return Object.assign(base, {
@@ -337,6 +368,31 @@ function __extendPageSurface(target, base) {
         var entry = performance.getEntriesByType('navigation')[0];
         return entry ? { domContentLoaded: Math.round(entry.domContentLoadedEventEnd), load: Math.round(entry.loadEventEnd), ttfb: Math.round(entry.responseStart), transferSize: entry.transferSize } : null;
       }) };
+    },
+    // Writes the rendered HTML (scripts stripped by default) to a workspace file.
+    saveHtml: async (name = 'page.html', options = {}) => {
+      var html = await page.html(options);
+      await artifact(String(name), html.html);
+      return { saved: String(name), length: html.length, truncated: html.truncated === true };
+    },
+    // What automatic screenshots are set to, and the last few they took.
+    autoState: () => ({ ...__options(), shots: __auto.shots.slice(-10) }),
+    // A Chrome performance trace saved as a workspace artifact.
+    trace: async (options = {}) => {
+      var events = [];
+      var complete;
+      var done = new Promise((resolve) => { complete = resolve; });
+      var data = page.onCdp('Tracing.dataCollected', (params) => { for (var item of (params.value || [])) events.push(item); });
+      var finished = page.onCdp('Tracing.tracingComplete', () => { complete(); });
+      await page.cdp('Tracing.start', { categories: options.categories || 'devtools.timeline,v8,blink.user_timing,loading', transferMode: 'ReportEvents' });
+      await __sleep(Math.min(Math.max(Number(options.seconds) || 2, 0.5), 30) * 1000);
+      await page.cdp('Tracing.end', {});
+      await Promise.race([done, __sleep(10000)]);
+      try { await data.stop(); } catch {}
+      try { await finished.stop(); } catch {}
+      var name = String(options.out || ('traces/trace-' + Date.now() + '.json'));
+      await artifact(name, JSON.stringify({ traceEvents: events }));
+      return { saved: name, events: events.length };
     },
     // Small screenshots of icon-only controls, not the whole page.
     iconTiles: async (options = {}) => {

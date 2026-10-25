@@ -164,14 +164,17 @@ async function subscribe(
       subscriptions.delete(id);
     }
 
-  if (!step.event || !/^(Page|Network|Runtime|DOM)\.[A-Za-z]+$|^(popup|download)$/.test(step.event))
+  if (
+    !step.event ||
+    !/^(Page|Network|Runtime|DOM|Tracing)\.[A-Za-z]+$|^(popup|download)$/.test(step.event)
+  )
     throw new Error("UNSUPPORTED");
   if (step.event.startsWith("Runtime.") && debuggee.tabId !== undefined)
     await enableConsoleCapture(debuggee.tabId);
   if (subscriptions.size >= 128)
     throw new Error("Too many browser subscriptions; dispose unused listeners");
   const domain = step.event.split(".")[0];
-  if (!["popup", "download"].includes(domain ?? ""))
+  if (!["popup", "download", "Tracing"].includes(domain ?? ""))
     await chrome.debugger.sendCommand(debuggee, domain + ".enable");
   if (step.event === "Page.fileChooserOpened")
     await chrome.debugger.sendCommand(debuggee, "Page.setInterceptFileChooserDialog", {

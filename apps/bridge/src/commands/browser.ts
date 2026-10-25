@@ -14,11 +14,22 @@ import type { Command } from "../usage.js";
 async function repl(args: Args): Promise<number> {
   const code = args.positional.join(" ");
   if (!code) throw new Error('Usage: browserkit repl "<code>" [--session name] [--timeout ms]');
+  // After-action behaviour for this realm: --screenshot turns it on, --settle waits after each
+  // action, --full captures at full resolution, --no-screenshot/--no-diff switch parts off.
+  const settings: string[] = [];
+  if (has(args, "screenshot") || has(args, "full") || has(args, "settle")) settings.push("on:true");
+  if (has(args, "screenshot") || has(args, "full")) settings.push("screenshots:true", "diff:true");
+  if (has(args, "settle"))
+    settings.push(`settleMs:${Math.max(0, Number(flag(args, "settle")) || 0)}`);
+  if (has(args, "full")) settings.push("full:true");
+  if (has(args, "no-screenshot")) settings.push("screenshots:false");
+  if (has(args, "no-diff")) settings.push("diff:false");
+  const prelude = settings.length ? `__options({${settings.join(", ")}});\n` : "";
   const bridge = await BridgeClient.connect();
   try {
     const timeout = flag(args, "timeout");
     const result = await bridge.request("run", {
-      code,
+      code: prelude + code,
       session: flag(args, "session") ?? "cli",
       ...(timeout ? { timeoutMs: Number(timeout) } : {}),
     });
