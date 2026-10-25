@@ -1280,6 +1280,113 @@ test(
         assert.match(result.missing, /not mapped/);
       });
 
+      await t.test(
+        "readiness, cookies, the network store and the scheduler answer from one cell",
+        async () => {
+          const origin = new URL(siteUrl).origin;
+          const { stdout } = await run(
+            process.execPath,
+            [
+              cli,
+              "repl",
+              "--session",
+              "phase2",
+              `(async () => {
+  await browser.openTab(${JSON.stringify(siteUrl)}, {newTab: true});
+  const ready = await page.waitReady({timeoutMs: 8000});
+  await browser.cookies.set({domain: '127.0.0.1', name: 'bk_phase2', value: '1', path: '/'});
+  const listed = await browser.cookies.list({domain: '127.0.0.1'});
+  const cleared = await browser.cookies.clear({domain: '127.0.0.1'});
+  const network = await browser.network.list({origin: ${JSON.stringify(origin)}, limit: 5});
+  const origins = await browser.network.origins();
+  const scheduler = await browser.scheduler();
+  const result = {
+    ready,
+    listed: {count: listed.count, valuesHidden: listed.valuesHidden},
+    cleared: {cleared: cleared.cleared},
+    network: {count: network.count, entries: network.entries.map((entry) => ({method: entry.method, status: entry.status, url: entry.url}))},
+    origins: {count: origins.origins.length},
+    scheduler: {write: scheduler.write},
+  };
+  console.log('RESULT ' + JSON.stringify(result));
+  return 'done';
+})()`,
+            ],
+            { env },
+          );
+          const result = JSON.parse(/RESULT (.*)/.exec(stdout)?.[1] ?? "null");
+          assert.ok(result, stdout);
+          assert.ok(
+            ["ready", "empty"].includes(result.ready.state),
+            `a loaded fixture page is not loading or broken: ${JSON.stringify(result.ready)}`,
+          );
+          assert.ok(Array.isArray(result.ready.evidence) && result.ready.evidence.length > 0);
+          assert.ok(result.listed.count >= 1, "the cookie just set is listed");
+          assert.equal(result.listed.valuesHidden, true, "values are hidden unless asked");
+          assert.ok(result.cleared.cleared >= 1);
+          assert.ok(result.network.count >= 1, "the page's own requests are in the host store");
+          assert.ok(result.origins.count >= 1);
+          assert.equal(typeof result.scheduler.write.busy, "boolean");
+        },
+      );
+
+      await t.test("named sessions own a tab each and clean up after themselves", async () => {
+        const first = JSON.parse(
+          (
+            await run(
+              process.execPath,
+              [cli, "sessions", "create", "phase2-a", "--url", siteUrl, "--json"],
+              { env },
+            )
+          ).stdout,
+        );
+        const second = JSON.parse(
+          (
+            await run(
+              process.execPath,
+              [cli, "sessions", "create", "phase2-b", "--url", siteUrl, "--json"],
+              { env },
+            )
+          ).stdout,
+        );
+        assert.equal(first.name, "phase2-a");
+        assert.ok(first.tabs.length >= 1, JSON.stringify(first));
+        assert.ok(second.tabs.length >= 1, JSON.stringify(second));
+        assert.notDeepEqual(first.tabs, second.tabs, "each session has its own tab");
+
+        const info = JSON.parse(
+          (await run(process.execPath, [cli, "sessions", "info", "phase2-a", "--json"], { env }))
+            .stdout,
+        );
+        assert.deepEqual(info.tabs, first.tabs);
+        const listed = JSON.parse(
+          (await run(process.execPath, [cli, "sessions", "list", "--json"], { env })).stdout,
+        );
+        assert.ok(listed.sessions.some((session) => session.name === "phase2-a"));
+        assert.ok(listed.sessions.some((session) => session.name === "phase2-b"));
+
+        const cleaned = JSON.parse(
+          (await run(process.execPath, [cli, "sessions", "cleanup", "phase2-a", "--json"], { env }))
+            .stdout,
+        );
+        assert.ok(cleaned.closed >= 1, JSON.stringify(cleaned));
+        await run(process.execPath, [cli, "sessions", "delete", "phase2-b", "--json"], { env });
+      });
+
+      await t.test("check reports typed readiness", async () => {
+        const { stdout } = await run(
+          process.execPath,
+          [cli, "check", siteUrl, "--ready", "--json"],
+          { env, cwd: home },
+        );
+        const report = JSON.parse(stdout);
+        const result = report.results?.[0];
+        assert.ok(result, stdout);
+        assert.ok(result.readiness, JSON.stringify(result));
+        assert.ok(["ready", "empty"].includes(result.readiness.state));
+        assert.ok(result.readiness.evidence.length > 0);
+      });
+
       await t.test("a saved workflow runs its browser steps from the CLI", async () => {
         const file = join(home, "read-shop.workflow.json");
         await writeFile(

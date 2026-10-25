@@ -18,6 +18,9 @@ import { packCommand } from "./pack.js";
 import { useGroup } from "./site-use.js";
 import { workflowCommand } from "./workflow.js";
 import { recipeCommand } from "./recipe.js";
+import { cookiesCommand } from "./cookies.js";
+import { networkCommand } from "./network.js";
+import { sessionCommand } from "./session.js";
 
 // Every capability the MCP tools and the bundled packages have, as a command.
 export const COMMANDS: Command[] = [
@@ -38,4 +41,7 @@ export const COMMANDS: Command[] = [
   boostsCommand,
   packCommand,
   workflowCommand,
+  cookiesCommand,
+  networkCommand,
+  sessionCommand,
 ];

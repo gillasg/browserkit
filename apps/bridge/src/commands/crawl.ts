@@ -182,6 +182,7 @@ async function runCheck(args: Args): Promise<number> {
       via,
       ...(paths.length ? { paths } : {}),
       ...(expect ? { expect } : {}),
+      ...(has(args, "ready") ? { readiness: true } : {}),
     },
     { workspace: process.cwd() },
   )) as CheckReport;

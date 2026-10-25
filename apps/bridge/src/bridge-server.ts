@@ -14,6 +14,12 @@ import {
   type JournalTarget,
 } from "./session-journal.js";
 import { runLogPath, writeRunLog } from "./session-runs.js";
+import {
+  readNamedSession,
+  readNamedSessions,
+  removeNamedSession,
+  saveNamedSession,
+} from "./named-sessions.js";
 import { isWorkspaceRequest, validateUploadFiles, workspaceCall } from "./workspace.js";
 
 // The bridge sits between the browser (extension executors) and agents (CLI and MCP clients).
@@ -52,6 +58,9 @@ export class Bridge {
   private readonly cells = new Map<string, Cell>();
   /** Tabs each session opened, passed back as its targets on later cells. */
   private readonly sessionTargets = new Map<string, Map<string, Target>>();
+  /** One FIFO per session: a session's own cells run in the order it sent them. */
+  private readonly sessionQueues = new Map<string, Promise<unknown>>();
+  private readonly sessionQueued = new Map<string, number>();
   private restoredSessions = false;
   private saveTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -70,7 +79,129 @@ export class Bridge {
     return [...this.executors.values()].flatMap((executor) => [...executor.tabs.values()]);
   }
 
+  /** Live tabs, busy cells and queued cells for one named session. */
+  private sessionStage(session: string): { tabs: number[]; busy: number; queued: number } {
+    const live = new Set(
+      this.tabs().map((tab) => Number(tab.tabId ?? (tab.target as Json | undefined)?.tabId)),
+    );
+    const tabs = [...(this.sessionTargets.get(session)?.values() ?? [])]
+      .map((target) => target.tabId)
+      .filter((id) => live.has(id));
+    const busy = [...this.cells.values()].filter((cell) => cell.session === session).length;
+    return { tabs, busy, queued: this.sessionQueued.get(session) ?? 0 };
+  }
+
+  private async sessionList(): Promise<Json> {
+    const named = await readNamedSessions();
+    const sessions = Object.values(named).map((session) => ({
+      ...session,
+      ...this.sessionStage(sessionId(session.name)),
+    }));
+    return { sessions };
+  }
+
+  private async sessionInfo(name: string): Promise<Json> {
+    const session = await readNamedSession(name);
+    return {
+      name,
+      ...(session
+        ? {
+            mode: session.mode,
+            url: session.url,
+            createdAt: session.createdAt,
+            lastUsedAt: session.lastUsedAt,
+          }
+        : {}),
+      ...this.sessionStage(sessionId(name)),
+    };
+  }
+
+  /** Creates or reuses a session's tab (or window). Reopen always makes a new one. */
+  private async sessionOpen(request: Json, reopen: boolean): Promise<Json> {
+    const name = String(request.session ?? request.name ?? "");
+    if (!name) return { error: "SESSION_NAME: give a session name" };
+    const known = await readNamedSession(name);
+    const mode = String(request.mode ?? known?.mode ?? "tab") === "window" ? "window" : "tab";
+    const url = String(request.url ?? known?.url ?? "");
+    if (!reopen) {
+      const stage = this.sessionStage(sessionId(name));
+      if (stage.tabs.length) {
+        await saveNamedSession({
+          name,
+          mode,
+          url: known?.url ?? url,
+          createdAt: known?.createdAt ?? new Date().toISOString(),
+          lastUsedAt: new Date().toISOString(),
+        });
+        return { ...(await this.sessionInfo(name)), reused: true };
+      }
+    }
+    if (!/^https?:\/\//i.test(url))
+      return { error: "SESSION_URL: give an http(s) url to open the session on" };
+    await saveNamedSession({
+      name,
+      mode,
+      url,
+      createdAt: known?.createdAt ?? new Date().toISOString(),
+      lastUsedAt: new Date().toISOString(),
+    });
+    const id = sessionId(name);
+    const result = await this.run(
+      { session: id, timeoutMs: 60_000, code: sessionOpenCode(url, mode) },
+      () => undefined,
+    );
+    if (result.error) return { error: result.error, session: name };
+    const opened = (result.value ?? {}) as { tabId?: number; target?: Target };
+    if (opened.target) this.remember(id, opened.target);
+    else {
+      const target = this.tabs().find(
+        (tab) =>
+          Number(tab.tabId ?? (tab.target as Json | undefined)?.tabId) === Number(opened.tabId),
+      );
+      if (target) this.remember(id, target as unknown as Target);
+    }
+    return { ...(await this.sessionInfo(name)), ...(result.value as Json | undefined) };
+  }
+
+  /** Closes everything a session opened; the name stays for a later reopen. */
+  private async sessionCleanup(name: string): Promise<Json> {
+    const result = await this.run(
+      { session: name, timeoutMs: 60_000, code: sessionCloseCode() },
+      () => undefined,
+    );
+    if (typeof result.error === "string") return { name, error: result.error };
+    return { name, ...((result.value ?? {}) as Json) };
+  }
+
+  /** Queues a cell behind this session's previous one, then runs it. */
   async run(request: Json, onEvent: (event: Json) => void = () => undefined): Promise<Json> {
+    const session = sessionId(String(request.session ?? "default"));
+    this.sessionQueued.set(session, (this.sessionQueued.get(session) ?? 0) + 1);
+    const previous = this.sessionQueues.get(session) ?? Promise.resolve();
+    const job = previous.then(
+      () => this.executeRun(request, onEvent),
+      () => this.executeRun(request, onEvent),
+    );
+    this.sessionQueues.set(
+      session,
+      job.then(
+        () => undefined,
+        () => undefined,
+      ),
+    );
+    try {
+      return await job;
+    } finally {
+      const left = (this.sessionQueued.get(session) ?? 1) - 1;
+      if (left <= 0) this.sessionQueued.delete(session);
+      else this.sessionQueued.set(session, left);
+    }
+  }
+
+  private async executeRun(
+    request: Json,
+    onEvent: (event: Json) => void = () => undefined,
+  ): Promise<Json> {
     const executor = await this.pickExecutor();
     if (!executor)
       return {
@@ -241,7 +372,21 @@ export class Bridge {
         void readJournalEntries(session, limit).then((entries) => respond({ entries }));
       } else if (request.kind === "run")
         void this.run(request, (event) => send(socket, { id: request.id, ...event })).then(respond);
-      else respond({ error: "Unknown request" });
+      else if (request.kind === "session.list") void this.sessionList().then(respond);
+      else if (request.kind === "session.info")
+        void this.sessionInfo(sessionId(String(request.session ?? "default"))).then(respond);
+      else if (request.kind === "session.create" || request.kind === "session.ensure")
+        void this.sessionOpen(request, false).then(respond);
+      else if (request.kind === "session.reopen")
+        void this.sessionOpen(request, true).then(respond);
+      else if (request.kind === "session.cleanup")
+        void this.sessionCleanup(String(request.session ?? "default")).then(respond);
+      else if (request.kind === "session.delete") {
+        const name = String(request.session ?? "default");
+        void this.sessionCleanup(name)
+          .then(async (result) => ({ ...result, deleted: await removeNamedSession(name) }))
+          .then(respond);
+      } else respond({ error: "Unknown request" });
     });
   }
 
@@ -396,6 +541,27 @@ function parse(raw: RawData): Json | undefined {
 
 function send(socket: WebSocket, message: unknown): void {
   if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message));
+}
+
+/** The cell that opens a named session's tab (quiet background) or its own window, and keeps it. */
+export function sessionOpenCode(url: string, mode: "tab" | "window"): string {
+  const options = mode === "window" ? "{window:{width:1440,height:900}}" : "{quiet:true}";
+  return `(async () => {
+  const tab = await browser.openTab(${JSON.stringify(url)}, ${options});
+  return { tabId: tab.tabId ?? tab.id, url: tab.url, title: tab.title, target: tab.target };
+})()`;
+}
+
+/** The cell that closes every tab a session opened. */
+export function sessionCloseCode(): string {
+  return `(async () => {
+  const tabs = await browser.tabs();
+  let closed = 0;
+  for (const tab of tabs) {
+    try { await browser.closeTab(tab.tabId); closed += 1; } catch {}
+  }
+  return { closed };
+})()`;
 }
 
 /** Starts the bridge on a free local port and publishes its port and token. */

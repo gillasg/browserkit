@@ -97,6 +97,11 @@ browserkit recipe run x.com thread --inputs '{"url":"https://x.com/a/status/1"}'
 browserkit recipe draft shop.example --save
 browserkit recipe list x.com
 browserkit workflow runs read-thread
+browserkit sessions create research --url https://x.com/home
+browserkit sessions list
+browserkit cookies list --domain example.com
+browserkit network list --origin https://api.example.com
+browserkit check example.com --ready
 ```
 
 Every command prints what it needs with `--help`, and takes `--json` where the answer is data.
@@ -126,6 +131,23 @@ Three layers, one recipe system:
 
 Recipes are carried in site packs (`browserkit pack export/import`); workflows and recipes move
 with `workflow export/import` and `recipe export/import`.
+
+## Sessions, network, cookies and readiness
+
+- **Named sessions** (`browserkit sessions`): a name owns one quiet tab or its own window, keeps
+  its own FIFO of cells, and survives a bridge restart. `create`, `ensure`, `reopen`, `info`,
+  `cleanup` and `delete`; `list` shows live tabs, busy cells and queued work. Sessions run in
+  parallel; writes across sessions are serialized by the engine's browser-wide write lock, and
+  every step of one tab runs in order.
+- **Host-wide network store** (`browserkit network`): every finished request from every tab the
+  session used, kept for an hour in a bounded ring, so a capture survives the tab closing. Filter
+  by match, origin, method, type, status, static/dynamic and time; `get`, `body`, `curl` (secrets
+  redacted unless asked), `origins`, `stats`, `clear`, `export` (HAR).
+- **Cookies** (`browserkit cookies`): list, set, delete and clear by domain or URL. Values are
+  hidden unless `--values` is passed, so a listing does not put a session token in a terminal.
+- **Typed readiness**: `page.readiness()` and `page.waitReady()` return one of ready, empty,
+  loading, login, challenge, not-found or error with the evidence behind it. `browserkit check
+  --ready` adds it to a site check, so a walled or empty site is named instead of guessed.
 
 ## How it fits together
 
