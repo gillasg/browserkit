@@ -16,11 +16,18 @@ export interface RecipeParam {
   type?: "string" | "number" | "boolean";
 }
 
+export interface CursorSelector {
+  /** Read this from the object that matched. */
+  path: string;
+  /** The first object in the tree with this field equal to the value. */
+  where: { field: string; equals: Json };
+}
+
 export interface RecipePagination {
   /** Request parameter that carries the cursor. */
   param: string;
-  /** Response pointer to the next cursor. */
-  next: string;
+  /** Response pointer to the next cursor, or a search for the cursor object. */
+  next: string | CursorSelector;
   /** Response pointer to the items. Found automatically when absent. */
   items?: string;
   /** Response pointer that says whether more pages exist. */
@@ -30,12 +37,31 @@ export interface RecipePagination {
   maxPages?: number;
 }
 
+export interface CollectFieldSpec {
+  selector: string;
+  /** Read an attribute instead of the text. */
+  attr?: string;
+  /** Read a DOM property instead: href and src come back absolute. */
+  property?: "href" | "src" | "text";
+  /** Keep only nodes whose text contains this, before picking. */
+  contains?: string;
+  /** Regex on the text; group 1 (or `group`) is the value. */
+  match?: string;
+  flags?: string;
+  group?: number;
+  /** Every match as an array instead of the first one. */
+  all?: boolean;
+  /** Text to remove from the value. */
+  strip?: string;
+  default?: string;
+}
+
 export interface CollectRecipe {
   url?: string;
   /** CSS for one row. */
   row: string;
-  /** Field name → CSS selector; an `@attr` suffix reads an attribute, `?` marks it optional. */
-  fields: Record<string, string>;
+  /** Field name → selector string ("css", "css@attr", trailing [] for every match) or a spec. */
+  fields: Record<string, string | CollectFieldSpec>;
   scroll?: boolean;
   expand?: string[];
   max?: number;
@@ -47,8 +73,12 @@ export type RecipeStrategy =
       kind: "api";
       /** Operation id, or a distinctive part of it (resolved against the site's model). */
       operation: string;
+      /** Page to open before the call, when the request must come from that page. */
+      open?: string;
       params?: JsonObject;
       pagination?: RecipePagination;
+      /** Records buried in a GraphQL tree: every object that has all of these keys. */
+      records?: { find: { exists: string[] } };
     }
   | { kind: "collect"; collect: CollectRecipe }
   | { kind: "script"; code: string; input?: Json };
@@ -83,7 +113,26 @@ export interface SiteRecipe {
   /** Write recipes: the operation to repeat and how a repeat is detected. */
   write?: { operation?: string; receipt?: "record" | "params"; ttlDays?: number };
   /** How a feed renders this recipe as Markdown. */
-  render?: { title?: string; text?: string; author?: string; date?: string; url?: string };
+  render?: {
+    title?: string;
+    text?: string;
+    author?: string;
+    date?: string;
+    url?: string;
+    /** Mapped field holding image URLs. */
+    media?: string;
+    /** Mapped field holding a quoted record. */
+    quote?: string;
+  };
+  /** Thread recipes: keep only the opening author's posts, in order. */
+  thread?: {
+    /** Mapped field to compare. Defaults to "author". */
+    authorField?: string;
+    /** Put the post named by the input URL first. Defaults to true. */
+    rootFirst?: boolean;
+  };
+  /** Values derived from the inputs by regex before strategies run (an id from a URL). */
+  derive?: Record<string, { from: string; pattern: string; flags?: string; group?: number }>;
   source?: {
     kind: "manual" | "recorded" | "activity";
     at?: string;
@@ -460,55 +509,139 @@ function slug(text: string): string {
 
 const X_SITES = new Set(["x.com", "twitter.com", "mobile.twitter.com"]);
 
+const X_MAP: Record<string, RecipeFieldMapping> = {
+  id: { path: ["rest_id", "id"], transform: "string" },
+  author: {
+    path: [
+      "core.user_results.result.core.screen_name",
+      "core.user_results.result.legacy.screen_name",
+      "author",
+    ],
+    transform: "trim",
+  },
+  name: {
+    path: ["core.user_results.result.core.name", "core.user_results.result.legacy.name", "name"],
+  },
+  time: { path: ["legacy.created_at", "time"], transform: "iso" },
+  text: { path: ["note_tweet.note_tweet_results.result.text", "legacy.full_text", "text"] },
+  replyTo: { path: ["legacy.in_reply_to_status_id_str", "replyTo"], transform: "string" },
+  media: {
+    path: ["legacy.extended_entities.media[*].media_url_https", "media"],
+  },
+  quoted: {
+    path: ["quoted_status_result.result.tweet", "quoted_status_result.result", "quoted"],
+    fields: {
+      id: { path: ["rest_id", "id"], transform: "string" },
+      author: {
+        path: [
+          "core.user_results.result.core.screen_name",
+          "core.user_results.result.legacy.screen_name",
+          "author",
+        ],
+        transform: "trim",
+      },
+      name: {
+        path: [
+          "core.user_results.result.core.name",
+          "core.user_results.result.legacy.name",
+          "name",
+        ],
+      },
+      time: { path: ["legacy.created_at", "time"], transform: "iso" },
+      text: { path: ["note_tweet.note_tweet_results.result.text", "legacy.full_text", "text"] },
+      media: { path: ["legacy.extended_entities.media[*].media_url_https", "media"] },
+    },
+  },
+  url: { template: "https://x.com/{{author}}/status/{{id}}" },
+};
+
+const X_COLLECT_FIELDS: Record<string, string | import("./recipes.js").CollectFieldSpec> = {
+  id: { selector: "a:has(> time)", attr: "href", match: "/status/(\\d+)" },
+  author: { selector: "a:has(> time)", attr: "href", match: "/([^/]+)/status/" },
+  name: { selector: '[data-testid="User-Name"]', match: "^([^\\n]+)" },
+  time: "a:has(> time) > time@datetime",
+  text: '[data-testid="tweetText"]',
+  replyTo: { selector: "div", contains: "Replying to", match: "@(\\w+)" },
+  media: {
+    selector: '[data-testid="tweetPhoto"]:not([role="link"] [data-testid="tweetPhoto"]) img',
+    property: "src",
+    all: true,
+  },
+  "quoted.id": {
+    selector: 'div[role="link"] a[href*="/status/"]',
+    attr: "href",
+    match: "/status/(\\d+)",
+  },
+  "quoted.author": { selector: 'div[role="link"] [data-testid="User-Name"]', match: "@(\\w+)" },
+  "quoted.name": { selector: 'div[role="link"] [data-testid="User-Name"]', match: "^([^\\n]+)" },
+  "quoted.time": 'div[role="link"] time@datetime',
+  "quoted.text": 'div[role="link"] [data-testid="tweetText"]',
+  "quoted.media": {
+    selector: 'div[role="link"] [data-testid="tweetPhoto"] img',
+    property: "src",
+    all: true,
+  },
+};
+
 function xRecipe(name: "thread" | "feed"): SiteRecipe {
   const stamp = now();
+  const thread = name === "thread";
   const collect: RecipeStrategy = {
     kind: "collect",
     collect: {
+      url: "{{url}}",
       row: 'article[data-testid="tweet"]',
-      fields: {
-        url: "a[href*='/status/']@href",
-        author: "[data-testid='User-Name']",
-        text: "[data-testid='tweetText']",
-        time: "time@datetime",
-      },
+      fields: X_COLLECT_FIELDS,
       scroll: true,
-      expand: ["Show more replies", "Show additional replies", "Read more"],
-      max: name === "thread" ? 300 : 100,
+      // The show-more link opens a long post in place; the reply link reveals the rest of a thread.
+      expand: ["[data-testid='tweet-text-show-more-link']", "Show additional replies"],
+      max: thread ? 300 : 100,
+    },
+  };
+  const api: RecipeStrategy = {
+    kind: "api",
+    operation: thread ? "TweetDetail" : "HomeTimeline",
+    open: "{{url}}",
+    params: {
+      url: "{{url}}",
+      ...(thread ? { id: "{{id}}", focalTweetId: "{{id}}" } : {}),
+    },
+    // TweetDetail and HomeTimeline bury each post in an instruction tree; a post is any object
+    // that carries both a rest_id and its legacy text.
+    records: { find: { exists: ["rest_id", "legacy.full_text"] } },
+    pagination: {
+      param: "cursor",
+      next: { where: { field: "cursorType", equals: "Bottom" }, path: "value" },
+      maxPages: 5,
     },
   };
   return {
     version: 1,
     name,
     site: "x.com",
-    description:
-      name === "thread"
-        ? "Every post in a thread, in order, with author and time."
-        : "The posts currently in the home feed, newest first.",
+    description: thread
+      ? "A thread: the author's posts in order, long posts in full, with media and quoted posts."
+      : "The posts in the home feed, newest first, with media and quoted posts.",
     kind: "items",
-    params:
-      name === "thread"
-        ? { url: { description: "A post URL to read the thread from", required: true } }
-        : { url: { description: "The feed URL to read", default: "https://x.com/home" } },
-    strategies: [
-      // A mapped x.com has TweetDetail/HomeTimeline operations; the runner skips this strategy
-      // when the site is not mapped and falls through to the page when a call is refused.
-      {
-        kind: "api",
-        operation: name === "thread" ? "TweetDetail" : "HomeTimeline",
-        params: {},
-      },
-      collect,
-    ],
-    map: {
-      id: { path: ["url"], pattern: "/status/(\\d+)", group: 1 },
-      url: { path: ["url"], required: true },
-      author: { path: ["author", "author.name", "user.name"] },
-      text: { path: ["text", "text.text", "full_text"] },
-      date: { path: ["time", "date"], transform: "iso" },
+    params: {
+      url: thread
+        ? { description: "Post URL, e.g. https://x.com/<user>/status/<id>", required: true }
+        : { description: "The feed URL to read", default: "https://x.com/home" },
     },
+    ...(thread ? { derive: { id: { from: "url", pattern: "/status/(\\d+)" } } } : {}),
+    strategies: [api, collect],
+    map: X_MAP,
     key: "id",
-    render: { title: "author", text: "text", author: "author", date: "date", url: "url" },
+    ...(thread ? { thread: { authorField: "author", rootFirst: true } } : {}),
+    render: {
+      title: "author",
+      text: "text",
+      author: "author",
+      date: "time",
+      url: "url",
+      media: "media",
+      quote: "quoted",
+    },
     source: { kind: "manual", at: stamp },
     createdAt: stamp,
     updatedAt: stamp,

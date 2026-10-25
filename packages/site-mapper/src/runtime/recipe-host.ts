@@ -37,6 +37,13 @@ export async function browserRecipeHost(
     write: (operation, params) => api.write(operation, params),
     resolveOperation: (wanted) =>
       model === undefined ? undefined : resolveOperationInModel(model, wanted),
+    open: async (url) => {
+      const connection = await browser();
+      await connection.run(
+        `(async () => { await page.goto(${JSON.stringify(url)}); return true; })()`,
+        { session: options.session ?? "site-mapper" },
+      );
+    },
     collect: async (input) => {
       const connection = await browser();
       const value = await connection.run(collectExpression(input as CollectInput), {

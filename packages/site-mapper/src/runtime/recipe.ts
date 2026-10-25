@@ -8,12 +8,13 @@ import {
   recordRecipeHealth,
   writeReceipt,
   type CollectRecipe,
+  type CursorSelector,
   type RecipePagination,
   type RecipeParam,
   type RecipeStrategy,
   type SiteRecipe,
 } from "../recipes.js";
-import { mapRecords, matchesFilters, recordKey } from "../recipe-map.js";
+import { mapRecords, matchesFilters, pickPath, recordKey } from "../recipe-map.js";
 import type { SiteModel } from "../types.js";
 
 /** A strategy that cannot run here (no browser for collect, site not mapped): try the next one. */
@@ -39,6 +40,8 @@ export interface RecipeHost {
   call(operation: string, params: Record<string, unknown>): Promise<unknown>;
   /** A write operation (receipts guard repeats). */
   write?: (operation: string, params: Record<string, unknown>) => Promise<unknown>;
+  /** Opens a page before an API call that must come from it (best effort). */
+  open?: (url: string) => Promise<void>;
   /** Reads rows from the page (browser side). */
   collect?: (input: CollectRecipe & { url?: string }) => Promise<unknown>;
   /** Runs in-page code for a script strategy. */
@@ -81,7 +84,7 @@ export interface RecipeRunResult {
 
 export async function runRecipe(options: RecipeRunOptions): Promise<RecipeRunResult> {
   const { site, recipe, host } = options;
-  const inputs = resolveParams(recipe.params ?? {}, options.inputs ?? {});
+  const inputs = deriveInputs(recipe, resolveParams(recipe.params ?? {}, options.inputs ?? {}));
   const maxPages = Math.max(1, options.maxPages ?? maxPageSetting(recipe));
   const limit = options.limit ?? recipe.limit ?? 500;
 
@@ -91,7 +94,7 @@ export async function runRecipe(options: RecipeRunOptions): Promise<RecipeRunRes
   for (const strategy of recipe.strategies) {
     try {
       const raw = await collectWith(strategy, inputs, host, maxPages);
-      const records = finish(raw.items, recipe, limit);
+      const records = finish(raw.items, recipe, limit, inputs);
       await health(site, recipe, { ok: true, strategy: strategy.kind }, options);
       return {
         site,
@@ -118,6 +121,20 @@ export async function runRecipe(options: RecipeRunOptions): Promise<RecipeRunRes
     `Recipe ${recipe.name} on ${site} could not fetch records (${detail})`,
     attempts,
   );
+}
+
+/** Computes values a recipe derives from its inputs, such as a post id from a URL. */
+function deriveInputs(
+  recipe: SiteRecipe,
+  inputs: Record<string, unknown>,
+): Record<string, unknown> {
+  for (const [name, rule] of Object.entries(recipe.derive ?? {})) {
+    const source = inputs[rule.from];
+    if (source === undefined || source === null) continue;
+    const match = new RegExp(rule.pattern, rule.flags ?? "").exec(String(source));
+    if (match) inputs[name] = match[rule.group ?? 1] ?? match[0];
+  }
+  return inputs;
 }
 
 async function health(
@@ -240,6 +257,10 @@ async function collectApi(
     : strategy.operation;
   if (!operation)
     throw new RecipeSkip(`Site has no operation matching ${JSON.stringify(strategy.operation)}`);
+  if (strategy.open && host.open) {
+    // The page supplies the session and the signing hooks; a call that works without it survives.
+    await host.open(fill(strategy.open, inputs)).catch(() => undefined);
+  }
   const params = apiParams(strategy, inputs);
   const pagination = strategy.pagination;
   const items: unknown[] = [];
@@ -248,15 +269,31 @@ async function collectApi(
   while (pages < maxPages) {
     const page = await host.call(operation, params);
     pages += 1;
-    items.push(...itemsOf(page, pagination));
+    items.push(...itemsOf(page, pagination, strategy.records?.find.exists));
     const next = pagination ? advanceCursor(page, pagination, cursor) : undefined;
     if (next === undefined || !pagination) break;
     cursor = next;
-    params[pagination.param] = next;
+    setParam(params, pagination.param, next);
     if (pagination.limitParam && pagination.pageSize)
-      params[pagination.limitParam] = pagination.pageSize;
+      setParam(params, pagination.limitParam, pagination.pageSize);
   }
   return { items, pages, truncated: pages >= maxPages };
+}
+
+/** "variables.cursor" sets a nested request parameter. */
+function setParam(params: Record<string, unknown>, path: string, value: unknown): void {
+  if (!path.includes(".")) {
+    params[path] = value;
+    return;
+  }
+  const parts = path.split(".");
+  let current = params;
+  for (const part of parts.slice(0, -1)) {
+    const next = current[part];
+    if (!next || typeof next !== "object" || Array.isArray(next)) current[part] = {};
+    current = current[part] as Record<string, unknown>;
+  }
+  current[parts[parts.length - 1] ?? ""] = value;
 }
 
 /** The next cursor, or undefined when this page was the last. */
@@ -281,12 +318,30 @@ function apiParams(
   return params;
 }
 
-function itemsOf(page: unknown, pagination: RecipePagination | undefined): unknown[] {
+function itemsOf(
+  page: unknown,
+  pagination: RecipePagination | undefined,
+  find?: string[],
+): unknown[] {
+  if (find?.length) return findRecords(page, find);
   const explicit = pagination?.items ? walk(page, pagination.items) : undefined;
   const found = explicit ?? biggestList(page);
   if (Array.isArray(found)) return found;
   if (found === undefined) return Array.isArray(page) ? page : [];
   return [found];
+}
+
+/** Every object in a tree that carries all of these keys, in document order. */
+function findRecords(value: unknown, keys: string[], depth = 0, found: unknown[] = []): unknown[] {
+  if (found.length >= 5000 || depth > 24 || !value || typeof value !== "object") return found;
+  if (Array.isArray(value)) {
+    for (const item of value) findRecords(item, keys, depth + 1, found);
+    return found;
+  }
+  const record = value as Record<string, unknown>;
+  if (keys.every((key) => pickPath(record, key) != null)) found.push(record);
+  for (const child of Object.values(record)) findRecords(child, keys, depth + 1, found);
+  return found;
 }
 
 /** Reads a pointer, falling back to the last path key (X-style instruction trees move levels). */
@@ -348,19 +403,48 @@ function biggestList(value: unknown, depth = 0): unknown {
   return best;
 }
 
-function cursorValue(page: unknown, pointer: string): unknown {
-  const value = walk(page, pointer);
+function cursorValue(page: unknown, next: string | CursorSelector): unknown {
+  if (typeof next !== "string") {
+    const target = findWhere(page, next.where.field, next.where.equals);
+    return target === undefined ? undefined : pick(target, next.path);
+  }
+  const value = walk(page, next);
   if (value && typeof value === "object" && "value" in (value as Record<string, unknown>))
     return (value as Record<string, unknown>).value;
   return value;
 }
 
-function finish(items: unknown[], recipe: SiteRecipe, limit: number): Record<string, unknown>[] {
+/** The first object anywhere in a response whose field equals a value. */
+function findWhere(value: unknown, field: string, expected: unknown, depth = 0): unknown {
+  if (!value || typeof value !== "object" || depth > 24) return undefined;
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = findWhere(item, field, expected, depth + 1);
+      if (found !== undefined) return found;
+    }
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  if (JSON.stringify(record[field]) === JSON.stringify(expected)) return record;
+  for (const child of Object.values(record)) {
+    const found = findWhere(child, field, expected, depth + 1);
+    if (found !== undefined) return found;
+  }
+  return undefined;
+}
+
+function finish(
+  items: unknown[],
+  recipe: SiteRecipe,
+  limit: number,
+  inputs: Record<string, unknown>,
+): Record<string, unknown>[] {
   const mapped = mapRecords(items, recipe.map);
-  const kept = mapped.filter((record) => matchesFilters(record, recipe.filter));
+  const filtered = mapped.filter((record) => matchesFilters(record, recipe.filter));
+  const threaded = recipe.thread ? threadOnly(filtered, recipe, inputs) : filtered;
   const seen = new Set<string>();
   const unique: Record<string, unknown>[] = [];
-  for (const record of kept) {
+  for (const record of threaded) {
     const key = recordKey(record, recipe.key);
     if (seen.has(key)) continue;
     seen.add(key);
@@ -368,6 +452,47 @@ function finish(items: unknown[], recipe: SiteRecipe, limit: number): Record<str
     if (unique.length >= limit) break;
   }
   return recipe.kind === "single" ? unique.slice(0, 1) : unique;
+}
+
+/**
+ * Keeps a thread to the posts of the author who opened it, in page order, with the opening post
+ * first. Without the filter a thread reader returns every reply in the DOM.
+ */
+function threadOnly(
+  records: Record<string, unknown>[],
+  recipe: SiteRecipe,
+  inputs: Record<string, unknown>,
+): Record<string, unknown>[] {
+  if (!records.length) return records;
+  const field = recipe.thread?.authorField ?? "author";
+  const root = openingRecord(records, inputs.id);
+  const author = authorOf(root ?? records[0], field);
+  if (!author) return records;
+  const mine = records.filter((record) => authorOf(record, field) === author);
+  return orderThread(root, mine, recipe.thread?.rootFirst !== false);
+}
+
+function openingRecord(
+  records: Record<string, unknown>[],
+  id: unknown,
+): Record<string, unknown> | undefined {
+  if (id === undefined || id === null) return undefined;
+  return records.find((record) => String(record.id) === String(id));
+}
+
+function authorOf(record: Record<string, unknown> | undefined, field: string): string {
+  return String(record?.[field] ?? "")
+    .trim()
+    .toLowerCase();
+}
+
+function orderThread(
+  root: Record<string, unknown> | undefined,
+  records: Record<string, unknown>[],
+  rootFirst: boolean,
+): Record<string, unknown>[] {
+  if (!root || !rootFirst) return records;
+  return [root, ...records.filter((record) => record !== root)];
 }
 
 function maxPageSetting(recipe: SiteRecipe): number {
@@ -430,21 +555,57 @@ export async function readFeed(
 ): Promise<FeedResult> {
   const result = await runRecipe(options);
   const render = options.recipe.render ?? {};
-  const blocks = result.records.map((record, index) => {
-    const title = text(record, render.title) ?? `#${index + 1}`;
-    const author = text(record, render.author);
-    const date = text(record, render.date);
-    const url = text(record, render.url);
-    const body = text(record, render.text) ?? "";
-    const meta = [author, date].filter(Boolean).join(" · ");
-    return `## ${title}${meta ? `\n${meta}` : ""}${body ? `\n\n${body}` : ""}${url ? `\n\n${url}` : ""}`;
-  });
+  const blocks = result.records.map((record, index) => renderRecord(record, index, render));
   const markdown = `# ${options.recipe.description ?? options.recipe.name} (${result.count})\n\n${blocks.join("\n\n")}\n`;
   return {
     ...result,
     markdown,
     jsonl: result.records.map((record) => JSON.stringify(record)).join("\n"),
   };
+}
+
+function renderRecord(
+  record: Record<string, unknown>,
+  index: number,
+  render: NonNullable<SiteRecipe["render"]>,
+): string {
+  const author = text(record, render.author);
+  const date = text(record, render.date);
+  const title = text(record, render.title) ?? author ?? `#${index + 1}`;
+  const body = text(record, render.text) ?? "";
+  const url = text(record, render.url);
+  const meta = [author ? `@${author.replace(/^@/, "")}` : undefined, date]
+    .filter(Boolean)
+    .join(" · ");
+  const quote = render.quote ? record[render.quote] : undefined;
+  const images = render.media ? list(record[render.media]) : [];
+  return [
+    `## ${title}${meta ? `\n${meta}` : ""}`,
+    body,
+    quoteBlock(quote),
+    images.map((image) => `![](${image})`).join(" "),
+    url,
+  ]
+    .filter((part): part is string => typeof part === "string" && part.length > 0)
+    .join("\n\n");
+}
+
+function quoteBlock(quote: unknown): string {
+  if (!quote || typeof quote !== "object") return "";
+  const record = quote as Record<string, unknown>;
+  const text = typeof record.text === "string" ? record.text : "";
+  const author = typeof record.author === "string" ? record.author : "";
+  if (!text) return "";
+  return [text, author ? `— @${author.replace(/^@/, "")}` : ""]
+    .filter(Boolean)
+    .map((line) => `> ${line}`)
+    .join("\n");
+}
+
+function list(value: unknown): string[] {
+  if (Array.isArray(value)) return value.map((item) => String(item)).filter(Boolean);
+  if (typeof value === "string" && value) return [value];
+  return [];
 }
 
 function text(record: Record<string, unknown>, field: string | undefined): string | undefined {

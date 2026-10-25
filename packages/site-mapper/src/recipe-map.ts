@@ -11,13 +11,17 @@ export type FieldTransform =
 export interface FieldRule {
   /** One path, or several tried in order (API shape first, page shape second). */
   path?: string | string[];
-  /** Template over the raw record: "{{author.name}} ({{author.handle}})". */
+  /** Template over the mapped record: "https://x.com/{{author}}/status/{{id}}". */
   template?: string;
   transform?: FieldTransform;
   /** Regex applied to the resolved text; group 1 (or `group`) is the value. */
   pattern?: string;
   flags?: string;
   group?: number;
+  /** Pick one element when the path resolves to a list. */
+  index?: number;
+  /** Map this value as a record of its own (a quoted post, an author object). */
+  fields?: RecipeMapping;
   /** Join a list with this separator instead of returning an array. */
   join?: string;
   /** Used when the path is missing or resolves to null. */
@@ -34,9 +38,26 @@ export interface RecipeFilter {
   value?: Json;
 }
 
-/** Reads a JSON pointer ("/a/0/b") or a dotted path ("a.0.b"). */
+/** Reads a JSON pointer ("/a/0/b"), a dotted path ("a.0.b") or a wildcard ("media[*].url"). */
 export function pickPath(source: unknown, path: string): unknown {
   if (!path) return source;
+  const normalised = path.replace(/\[\]/g, "[*]");
+  if (normalised.includes("[*]")) return pickWildcard(source, normalised);
+  if (hasLiteral(source, normalised)) return (source as Record<string, unknown>)[normalised];
+  return walkPath(source, normalised);
+}
+
+/** A dotted name may be a literal key (collected rows use "quoted.text"). */
+function hasLiteral(source: unknown, path: string): boolean {
+  return (
+    !!source &&
+    typeof source === "object" &&
+    !Array.isArray(source) &&
+    Object.prototype.hasOwnProperty.call(source, path)
+  );
+}
+
+function walkPath(source: unknown, path: string): unknown {
   const parts = path.startsWith("/")
     ? path
         .slice(1)
@@ -56,6 +77,17 @@ export function pickPath(source: unknown, path: string): unknown {
     current = (current as Record<string, unknown>)[part];
   }
   return current;
+}
+
+/** "media[*].url" maps the rest of the path over every element and flattens one level. */
+function pickWildcard(source: unknown, path: string): unknown {
+  const star = path.indexOf("[*]");
+  const head = path.slice(0, star);
+  const tail = path.slice(star + 3).replace(/^\./, "");
+  const base = head ? pickPath(source, head) : source;
+  if (!Array.isArray(base)) return undefined;
+  const values = base.map((item) => (tail ? pickPath(item, tail) : item));
+  return values.flat().filter((value) => value !== undefined);
 }
 
 function firstPath(source: unknown, paths: string | string[]): unknown {
@@ -130,8 +162,12 @@ function applyPattern(value: unknown, rule: FieldRule): unknown {
 
 export function resolveField(record: unknown, mapping: FieldMapping): unknown {
   if (typeof mapping === "string") return firstPath(record, mapping);
+  if (mapping.fields) return nestedRecord(record, mapping);
   const value = normalise(
-    applyTransform(applyPattern(rawValue(record, mapping), mapping), mapping.transform),
+    applyTransform(
+      applyPattern(selected(rawValue(record, mapping), mapping), mapping),
+      mapping.transform,
+    ),
   );
   if (value !== undefined && value !== null)
     return mapping.join && Array.isArray(value) ? value.map(textOf).join(mapping.join) : value;
@@ -142,11 +178,31 @@ export function resolveField(record: unknown, mapping: FieldMapping): unknown {
   return normalise(mapping.default);
 }
 
+function selected(value: unknown, rule: FieldRule): unknown {
+  if (rule.index === undefined || !Array.isArray(value)) return value;
+  return value[rule.index];
+}
+
+/** A value that is itself a record: each sub-rule reads from it. */
+function nestedRecord(record: unknown, rule: FieldRule): unknown {
+  const base = rawValue(record, rule);
+  if (base === undefined || base === null) return undefined;
+  const out: Record<string, unknown> = {};
+  for (const [key, subRule] of Object.entries(rule.fields ?? {}))
+    out[key] = resolveField(base, subRule);
+  return Object.values(out).some((value) => value !== undefined && value !== null)
+    ? out
+    : undefined;
+}
+
 function normalise(value: unknown): unknown {
   return value as Json;
 }
 
-/** Applies a mapping to every raw record. */
+/**
+ * Applies a mapping to every raw record. Templates run last, against the mapped record, so a URL
+ * can be built from the author and id this same mapping produced.
+ */
 export function mapRecords(
   records: unknown[],
   mapping: RecipeMapping | undefined,
@@ -154,9 +210,30 @@ export function mapRecords(
   return records.map((record, index) => {
     if (!mapping) return { ...(record as Record<string, unknown>), index };
     const mapped: Record<string, unknown> = {};
-    for (const [field, rule] of Object.entries(mapping)) mapped[field] = resolveField(record, rule);
+    const templates: [string, FieldRule][] = [];
+    for (const [field, rule] of Object.entries(mapping)) {
+      if (typeof rule === "object" && rule.template !== undefined) templates.push([field, rule]);
+      else setNested(mapped, field, resolveField(record, rule));
+    }
+    for (const [field, rule] of templates) setNested(mapped, field, resolveField(mapped, rule));
     return mapped;
   });
+}
+
+/** "quoted.text" lands as { quoted: { text } }, so a mapping can build a record shape. */
+function setNested(target: Record<string, unknown>, path: string, value: unknown): void {
+  if (!path.includes(".")) {
+    target[path] = value;
+    return;
+  }
+  const parts = path.split(".");
+  let current = target;
+  for (const part of parts.slice(0, -1)) {
+    const next = current[part];
+    if (!next || typeof next !== "object" || Array.isArray(next)) current[part] = {};
+    current = current[part] as Record<string, unknown>;
+  }
+  current[parts[parts.length - 1] as string] = value;
 }
 
 function matchesFilter(record: Record<string, unknown>, filter: RecipeFilter): boolean {
