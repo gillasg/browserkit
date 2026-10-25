@@ -299,7 +299,7 @@ function __extendPage(target, base) {
   var byRole = base.getByRole, byText = base.getByText, coordHover = base.hover;
   // Agents sometimes reach for page.playwright.X: it is the page itself.
   base.playwright = base;
-  return __extendPageControls(target, __extendPageEvents(target, __extendPageData(target, Object.assign(base, {
+  return __extendPageSurface(target, __extendPageControls(target, __extendPageEvents(target, __extendPageData(target, Object.assign(base, {
     // Playwright accepts a RegExp for names and text. The engine's own targeting matches strings,
     // so a regex locator resolves in the page and acts on its first match.
     getByRole: (role, options = {}) => options.name instanceof RegExp
@@ -362,6 +362,6 @@ function __extendPage(target, base) {
       up: (options = {}) => { var at = __mouseAt.get(__key(target)) || {x: 0, y: 0}; return base.cdp('Input.dispatchMouseEvent', {type: 'mouseReleased', x: at.x, y: at.y, button: options.button || 'left', clickCount: 1}); },
       wheel: (_dx, dy) => base.scroll(dy >= 0 ? 'down' : 'up', Math.abs(dy) || 600),
     }),
-  }))));
+  })))));
 }
 `;

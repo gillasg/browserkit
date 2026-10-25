@@ -5,8 +5,7 @@ import { has, parseArgs } from "./args.js";
 import { COMMANDS } from "./commands/index.js";
 import { runNativeHost } from "./native-host.js";
 import { printError, out } from "./output.js";
-import { commandHelp, usageText } from "./usage.js";
-
+import { commandHelp, usageText, HELP_TOPICS } from "./usage.js";
 /** Exit codes callers can act on: 2 needs input, 3 signed out, 4 no browser, 5 the API failed. */
 const EXIT_CODES: Record<string, number> = {
   failed: 1,
@@ -43,8 +42,18 @@ async function main(argv: string[]): Promise<number> {
 function printHelp(rest: string[]): number {
   const name = rest[0];
   const command = name ? COMMANDS.find((item) => item.name === name) : undefined;
-  out(command ? commandHelp(command) : usageText(COMMANDS));
-  return command || !name ? 0 : 1;
+  if (command) {
+    out(commandHelp(command));
+    return 0;
+  }
+  if (name && HELP_TOPICS[name]) {
+    out(HELP_TOPICS[name] as string);
+    return 0;
+  }
+  out(usageText(COMMANDS));
+  const topics = Object.keys(HELP_TOPICS).sort().join(", ");
+  out(`\nTopics: ${topics}\nRun \`browserkit help <topic>\` for one.`);
+  return name ? 1 : 0;
 }
 
 main(process.argv.slice(2)).then(
@@ -53,8 +62,22 @@ main(process.argv.slice(2)).then(
     process.exit(code);
   },
   async (error: unknown) => {
-    printError(error);
+    const soft = process.argv.includes("--soft-fail");
+    const json = process.argv.includes("--json");
+    if (json) {
+      out(
+        JSON.stringify({
+          ok: false,
+          error: {
+            message: error instanceof Error ? error.message : String(error),
+            kind: errorKind(error),
+          },
+        }),
+      );
+    } else {
+      printError(error);
+    }
     await Promise.all([closeSharedBridge(), closeCrawlBridge()]);
-    process.exit(EXIT_CODES[errorKind(error)] ?? 1);
+    process.exit(soft ? 0 : (EXIT_CODES[errorKind(error)] ?? 1));
   },
 );

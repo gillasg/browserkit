@@ -205,6 +205,9 @@ var browser = Object.freeze({
   }),
   // What is queued or running: per-tab queues and the browser-wide write lock.
   scheduler: async () => (await __step({op:'scheduler', target:__hostTarget()})).data,
+  // Windows and zoom: the browser's own window list, resizing, and per-tab zoom.
+  windows: __windows,
+  setZoom: (factor, tabId) => __zoom(factor, tabId),
   pool: (items, worker, options = {}) => __pool(items, worker, options),
   // Close every tab this chat/session opened (page.keep tabs stay), returning {closed, remaining}.
   reset: () => __call({tabs:'reset'}),

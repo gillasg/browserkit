@@ -79,6 +79,63 @@ const interactiveRoles = new Set([
 interface Options {
   query?: string | undefined;
   interactive?: boolean | undefined;
+  /** Keep every relevant node instead of the 180 most useful. */
+  all?: boolean | undefined;
+  /** Headings, landmarks and controls only; body text is left out. */
+  summary?: boolean | undefined;
+  /** Nodes the accessibility tree marks ignored (hidden from assistive tech). */
+  includeHidden?: boolean | undefined;
+  /** Leave out static text and paragraphs. */
+  noText?: boolean | undefined;
+  /** Only nodes at most this many levels below the root. */
+  depth?: number | undefined;
+  /** Short names and values, no state properties. */
+  compact?: boolean | undefined;
+  /** Drop nodes from the end until the observation fits. */
+  maxBytes?: number | undefined;
+}
+
+const SUMMARY_ROLES = new Set([
+  "heading",
+  "button",
+  "link",
+  "textbox",
+  "searchbox",
+  "combobox",
+  "checkbox",
+  "radio",
+  "tab",
+  "switch",
+  "menuitem",
+  "menuitemcheckbox",
+  "slider",
+  "spinbutton",
+  "main",
+  "navigation",
+  "banner",
+  "contentinfo",
+  "complementary",
+  "form",
+  "search",
+  "dialog",
+  "alertdialog",
+]);
+
+function depthsOf(nodes: AxNode[]): Map<string, number> {
+  const parents = new Map(
+    nodes.filter((node) => node.nodeId).map((node) => [node.nodeId as string, node.parentId]),
+  );
+  const depths = new Map<string, number>();
+  const depthOf = (id: string | undefined, seen = 0): number => {
+    if (!id || seen > 200) return 0;
+    const known = depths.get(id);
+    if (known !== undefined) return known;
+    const depth = 1 + depthOf(parents.get(id), seen + 1);
+    depths.set(id, depth);
+    return depth;
+  };
+  for (const node of nodes) if (node.nodeId) depthOf(node.nodeId);
+  return depths;
 }
 export function filterVisibleTextNodes(nodes: AxNode[], visibleText: string): AxNode[] {
   const normalized = visibleText.replace(/\s+/g, " ").toLowerCase();
@@ -89,12 +146,18 @@ export function filterVisibleTextNodes(nodes: AxNode[], visibleText: string): Ax
     return !text || normalized.includes(text);
   });
 }
-function relevant(node: AxNode, options: Options): boolean {
+function relevant(node: AxNode, options: Options, depth: number): boolean {
   const role = textValue(node.role?.value).toLowerCase();
   const name = textValue(node.name?.value).trim();
-  if (node.ignored || node.backendDOMNodeId === undefined || !role) return false;
+  if (node.backendDOMNodeId === undefined || !role) return false;
+  if (node.ignored && options.includeHidden !== true) return false;
+  if (options.depth !== undefined && depth > options.depth) return false;
   if (options.interactive && !interactiveRoles.has(role)) return false;
-  if (!name && !interactiveRoles.has(role)) return false;
+  const textRole = ["statictext", "paragraph", "inlinetextbox"].includes(role);
+  if (options.noText && textRole) return false;
+  if (options.summary && textRole) return false;
+  if (options.summary && !SUMMARY_ROLES.has(role) && !interactiveRoles.has(role)) return false;
+  if (!name && !interactiveRoles.has(role) && !SUMMARY_ROLES.has(role)) return false;
   if (["generic", "none", "presentation", "inlinetextbox"].includes(role)) return false;
   return !options.query || `${role} ${name}`.toLowerCase().includes(options.query.toLowerCase());
 }
@@ -137,17 +200,19 @@ export function createSemanticNodes(
   nodes: AxNode[],
   options: Options = {},
 ): { refs: Map<string, AxRef>; nodes: BrowserSemanticNode[]; truncated: boolean } {
+  const depths = depthsOf(nodes);
   const regions = regionsOf(nodes);
   const regionOf = (node: AxNode) => regions.get(node) ?? 1;
+  const cap = options.summary ? 60 : options.all ? 800 : 180;
   const candidates = nodes
-    .filter((node) => relevant(node, options))
+    .filter((node) => relevant(node, options, depthOfNode(node)))
     .map((node, index) => ({ node, index }))
     .sort((a, b) => regionOf(a.node) - regionOf(b.node) || a.index - b.index)
     .map(({ node }) => node);
   const selected = new Set(
     [...candidates]
       .sort((a, b) => selectionKey(a, regionOf(a)) - selectionKey(b, regionOf(b)))
-      .slice(0, 180),
+      .slice(0, cap),
   );
   const refs = new Map<string, AxRef>();
   const compact: BrowserSemanticNode[] = [];
@@ -156,30 +221,47 @@ export function createSemanticNodes(
     const backendNodeId = node.backendDOMNodeId;
     if (backendNodeId === undefined) continue;
     const role = textValue(node.role?.value).slice(0, 80);
-    const name = textValue(node.name?.value).trim().slice(0, 512);
+    const limit = options.compact ? 80 : 512;
+    const name = textValue(node.name?.value).trim().slice(0, limit);
     const ref = `e${compact.length}`;
-    refs.set(ref, { backendNodeId: backendNodeId, role, name });
+    refs.set(ref, { backendNodeId, role, name });
     compact.push({
       ref,
       backendNodeId,
       role,
       name,
-      ...(node.value ? { value: textValue(node.value.value).slice(0, 512) } : {}),
-      ...booleanProperty(node, "disabled"),
-      ...booleanProperty(node, "checked"),
-      ...booleanProperty(node, "focused"),
-      ...booleanProperty(node, "expanded"),
-      ...booleanProperty(node, "selected"),
-      ...booleanProperty(node, "pressed"),
-      ...(node.properties?.some((p) => p.name === "pressed" && p.value?.value === "mixed")
-        ? { pressed: "mixed" as const }
-        : {}),
-      ...(node.properties?.some((p) => p.name === "checked" && p.value?.value === "mixed")
-        ? { mixed: true }
-        : {}),
+      ...(node.ignored ? { hidden: true } : {}),
+      ...(node.value ? { value: textValue(node.value.value).slice(0, limit) } : {}),
+      ...(options.compact
+        ? {}
+        : {
+            ...booleanProperty(node, "disabled"),
+            ...booleanProperty(node, "checked"),
+            ...booleanProperty(node, "focused"),
+            ...booleanProperty(node, "expanded"),
+            ...booleanProperty(node, "selected"),
+            ...booleanProperty(node, "pressed"),
+            ...(node.properties?.some((p) => p.name === "pressed" && p.value?.value === "mixed")
+              ? { pressed: "mixed" as const }
+              : {}),
+            ...(node.properties?.some((p) => p.name === "checked" && p.value?.value === "mixed")
+              ? { mixed: true }
+              : {}),
+          }),
     });
   }
+  truncateToBudget(compact, options.maxBytes);
   return { refs, nodes: compact, truncated: candidates.length > compact.length };
+
+  function depthOfNode(node: AxNode): number {
+    return node.nodeId ? (depths.get(node.nodeId) ?? 0) : 0;
+  }
+}
+
+/** Drops nodes from the end until the observation fits a byte budget (never below ten). */
+function truncateToBudget(nodes: BrowserSemanticNode[], maxBytes?: number): void {
+  if (!maxBytes || maxBytes <= 0) return;
+  while (nodes.length > 10 && JSON.stringify(nodes).length > maxBytes) nodes.pop();
 }
 
 export async function visiblePageText(debuggee: chrome.debugger.Debuggee): Promise<string> {

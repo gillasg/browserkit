@@ -197,6 +197,7 @@ type ExtraRequest = BrowserExecutorRequest & {
         | "evaluate"
         | "cdp"
         | "readiness"
+        | "settle"
         | "cookies"
         | "networkStore"
         | "scheduler"
@@ -229,6 +230,15 @@ export async function performExtra(
   } else
     data = await withBrowserDebugger(tabId, async (debuggee) => {
       await revalidate(request, tabId);
+      if (step.op === "settle") {
+        const settle = await settleBrowserPage(debuggee, step.timeoutMs, Date.now(), step.quietMs);
+        return {
+          settled: settle.why === "quiet",
+          why: settle.why,
+          waitedMs: settle.ms,
+          pending: settle.pending,
+        };
+      }
       if (step.op === "readiness")
         return classifyReadiness(
           ((await evaluate(debuggee, readinessSnapshotExpression)) ?? {}) as ReadinessSnapshot,
@@ -705,6 +715,7 @@ function isExtraStep(step: BrowserStep): step is Extract<
       | "evaluate"
       | "cdp"
       | "readiness"
+      | "settle"
       | "cookies"
       | "networkStore"
       | "scheduler"
@@ -722,6 +733,7 @@ function isExtraStep(step: BrowserStep): step is Extract<
     "evaluate",
     "cdp",
     "readiness",
+    "settle",
     "cookies",
     "networkStore",
     "scheduler",

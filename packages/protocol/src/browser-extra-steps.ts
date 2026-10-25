@@ -86,6 +86,14 @@ export const browserExtraSteps = [
   z.object({ op: z.literal("diagnostics"), target, clear: z.boolean().default(false) }).strict(),
   z.object({ op: z.literal("popups"), target }).strict(),
   z.object({ op: z.literal("readiness"), target }).strict(),
+  z
+    .object({
+      op: z.literal("settle"),
+      target,
+      quietMs: z.number().int().min(50).max(10000).default(500),
+      timeoutMs: z.number().int().min(100).max(60000).default(10000),
+    })
+    .strict(),
   z.object({ op: z.literal("scheduler"), target }).strict(),
   z
     .object({

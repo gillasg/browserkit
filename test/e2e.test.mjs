@@ -1387,6 +1387,65 @@ test(
         assert.ok(result.readiness.evidence.length > 0);
       });
 
+      await t.test("the browser surface reads, searches, collects and emulates", async () => {
+        const { stdout } = await run(
+          process.execPath,
+          [
+            cli,
+            "repl",
+            "--session",
+            "phase3",
+            `(async () => {
+  await browser.openTab(${JSON.stringify(siteUrl)}, {newTab: true});
+  const steps = {};
+  const attempt = async (name, fn) => { try { steps[name] = await fn(); } catch (error) { steps[name] = {error: String((error && error.message) || error)}; } };
+  await attempt('html', () => page.html({stripScripts: true}));
+  await attempt('state', () => page.state());
+  await attempt('find', () => page.find('Shop'));
+  await attempt('styles', () => page.styles('h1'));
+  await attempt('frames', () => page.diagnoseFrames());
+  await attempt('extract', () => page.extract({script: 'async (p) => ({title: await p.title()})'}));
+  await attempt('collect', () => page.collect({row: 'h1, button', fields: {text: ''}}));
+  await attempt('settle', () => page.settle({quietMs: 200, timeoutMs: 3000}));
+  await attempt('cpu', () => page.emulateCPU(2));
+  await attempt('viewport', () => page.emulateViewport({width: 900, height: 700}));
+  await attempt('abort', () => page.abort(['*doubleclick*']));
+  await attempt('perf', () => page.performance());
+  await attempt('animations', () => page.animations());
+  await attempt('windows', () => browser.windows.list());
+  await attempt('zoom', () => browser.setZoom(1.2));
+  await attempt('tiles', () => page.iconTiles({max: 2}));
+  console.log('RESULT ' + JSON.stringify(steps));
+  return 'done';
+})()`,
+          ],
+          { env },
+        );
+        const result = JSON.parse(/RESULT (.*)/.exec(stdout)?.[1] ?? "null");
+        assert.ok(result, stdout);
+        for (const [name, value] of Object.entries(result))
+          assert.equal(value.error, undefined, `${name} failed: ${value.error}`);
+        assert.equal(result.html.html.includes("Shop"), true);
+        assert.equal(
+          result.html.html.includes("<script"),
+          false,
+          "scripts are stripped by default",
+        );
+        assert.equal(result.state.title, "Shop");
+        assert.ok(result.state.headings.length >= 1);
+        assert.ok(result.find.count >= 1, "page search finds the heading");
+        assert.ok(result.styles.styles.display, "h1 has a computed display");
+        assert.ok(result.frames.count >= 1);
+        assert.equal(result.extract.ok, true);
+        assert.equal(result.extract.data.title, "Shop");
+        assert.ok(result.collect.count >= 1, "collect reads rows");
+        assert.equal(typeof result.settle.settled, "boolean");
+        assert.ok(["quiet", "cap"].includes(result.settle.why), JSON.stringify(result.settle));
+        assert.equal(typeof result.perf.metrics.TaskDuration, "number");
+        assert.equal(Array.isArray(result.animations.animations), true);
+        assert.ok(result.windows.windows.length >= 1);
+      });
+
       await t.test("a saved workflow runs its browser steps from the CLI", async () => {
         const file = join(home, "read-shop.workflow.json");
         await writeFile(

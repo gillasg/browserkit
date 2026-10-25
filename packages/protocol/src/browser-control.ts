@@ -47,6 +47,13 @@ export const BrowserStepSchema = z.discriminatedUnion("op", [
       query: z.string().max(256).optional(),
       interactive: z.boolean().optional(),
       selector: z.string().min(1).max(512).optional(),
+      all: z.boolean().optional(),
+      summary: z.boolean().optional(),
+      includeHidden: z.boolean().optional(),
+      noText: z.boolean().optional(),
+      depth: z.number().int().min(0).max(80).optional(),
+      compact: z.boolean().optional(),
+      maxBytes: z.number().int().min(500).max(400_000).optional(),
     })
     .strict(),
   z
@@ -128,6 +135,7 @@ export const BrowserSemanticNodeSchema = z
     selected: z.boolean().optional(),
     pressed: z.union([z.boolean(), z.literal("mixed")]).optional(),
     mixed: z.boolean().optional(),
+    hidden: z.boolean().optional(),
   })
   .strict();
 export type BrowserSemanticNode = z.infer<typeof BrowserSemanticNodeSchema>;
