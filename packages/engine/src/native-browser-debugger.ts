@@ -11,6 +11,7 @@ import {
 import type { BrowserElementTarget, BrowserTargetKey } from "@browserkit/protocol";
 import { queryNodes, visibleNodes, scopedBackendIds } from "./native-browser-dom.js";
 import { collectFrameAx } from "./native-browser-frames.js";
+import { humanMouse } from "./native-browser-human-input.js";
 export { withBrowserDebugger as withDebugger } from "./native-browser-session.js";
 
 export async function resolveElement(
@@ -249,11 +250,15 @@ export async function scrollAt(
   amount: number,
 ): Promise<void> {
   const positive = direction === "down" || direction === "right" ? 1 : -1;
-  await chrome.debugger.sendCommand(debuggee, "Input.dispatchMouseEvent", {
+  const params = await humanMouse(debuggee, "mouseWheel", {
     type: "mouseWheel",
     x,
     y,
     deltaX: direction === "left" || direction === "right" ? amount * positive : 0,
     deltaY: direction === "up" || direction === "down" ? amount * positive : 0,
+  });
+  await chrome.debugger.sendCommand(debuggee, "Input.dispatchMouseEvent", {
+    type: "mouseWheel",
+    ...params,
   });
 }

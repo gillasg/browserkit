@@ -3,7 +3,7 @@ import { showAgentCursor, showAgentKeys, type CursorUpdate } from "./native-brow
 import { onNode, nodeState, fillTextNode } from "./native-browser-dom.js";
 import { beginReceipt, takeReceipt } from "./native-browser-receipts.js";
 import { noteVaultFill } from "./native-browser-vault.js";
-import { humanMouse, paceKey } from "./native-browser-human-input.js";
+import { humanMouse, humanType, paceKey } from "./native-browser-human-input.js";
 import { toOffscreen } from "./code-offscreen-host.js";
 import {
   type BrowserExecutorRequest,
@@ -323,6 +323,11 @@ async function keyboard(debuggee: chrome.debugger.Debuggee, combo: string): Prom
   };
   const windowsVirtualKeyCode =
     names[key] ?? (key.length === 1 ? key.toUpperCase().charCodeAt(0) : 0);
+  // Plain text (no modifiers, not a named key) is typed one character at a time.
+  if (!parts.length && !names[key] && key.length > 1) {
+    await humanType(debuggee, key);
+    return { typed: key.length };
+  }
   if (!windowsVirtualKeyCode) throw new Error("Unsupported key");
   const params = { key: key === "Space" ? " " : key, modifiers, windowsVirtualKeyCode };
   // macOS runs Cmd shortcuts as editing commands, which synthetic key events do not trigger alone.
