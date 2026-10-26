@@ -10,7 +10,7 @@ import {
 } from "./native-browser-fetch-errors.js";
 import { HostBudget } from "./native-browser-rate.js";
 import { engineConfig } from "./engine-config.js";
-import { privateTarget } from "./native-browser-policy.js";
+import { assertBrowserNetwork } from "./native-browser-dns.js";
 
 const MAX_TEXT = 5_000_000;
 const MAX_BINARY = 16_000_000;
@@ -46,6 +46,7 @@ export async function fetchCall(value: Record<string, unknown>): Promise<unknown
   const url = new URL(String(request.url));
   if (url.protocol !== "http:" && url.protocol !== "https:")
     throw new Error("browser.fetch only supports http and https addresses");
+  await assertBrowserNetwork(url.href);
   const split = splitHeaders(request.headers);
   const timeout = Math.min(Math.max(Number(request.timeoutMs ?? TIMEOUT_MS), 1000), 120_000);
   let body = request.body;

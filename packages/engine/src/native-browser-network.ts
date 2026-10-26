@@ -4,6 +4,7 @@ import {
   withBrowserDebugger,
 } from "./native-browser-session.js";
 import { toHar, type NetworkEntry } from "./native-browser-network-format.js";
+import { privateAddress } from "./native-browser-policy.js";
 import { listEntries, recentOf } from "./native-browser-network-list.js";
 import {
   attachChild,
@@ -24,7 +25,6 @@ import { isTrackerUrl, takeLearned } from "./native-browser-network-learn.js";
 import { rememberSessionHeaders, sessionHeadersFor } from "./native-browser-session-headers.js";
 import { hideSecrets } from "./native-browser-secrets.js";
 import { recordGlobalEntry } from "./network-store.js";
-
 // Network recording for learning a site's own APIs. While a tab records, its API traffic is
 // kept with full headers (cookies included), the script that made each call, request and
 // response bodies (captured as each request finishes, before navigation discards them),
@@ -38,7 +38,6 @@ const API_TYPES = new Set(["XHR", "Fetch", "EventSource", "WebSocket", "Document
 const PASSIVE_TYPES = new Set(["XHR", "Fetch", "Document"]);
 const PASSIVE_MAX_BODY = 256_000;
 const TEXTUAL = /json|text|javascript|xml|html|graphql|x-www-form-urlencoded|csv|event-stream/i;
-
 interface Recorder {
   entries: Map<string, NetworkEntry>;
   /** Extra-info headers that arrived before their request. */
@@ -61,7 +60,6 @@ interface Recorder {
   /** Set while a child session event is handled, so its entry says where it came from. */
   scope?: ChildScope | undefined;
 }
-
 interface Waiter {
   matches(entry: Waitable): boolean;
   resolve(entry: NetworkEntry): void;
@@ -71,13 +69,11 @@ const recorders = new Map<number, Recorder>();
 /** Recordings that were stopped: still readable (list, har, save) until a new start or the tab closes. */
 const stopped = new Map<number, Recorder>();
 type Params = Record<string, unknown>;
-
 // Runs inside the attach itself, so it talks to the debugger directly.
 onBrowserDebuggerAttached(async (tabId) => {
   if (recorders.has(tabId))
     await chrome.debugger.sendCommand({ tabId }, "Network.enable", NETWORK_BUFFERS);
 });
-
 onEngineInstall(() => {
   chrome.debugger.onEvent.addListener((source, method, raw) => {
     const tabId = source.tabId;
@@ -218,6 +214,11 @@ function responseReceived(recorder: Recorder, params: Params): void {
   if (typeof response.protocol === "string") entry.protocol = response.protocol;
   if (typeof response.remoteIPAddress === "string")
     entry.remoteIPAddress = response.remoteIPAddress;
+  const privateRemote = privateAddress(entry.remoteIPAddress ?? "");
+  if (privateRemote)
+    entry.privateNetwork =
+      `PRIVATE_NETWORK: the request reached ${privateRemote} after the URL preflight; ` +
+      "this is a DNS-rebinding result, not an allowed destination";
 }
 
 function loadingFinished(recorder: Recorder, params: Params, tabId: number): void {

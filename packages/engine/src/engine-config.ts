@@ -41,8 +41,24 @@ export const engineConfig: EngineConfig = {
   agentView: () => Promise.resolve("split"),
   agentInFront: () => Promise.resolve(false),
   hideAgentCursor: () => Promise.resolve(false),
-  privateNetwork: () => Promise.resolve(false),
-  privateNetworkPorts: () => Promise.resolve([3000, 5173, 8080]),
+  privateNetwork: async () =>
+    Boolean(
+      (
+        (await chrome.storage.local.get("private-network").catch(() => ({}))) as Record<
+          string,
+          unknown
+        >
+      )["private-network"],
+    ),
+  privateNetworkPorts: async () => {
+    const saved = await chrome.storage.local
+      .get("private-network-ports")
+      .catch(() => ({}) as Record<string, unknown>);
+    const ports = saved["private-network-ports"];
+    return Array.isArray(ports)
+      ? ports.map(Number).filter((port) => Number.isInteger(port) && port > 0)
+      : [3000, 5173, 8080];
+  },
   defaultSpace: () => "tabs",
 };
 

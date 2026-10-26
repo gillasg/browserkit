@@ -147,7 +147,16 @@ with `workflow export/import` and `recipe export/import`.
   hidden unless `--values` is passed, so a listing does not put a session token in a terminal.
 - **Typed readiness**: `page.readiness()` and `page.waitReady()` return one of ready, empty,
   loading, login, challenge, not-found or error with the evidence behind it. `browserkit check
-  --ready` adds it to a site check, so a walled or empty site is named instead of guessed.
+--ready` adds it to a site check, so a walled or empty site is named instead of guessed.
+- **Private network (opt-in)**: `chrome.storage.local.set({"private-network": true})` makes agent
+  fetches, opens and navigations refuse private, loopback and metadata destinations. The bridge
+  resolves every hostname before the request, and a tab also gets literal DNR rules in the
+  `790000-798999` band for addresses a redirect or subresource might reach. Loopback on the
+  `private-network-ports` allowlist (default 3000, 5173, 8080) stays open for local development.
+  Chrome has no per-tab proxy, so an extension cannot block a hostname that resolves private
+  before the first connection: the network store marks such a response with `privateNetwork`
+  when it comes back from a private `remoteIPAddress`, which reports DNS rebinding instead of
+  silently allowing it.
 
 ## How it fits together
 

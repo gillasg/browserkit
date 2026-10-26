@@ -1,6 +1,6 @@
 import { noteActionTiming } from "./native-browser-action-timing.js";
 import { engineConfig } from "./engine-config.js";
-import { privateTarget } from "./native-browser-policy.js";
+import { assertBrowserNetwork } from "./native-browser-dns.js";
 import {
   type BrowserExecutorRequest,
   type BrowserExecutorResult,
@@ -47,6 +47,8 @@ import { openTab } from "./native-browser-open-tab.js";
 import { attachTab, hostOf, isLivePage, listTabs } from "./native-browser-tabs.js";
 import { handleCdpMessage, noteCdpSocket } from "./native-browser-cdp.js";
 import { handleBrowserViewMessage, installBrowserView } from "./native-browser-view.js";
+import { handleBrowserDnsMessage, installBrowserDns } from "./native-browser-dns.js";
+import { guardPrivateTab } from "./native-browser-private-rules.js";
 import { withManualScreencast } from "./native-browser-flight.js";
 import { injectedScripts, judgeStealth, noteInjectedScript, type StealthProbe } from "./stealth.js";
 import { controlError, controlOf, stepInput } from "./native-browser-control.js";
@@ -274,10 +276,9 @@ export async function performExtra(
       if (step.op === "press")
         return pressElement(debuggee, request, () => revalidate(request, tabId));
       if (step.op === "navigate") {
-        if (await engineConfig.privateNetwork()) {
-          const blocked = privateTarget(step.url, await engineConfig.privateNetworkPorts());
-          if (blocked) throw new Error(`PRIVATE_NETWORK: ${blocked}`);
-        }
+        await assertBrowserNetwork(step.url);
+        if (await engineConfig.privateNetwork())
+          await guardPrivateTab(tabId, await engineConfig.privateNetworkPorts());
         // Recorded from the first request, so page.network.list() has the new page's calls.
         await captureFromTabStart(tabId);
         return navigateReady(tabId, step.url, step.timeoutMs, step.referer);
@@ -455,6 +456,8 @@ export function handleBrowserExecutorMessage(
 ): boolean {
   noteCdpSocket(socket, identity);
   installBrowserView(socket);
+  installBrowserDns(socket);
+  if (handleBrowserDnsMessage(candidate)) return true;
   if (handleBrowserViewMessage(candidate as Record<string, unknown>)) return true;
   if (handleCdpMessage(candidate)) return true;
   if (handleScriptSync(candidate) || handleBrowserRelease(candidate)) return true;
@@ -635,7 +638,6 @@ function enqueueTarget(
   void current.then(cleanup, cleanup);
   return current;
 }
-
 type TargetStep = Exclude<BrowserStep, { op: "listTabs" | "openTab" | "attachTab" }>;
 function isTargetStep(step: BrowserStep): step is TargetStep {
   return !["listTabs", "openTab", "attachTab"].includes(step.op);
@@ -689,7 +691,6 @@ function isExtraStep(step: BrowserStep): step is Extract<
     "waitFor",
   ].includes(step.op);
 }
-
 function sendResult(
   socket: WebSocket,
   request: BrowserExecutorRequest,
@@ -709,7 +710,6 @@ function sendResult(
     ),
   );
 }
-
 function sendFailure(
   socket: WebSocket,
   request: BrowserExecutorRequest,
@@ -751,7 +751,6 @@ function sendFailure(
     ),
   );
 }
-
 function respondFailure(socket: WebSocket, request: BrowserExecutorRequest, code: string): true {
   sendFailure(socket, request, code);
   return true;

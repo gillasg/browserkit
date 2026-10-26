@@ -1,4 +1,5 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { lookup } from "node:dns/promises";
 import { createHostHandler } from "@browserkit/tools/host";
 import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -322,7 +323,25 @@ export class Bridge {
       this.completeCdp(message);
     } else if (message.kind === "cdp.event" || message.kind === "cdp.detached") {
       this.cdp?.handleEngine(message);
+    } else if (message.kind === "browser.view.frame") {
+      this.view?.frame(String(message.data ?? ""));
+    } else if (message.kind === "browser.dns.query") {
+      void this.answerDns(executor, message);
     }
+  }
+
+  private async answerDns(executor: Executor, message: Json): Promise<void> {
+    const requestId = Number(message.requestId);
+    const host = String(message.host ?? "").toLowerCase();
+    let addresses: string[] = [];
+    try {
+      addresses = /^[0-9a-f:.]+$/i.test(host)
+        ? [host]
+        : (await lookup(host, { all: true })).map((row) => row.address);
+    } catch {
+      // An unresolvable host is refused by the engine while the policy is on.
+    }
+    send(executor.socket, { kind: "browser.dns.result", requestId, addresses });
   }
 
   private applyInventory(executor: Executor, message: Json): void {

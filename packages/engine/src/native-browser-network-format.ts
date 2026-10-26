@@ -31,6 +31,8 @@ export interface NetworkEntry {
   protocol?: string;
   /** The address the browser connected to (its own resolver, after DoH/hosts). */
   remoteIPAddress?: string;
+  /** Set when a response came from a private address the URL preflight could not see (rebinding). */
+  privateNetwork?: string;
   size?: number;
   durationMs?: number;
   body?: string;
@@ -54,6 +56,7 @@ export function summarize(entry: NetworkEntry): Record<string, unknown> {
   if (entry.status !== undefined) summary.status = entry.status;
   if (entry.mimeType) summary.mimeType = entry.mimeType;
   if (entry.remoteIPAddress) summary.remoteIPAddress = entry.remoteIPAddress;
+  if (entry.privateNetwork) summary.privateNetwork = entry.privateNetwork;
   if (entry.size !== undefined) summary.size = entry.size;
   summary.json = /json/i.test(entry.mimeType ?? "");
   summary.state = entry.failed ? "failed" : entry.done ? "done" : "pending";
