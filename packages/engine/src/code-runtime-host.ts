@@ -18,6 +18,7 @@ import { browserSessionOwner } from "./native-browser-session.js";
 import { currentInventoryTabs } from "./native-inventory-client.js";
 import { notePreviewActivity } from "./native-browser-preview.js";
 import { signInToPage } from "./native-browser-signin.js";
+import { sessionHeadersFor } from "./native-browser-session-headers.js";
 import {
   NO_RULES,
   assertAllowed,
@@ -260,6 +261,10 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
 
 // Non-step requests: browser info and hand-off stay local, everything else goes to Core.
 function serveCall(cell: Cell, value: Record<string, unknown> | null): Promise<unknown> {
+  if (value && typeof value.sessionHeaders === "object" && value.sessionHeaders)
+    return Promise.resolve({
+      headers: sessionHeadersFor(String((value.sessionHeaders as { url?: unknown }).url ?? "")),
+    });
   const signIn = serveSignIn(cell, value);
   if (signIn) return signIn;
   const guarded = guardedCall(cell, value);

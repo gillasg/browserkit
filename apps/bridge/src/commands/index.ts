@@ -19,6 +19,7 @@ import { signinCommand } from "./signin.js";
 import { packCommand } from "./pack.js";
 import { useGroup } from "./site-use.js";
 import { siteToolsCommand } from "./site-tools.js";
+import { secretsCommand } from "./secrets.js";
 import { workflowCommand } from "./workflow.js";
 import { recipeCommand } from "./recipe.js";
 import { cookiesCommand } from "./cookies.js";
@@ -49,6 +50,7 @@ export const COMMANDS: Command[] = [
   ...mapGroup,
   ...useGroup,
   siteToolsCommand,
+  secretsCommand,
   recipeCommand,
   ...keepGroup,
   ...blockGroup,

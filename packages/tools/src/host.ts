@@ -3,6 +3,15 @@ import { learnAbout, readLearned, learnedHint } from "@browserkit/site-mapper";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { handleCredentialRequest, isCredentialRequest } from "@browserkit/credentials";
 import {
+  deleteSecretProfile,
+  isSecretRequest,
+  listSecretProfiles,
+  runSecretScript,
+  saveSecretProfile,
+  type SecretRequest,
+  type SecretValues,
+} from "./secrets.js";
+import {
   isSiteToolRequest,
   listSiteTools,
   readPageTool,
@@ -130,6 +139,7 @@ export function createHostHandler(
     if (isSiteRulesRequest(request)) return answerSiteRules(context, options, home);
     if (isFlightRequest(request)) return saveFlightRecording(request, home);
     if (isSiteToolRequest(request)) return handleSiteTool(request);
+    if (isSecretRequest(request)) return handleSecretRequest(request, home);
     if (isLearnRequest(request)) return answerLearn(request);
     if (isLearnedRequest(request)) return answerLearned(request);
     if (isSiteMapperRequest(request))
@@ -151,6 +161,16 @@ interface FlightRequest {
 
 export function isFlightRequest(value: unknown): value is FlightRequest {
   return Boolean(value && typeof (value as { flight?: unknown }).flight === "object");
+}
+
+async function handleSecretRequest(request: SecretRequest, home: string): Promise<unknown> {
+  const { action, name, script, values } = request.secrets;
+  const profileName = String(name ?? "");
+  if (action === "list") return listSecretProfiles(home);
+  if (action === "run") return runSecretScript(profileName, String(script ?? ""), home);
+  if (action === "delete") return { deleted: await deleteSecretProfile(profileName, home) };
+  if (action === "save") return saveSecretProfile(profileName, values as SecretValues, home);
+  throw new Error(`SECRET_ACTION_UNKNOWN: ${String(action)}`);
 }
 
 interface SiteToolRequest {
