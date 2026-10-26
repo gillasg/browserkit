@@ -14,6 +14,9 @@ test("write steps are classified and reads are not", () => {
 test("browser-wide clears are refused, scoped storage is not", () => {
   assert.match(refusedCdp("Network.clearBrowserCookies"), /browser\.cookies/);
   assert.match(refusedCdp("Storage.clearDataForOrigin", {}), /origin/);
-  assert.equal(refusedCdp("Storage.clearDataForOrigin", { origin: "https://example.com" }), undefined);
+  assert.equal(
+    refusedCdp("Storage.clearDataForOrigin", { origin: "https://example.com" }),
+    undefined,
+  );
   assert.equal(cdpChangesPage("Page.captureScreenshot"), false);
 });
