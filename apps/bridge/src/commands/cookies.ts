@@ -174,6 +174,9 @@ export const cookiesCommand: Command = {
        browserkit cookies set --domain <host> --name <name> --value <value> [--path /] [--secure] [--http-only]
        browserkit cookies delete --name <name> --domain <host> [--json]
        browserkit cookies clear --domain <host> [--json]
+       browserkit cookies import --from firefox|edge|brave|opera --profile <name> --domain a,b [--include-session] [--dry-run] [--json]
+
+For import, --domain takes one comma-separated list (repeat flags are not supported).
 
 Values are hidden unless --values is passed, so a listing does not put a session token in your
 terminal by accident. Uses the open browser; the active tab is only borrowed to answer.`,

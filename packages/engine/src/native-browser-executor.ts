@@ -1,5 +1,6 @@
 import { noteActionTiming } from "./native-browser-action-timing.js";
 import { engineConfig } from "./engine-config.js";
+import { privateTarget } from "./native-browser-policy.js";
 import {
   type BrowserExecutorRequest,
   type BrowserExecutorResult,
@@ -272,6 +273,10 @@ export async function performExtra(
       if (step.op === "press")
         return pressElement(debuggee, request, () => revalidate(request, tabId));
       if (step.op === "navigate") {
+        if (await engineConfig.privateNetwork()) {
+          const blocked = privateTarget(step.url, await engineConfig.privateNetworkPorts());
+          if (blocked) throw new Error(`PRIVATE_NETWORK: ${blocked}`);
+        }
         // Recorded from the first request, so page.network.list() has the new page's calls.
         await captureFromTabStart(tabId);
         return navigateReady(tabId, step.url, step.timeoutMs, step.referer);
@@ -512,7 +517,6 @@ function claimIsFresh(request: BrowserExecutorRequest): boolean {
   if (usedClaims.size > 2048) usedClaims.delete(usedClaims.values().next().value as string);
   return true;
 }
-
 async function executeStep(
   identity: BrowserIdentity,
   request: BrowserExecutorRequest,
@@ -544,7 +548,6 @@ async function executeStep(
     }
   });
 }
-
 async function dispatchStep(
   request: BrowserExecutorRequest,
   step: BrowserStep,
@@ -565,7 +568,6 @@ async function dispatchStep(
   if (isExtraStep(step)) return performExtra({ ...request, step }, revalidateTarget);
   throw new Error("UNSUPPORTED");
 }
-
 // Chrome only reports activation for a focused window, so a tab opened in a background or
 // headless window can sit in the inventory as inactive. Ask each window which tab is active at
 // list time, so browser.tabs() and browser.activeTab() both describe Chrome as it is now.
@@ -580,7 +582,6 @@ async function assertTarget(request: BrowserExecutorRequest): Promise<chrome.tab
   if (!inventoryMatchesRequest(refreshed, request)) throw new Error("TARGET_LOST");
   return live;
 }
-
 function inventoryMatchesRequest(
   tab: ReturnType<typeof currentInventoryTabs>[number] | undefined,
   request: BrowserExecutorRequest,
@@ -595,7 +596,6 @@ function inventoryMatchesRequest(
     safePage(tab.url),
   );
 }
-
 async function revalidateTarget(request: BrowserExecutorRequest, tabId: number): Promise<void> {
   assertClaimActive(request);
   if (!isTargetStep(request.step) || request.step.target.tabId !== tabId)
