@@ -117,10 +117,11 @@ export async function saveFlight(tabId: number): Promise<SavedFlight | undefined
     toOffscreen({ target: "aeon-code-offscreen", kind: "flightSave", tabId }).catch(
       () => undefined,
     ),
-    new Promise((resolve) => setTimeout(() => resolve(undefined), 10_000)),
+    new Promise((resolve) => setTimeout(() => resolve(undefined), 60_000)),
   ])) as
     | { data?: string; frames?: number; durationMs?: number; startedAt?: number; error?: string }
     | undefined;
+  if (reply?.error) throw new Error(`FLIGHT_SAVE: ${reply.error}`);
   if (!reply?.data || !reply.frames) return undefined;
   return {
     tabId,

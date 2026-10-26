@@ -76,6 +76,8 @@ async function input(message: Record<string, unknown>): Promise<void> {
         });
       }
       void at;
+    } catch {
+      // Viewer input is best effort; a refused dispatch must not detach the shared debugger.
     } finally {
       endDispatch(tabId);
     }

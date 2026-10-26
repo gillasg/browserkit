@@ -24,7 +24,9 @@ test("the viewer rejects a bad token and streams frames to a good client", async
       socket.once("error", fail);
     });
     assert.equal(requested, 1);
-    const frame = new Promise((done) => socket.once("message", (raw) => done(JSON.parse(String(raw)))));
+    const frame = new Promise((done) =>
+      socket.once("message", (raw) => done(JSON.parse(String(raw)))),
+    );
     view.frame("abc");
     assert.equal((await frame).data, "data:image/jpeg;base64,abc");
     socket.send(JSON.stringify({ action: "key", key: "a" }));
