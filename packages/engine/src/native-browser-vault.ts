@@ -1,3 +1,4 @@
+import { onEngineInstall } from "./native-engine-install.js";
 import { onNode } from "./native-browser-dom.js";
 import { withBrowserDebugger } from "./native-browser-session.js";
 import { promptVaultSave } from "./native-browser-vault-prompt.js";
@@ -164,6 +165,10 @@ async function saveVaultCandidate(candidate: VaultCandidate, ask: VaultAsk): Pro
     return false;
   }
 }
+
+onEngineInstall(() => {
+  chrome.tabs.onRemoved.addListener((tabId) => candidates.delete(tabId));
+});
 
 export async function offerSaveCandidate(
   tabId: number,
