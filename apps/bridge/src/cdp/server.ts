@@ -2,12 +2,16 @@ import { randomUUID } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { WebSocket, WebSocketServer } from "ws";
 
-// A local DevTools Protocol endpoint over agent tabs. Clients see only tabs they opened; every
-// command goes to the debugger session the engine already has for that tab. Browser-level
-// commands that cannot be honoured are refused with a clear CDP error.
+// A local DevTools Protocol endpoint over agent tabs. Clients see only tabs they opened. Only
+// browser-level Target.* bookkeeping is answered here; every page command is passed unchanged to
+// the debugger session the engine already has for that tab, and every debugger event comes back
+// on the matching session, so clients see Chrome's own frame tree, lifecycle and contexts. Targets
+// carry Chrome's real target ids: Playwright keys a page's main frame by its target id.
+// Browser-level commands that cannot be honoured are refused with a clear CDP error.
 
 export interface CdpTab {
   tabId: number;
+  targetId: string;
   url: string;
   title: string;
 }
@@ -98,51 +102,43 @@ export class CdpServer {
     return `ws://127.0.0.1:${this.port}/devtools/browser/${randomUUID()}?token=${this.token}`;
   }
 
-  /** Debugger events for a tab a CDP client owns. */
+  /** Debugger events for a tab a CDP client owns, relayed on the matching client session. */
   handleEngine(message: Record<string, unknown>): void {
     const tabId = Number(message.tabId);
-    if (!Number.isSafeInteger(tabId)) return;
+    if (!Number.isSafeInteger(tabId) || message.kind === "cdp.result") return;
     for (const client of this.clients) {
       if (!client.targets.has(tabId)) continue;
-      const root = this.rootSession(client, tabId);
-      const engineSession = message.sessionId === undefined ? undefined : String(message.sessionId);
-      if (message.kind === "cdp.result") continue;
       if (message.kind === "cdp.detached") {
-        this.event(
-          client.socket,
-          "Inspector.detached",
-          { reason: message.reason ?? "target_closed" },
-          root,
-        );
+        this.forget(client, tabId);
         continue;
       }
-      if (engineSession) {
-        const child = this.childSession(client, tabId, engineSession);
-        const method = String(message.method);
-        const params = { ...((message.params ?? {}) as Record<string, unknown>) };
-        if (method === "Target.attachedToTarget") {
-          params.sessionId = child;
-          params.parentSessionId = root;
-        }
-        if (method === "Target.detachedFromTarget") {
-          params.sessionId = child;
-          client.sessions.delete(child);
-        }
-        this.event(
-          client.socket,
-          method,
-          params,
-          method === "Target.attachedToTarget" ? root : child,
-        );
-        continue;
-      }
-      this.event(
-        client.socket,
-        String(message.method),
-        (message.params ?? {}) as Record<string, unknown>,
-        root,
-      );
+      const source = message.sessionId === undefined ? undefined : String(message.sessionId);
+      const session = source
+        ? this.childSession(client, tabId, source)
+        : this.rootSession(client, tabId);
+      const method = String(message.method);
+      const params = this.childParams(client, tabId, method, message.params, session);
+      this.event(client.socket, method, params, session);
     }
+  }
+
+  /** Child-session events name the engine's session id; the client knows its own alias. */
+  private childParams(
+    client: Client,
+    tabId: number,
+    method: string,
+    raw: unknown,
+    parent: string,
+  ): Record<string, unknown> {
+    const params = { ...((raw ?? {}) as Record<string, unknown>) };
+    if (method !== "Target.attachedToTarget" && method !== "Target.detachedFromTarget")
+      return params;
+    if (params.sessionId === undefined) return params;
+    const child = this.childSession(client, tabId, String(params.sessionId));
+    params.sessionId = child;
+    if (method === "Target.attachedToTarget") params.parentSessionId = parent;
+    else client.sessions.delete(child);
+    return params;
   }
 
   private async http(request: IncomingMessage, response: ServerResponse): Promise<void> {
@@ -167,8 +163,7 @@ export class CdpServer {
       const urlToOpen = url.searchParams.get("url") ?? "about:blank";
       const session = `cdp-http-${randomUUID()}`;
       const tab = await this.adapter.openTab(session, urlToOpen);
-      const info = { ...targetInfo(tab), targetId: targetId(tab.tabId) };
-      json(response, info);
+      json(response, targetInfo(tab));
       return;
     }
     const activate = /^\/json\/activate\/(.+)$/.exec(url.pathname);
@@ -178,10 +173,7 @@ export class CdpServer {
       const tab = await this.findByTarget(String(close[1]));
       if (!tab) return fail(response, 404, "No such target");
       await this.adapter.closeTab(tab.session, tab.tab.tabId);
-      for (const client of this.clients) {
-        client.targets.delete(tab.tab.tabId);
-        client.roots.delete(tab.tab.tabId);
-      }
+      for (const client of this.clients) this.forget(client, tab.tab.tabId);
       return json(response, { ok: true });
     }
     fail(response, 404, "Not found");
@@ -301,15 +293,13 @@ export class CdpServer {
       client.targets.set(tab.tabId, tab);
       this.targetCreated(client, tab);
       if (client.autoAttach) this.announce(client, tab);
-      return { targetId: targetId(tab.tabId) };
+      return { targetId: tab.targetId };
     }
     if (method === "Target.closeTarget") {
       const found = this.clientTarget(client, String(params.targetId ?? ""));
       if (!found) throw new Error(`Target not found: ${String(params.targetId ?? "")}`);
       await this.adapter.closeTab(client.session, found.tabId);
-      client.targets.delete(found.tabId);
-      client.roots.delete(found.tabId);
-      this.event(client.socket, "Target.targetDestroyed", { targetId: String(params.targetId) });
+      this.forget(client, found.tabId);
       return { success: true };
     }
     if (method === "Target.attachToTarget") {
@@ -405,9 +395,32 @@ export class CdpServer {
     this.event(
       client.socket,
       "Target.attachedToTarget",
-      { sessionId: session, targetInfo: targetInfo(tab), waitingForDebugger: false },
+      {
+        sessionId: session,
+        targetInfo: { ...targetInfo(tab), attached: true },
+        waitingForDebugger: false,
+      },
       undefined,
     );
+  }
+
+  /** A tab went away: detach its sessions and tell the client the target is gone. */
+  private forget(client: Client, tabId: number): void {
+    const tab = client.targets.get(tabId);
+    if (!tab) return;
+    const root = client.roots.get(tabId);
+    for (const [id, route] of client.sessions)
+      if (route.tabId === tabId) client.sessions.delete(id);
+    client.targets.delete(tabId);
+    client.roots.delete(tabId);
+    client.announced.delete(tabId);
+    if (root)
+      this.event(client.socket, "Target.detachedFromTarget", {
+        sessionId: root,
+        targetId: tab.targetId,
+      });
+    if (client.discovered)
+      this.event(client.socket, "Target.targetDestroyed", { targetId: tab.targetId });
   }
 
   private targetCreated(client: Client, tab: CdpTab): void {
@@ -425,7 +438,7 @@ export class CdpServer {
   }
 
   private clientTarget(client: Client, id: string): CdpTab | undefined {
-    for (const tab of client.targets.values()) if (targetId(tab.tabId) === id) return tab;
+    for (const tab of client.targets.values()) if (tab.targetId === id) return tab;
     return undefined;
   }
 
@@ -438,13 +451,13 @@ export class CdpServer {
           seen.add(tab.tabId);
           tabs.push(tab);
         }
-    return tabs.map((tab) => ({ ...targetInfo(tab), targetId: targetId(tab.tabId) }));
+    return tabs.map(targetInfo);
   }
 
   private async findByTarget(id: string): Promise<{ session: string; tab: CdpTab } | undefined> {
     for (const client of this.clients)
       for (const tab of client.targets.values())
-        if (targetId(tab.tabId) === id) return { session: client.session, tab };
+        if (tab.targetId === id) return { session: client.session, tab };
     return undefined;
   }
 
@@ -457,13 +470,9 @@ export class CdpServer {
   }
 }
 
-function targetId(tabId: number): string {
-  return `page-${tabId}`;
-}
-
 function targetInfo(tab: CdpTab): TargetInfo {
   return {
-    targetId: targetId(tab.tabId),
+    targetId: tab.targetId,
     type: "page",
     title: tab.title || "",
     url: tab.url || "about:blank",

@@ -111,7 +111,7 @@ async function newTab(id: string, chatId: string, url: string): Promise<void> {
     if (!known) throw new Error("TARGET_LOST");
     noteLabel(chatId, tab.id, known.url);
     enableTab(tab.id, chatId);
-    send({ kind: "cdp.tab", id, tab: known });
+    send({ kind: "cdp.tab", id, tab: known, targetId: await realTargetId(tab.id) });
   } catch (error) {
     send({ kind: "cdp.tab", id, error: String(error instanceof Error ? error.message : error) });
   }
@@ -128,6 +128,14 @@ async function closeTab(id: string, tabId: number, chatId: string): Promise<void
   } catch (error) {
     send({ kind: "cdp.tab", id, error: String(error instanceof Error ? error.message : error) });
   }
+}
+
+/** Chrome's own target id for the tab; clients match it against the main frame id. */
+async function realTargetId(tabId: number): Promise<string> {
+  const targets = await chrome.debugger.getTargets();
+  const found = targets.find((target) => target.tabId === tabId && target.type === "page");
+  if (!found) throw new Error("TARGET_LOST");
+  return found.id;
 }
 
 function enableTab(tabId: number, chatId: string): void {

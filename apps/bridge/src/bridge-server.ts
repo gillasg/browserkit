@@ -318,7 +318,6 @@ export class Bridge {
     } else if (message.kind === "cdp.result" || message.kind === "cdp.tab") {
       this.completeCdp(message);
     } else if (message.kind === "cdp.event" || message.kind === "cdp.detached") {
-      console.error("[cdp] engine", String(message.kind), String(message.method ?? ""));
       this.cdp?.handleEngine(message);
     }
   }
@@ -557,13 +556,15 @@ export class Bridge {
   private async cdpOpenTab(
     session: string,
     url: string,
-  ): Promise<{ tabId: number; url: string; title: string }> {
+  ): Promise<{ tabId: number; targetId: string; url: string; title: string }> {
     const reply = await this.cdpSend({ kind: "cdp.newTab", chatId: session, url });
     const tab = reply.tab as Json | undefined;
     const target = (tab?.target ?? {}) as Json;
-    if (reply.error || !tab) throw new Error(String(reply.error ?? "Could not open a tab"));
+    if (reply.error || !tab || !reply.targetId)
+      throw new Error(String(reply.error ?? "Could not open a tab"));
     return {
       tabId: Number(target.tabId ?? tab.tabId),
+      targetId: String(reply.targetId),
       url: String(tab.url ?? url),
       title: String(tab.title ?? ""),
     };

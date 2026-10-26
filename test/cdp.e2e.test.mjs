@@ -1,5 +1,5 @@
-// One targeted real-Chrome check: a raw CDP client opens, evaluates, screenshots and closes an
-// agent tab through the local endpoint.
+// One targeted real-Chrome check: Playwright connects to the local endpoint, drives an agent tab
+// end to end, is refused browser-level commands, and its tabs close when it disconnects.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn, execFile } from "node:child_process";
@@ -10,6 +10,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import WebSocket from "ws";
+import { chromium } from "playwright-core";
 
 const chromePath =
   process.env.CHROME_PATH ??
@@ -20,14 +21,14 @@ const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
 const run = promisify(execFile);
 
 test(
-  "the local CDP endpoint drives an agent tab",
+  "Playwright drives an agent tab through the local CDP endpoint",
   {
     skip:
       !process.env.REQUIRE_E2E &&
       (!existsSync(chromePath) || !existsSync(extension) || !existsSync(cli)),
   },
   async () => {
-    const home = await mkdtemp(join(tmpdir(), "bue-cdp-ws-"));
+    const home = await mkdtemp(join(tmpdir(), "bue-cdp-"));
     const env = { ...process.env, BROWSERKIT_HOME: home, SITE_TO_API_HOME: join(home, "s2a") };
     const site = createServer((_request, response) => {
       response.setHeader("content-type", "text/html");
@@ -36,7 +37,7 @@ test(
     await new Promise((done) => site.listen(0, "127.0.0.1", done));
     const url = `http://127.0.0.1:${site.address().port}/`;
     const bridge = spawn(process.execPath, [cli, "serve"], { env, stdio: "ignore" });
-    const profile = await mkdtemp(join(tmpdir(), "bue-cdp-ws-chrome-"));
+    const profile = await mkdtemp(join(tmpdir(), "bue-cdp-chrome-"));
     let chrome;
     try {
       await waitFor(async () => JSON.parse(await readFile(join(home, "bridge.json"), "utf8")));
@@ -55,40 +56,38 @@ test(
         ],
         { stdio: "ignore" },
       );
-      await connectExtension(profile, env);
+      const chromePort = await connectExtension(profile, env);
       const started = await run(process.execPath, [cli, "cdp", "--port", "0", "--json"], { env });
       const info = JSON.parse(started.stdout);
       assert.equal(info.running, true, started.stdout);
       const denied = await fetch(`${info.url}/json/version`);
       assert.equal(denied.status, 401);
 
-      const client = await cdpClient(info.wsUrl);
+      const browser = await chromium.connectOverCDP(info.connectUrl, { timeout: 30_000 });
       try {
-        await client.send("Target.setAutoAttach", {
-          autoAttach: true,
-          waitForDebuggerOnStart: false,
-          flatten: true,
-        });
-        const created = await client.send("Target.createTarget", { url });
-        const targetId = created.targetId;
-        const attached = await client.waitEvent("Target.attachedToTarget", 15_000);
-        const sessionId = attached.params.sessionId;
-        await client.send("Page.enable", {}, sessionId);
-        await client.send("Runtime.enable", {}, sessionId);
-        await client.send("Page.navigate", { url }, sessionId);
-        await sleep(1000);
-        const evaluated = await client.send(
-          "Runtime.evaluate",
-          { expression: "document.title", returnByValue: true },
-          sessionId,
-        );
-        assert.equal(evaluated.result.value, "CDP page");
-        const shot = await client.send("Page.captureScreenshot", { format: "png" }, sessionId);
-        assert.ok(String(shot.data).length > 100);
-        await client.send("Target.closeTarget", { targetId });
+        const context = browser.contexts()[0];
+        assert.ok(context, "a default context");
+        const page = await context.newPage();
+        await page.goto(url);
+        assert.equal(await page.evaluate(() => document.title), "CDP page");
+        assert.equal(await page.locator("h1").textContent(), "CDP page");
+        const shot = await page.screenshot();
+        assert.ok(shot.length > 100);
+        await page.close();
+
+        const session = await browser.newBrowserCDPSession();
+        await assert.rejects(session.send("Browser.close"), /not supported/);
+        await assert.rejects(session.send("Network.clearBrowserCookies"), /not allowed/);
+
+        const left = await context.newPage();
+        await left.goto(`${url}?left`);
       } finally {
-        client.close();
+        await browser.close();
       }
+      await waitFor(async () => {
+        const tabs = await fetch(`http://127.0.0.1:${chromePort}/json/list`).then((r) => r.json());
+        if (tabs.some((tab) => tab.url.startsWith(url))) throw new Error("client tab still open");
+      });
     } finally {
       chrome?.kill();
       bridge.kill();
@@ -104,50 +103,6 @@ test(
   },
 );
 
-async function cdpClient(url) {
-  const socket = new WebSocket(url);
-  await new Promise((done, fail) => {
-    socket.once("open", done);
-    socket.once("error", fail);
-  });
-  let id = 0;
-  const waiting = new Map();
-  const events = [];
-  socket.on("message", (raw) => {
-    const message = JSON.parse(String(raw));
-    if (message.id && waiting.has(message.id)) {
-      const waiter = waiting.get(message.id);
-      waiting.delete(message.id);
-      if (message.error) waiter.fail(new Error(message.error.message));
-      else waiter.done(message.result);
-      return;
-    }
-    events.push(message);
-  });
-  return {
-    send(method, params = {}, sessionId) {
-      const requestId = ++id;
-      return new Promise((done, fail) => {
-        waiting.set(requestId, { done, fail });
-        socket.send(
-          JSON.stringify({ id: requestId, method, params, ...(sessionId ? { sessionId } : {}) }),
-        );
-      });
-    },
-    async waitEvent(method, timeoutMs) {
-      const deadline = Date.now() + timeoutMs;
-      while (Date.now() < deadline) {
-        const at = events.findIndex((event) => event.method === method);
-        if (at >= 0) return events.splice(at, 1)[0];
-        await sleep(50);
-      }
-      throw new Error(`Timed out waiting for ${method}`);
-    },
-    close() {
-      socket.close();
-    },
-  };
-}
 async function connectExtension(profile, env) {
   const port = await waitFor(async () =>
     Number((await readFile(join(profile, "DevToolsActivePort"), "utf8")).split("\n")[0]),
@@ -177,7 +132,7 @@ async function connectExtension(profile, env) {
     const { stdout } = await run(process.execPath, [cli, "status"], { env });
     if (!/1 browser/.test(stdout)) throw new Error(stdout);
   }, 30000);
-  return cdp;
+  return port;
 }
 
 function nativeBootstrap(env, message) {
