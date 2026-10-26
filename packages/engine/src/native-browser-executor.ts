@@ -39,23 +39,16 @@ import {
   mineTabIds,
   trackAgentTab,
 } from "./native-browser-tab-cleanup.js";
-import { currentFocusedWindowId } from "./native-inventory-client.js";
 import { ownerTitle } from "./native-browser-owner.js";
 import { enableQuietTab } from "./native-browser-quiet.js";
 import { showAgentCaption } from "./native-browser-cursor.js";
 import { openTab } from "./native-browser-open-tab.js";
-import { attachTab, listTabs } from "./native-browser-tabs.js";
+import { attachTab, hostOf, isLivePage, listTabs } from "./native-browser-tabs.js";
+import { handleCdpMessage, noteCdpSocket } from "./native-browser-cdp.js";
 import { injectedScripts, judgeStealth, noteInjectedScript, type StealthProbe } from "./stealth.js";
 import { controlError, controlOf, stepInput } from "./native-browser-control.js";
-import { controlOrSessionStep } from "./native-browser-extra-session.js";
+import { controlOrSessionStep, flightStep } from "./native-browser-extra-session.js";
 
-function hostOf(url: string): string {
-  try {
-    return new URL(url).hostname.replace(/^www./, "");
-  } catch {
-    return "page";
-  }
-}
 import {
   executeInteraction,
   interactFrame,
@@ -203,6 +196,7 @@ type ExtraRequest = BrowserExecutorRequest & {
         | "stealth"
         | "control"
         | "session"
+        | "flight"
         | "siteScript"
         | "popups"
         | "evaluate"
@@ -236,6 +230,9 @@ export async function performExtra(
   } else if (step.op === "control" || step.op === "session") {
     await revalidate(request, tabId);
     data = await controlOrSessionStep(step, request.chatId);
+  } else if (step.op === "flight") {
+    await revalidate(request, tabId);
+    data = await flightStep(step, tabId);
   } else if (step.op === "siteScript") {
     await revalidate(request, tabId);
     data = await executeSiteScript(step.action, tabId, step.definition, step.scriptId, () =>
@@ -295,10 +292,11 @@ export async function performExtra(
   if (!tab || !sameTarget(tab.target, request.step.target) || !safePage(tab.url))
     throw new Error("TARGET_LOST");
   const encoded = JSON.stringify(data);
-  if (encoded && encoded.length > 1_000_000)
+  // A flight recording is a whole WebM file; other results stay small enough for one message.
+  if (encoded && encoded.length > (step.op === "flight" ? 60_000_000 : 1_000_000))
     throw new BrowserActionError(
       "UNSUPPORTED",
-      "Result exceeds 1 MB; extract in smaller batches and save artifacts.",
+      "Result exceeds its size limit; extract in smaller batches and save artifacts.",
     );
   return {
     kind: "page",
@@ -450,6 +448,8 @@ export function handleBrowserExecutorMessage(
   socket: WebSocket,
   candidate: unknown,
 ): boolean {
+  noteCdpSocket(socket, identity);
+  if (handleCdpMessage(candidate)) return true;
   if (handleScriptSync(candidate) || handleBrowserRelease(candidate)) return true;
   const request = BrowserExecutorRequestSchema.safeParse(candidate);
   if (!request.success) return false;
@@ -594,11 +594,6 @@ function inventoryMatchesRequest(
   );
 }
 
-async function isLivePage(tabId: number): Promise<boolean> {
-  const tab = await chrome.tabs.get(tabId).catch(() => undefined);
-  return Boolean(tab?.url && safePage(tab.url));
-}
-
 async function revalidateTarget(request: BrowserExecutorRequest, tabId: number): Promise<void> {
   assertClaimActive(request);
   if (!isTargetStep(request.step) || request.step.target.tabId !== tabId)
@@ -656,6 +651,7 @@ function isExtraStep(step: BrowserStep): step is Extract<
       | "stealth"
       | "control"
       | "session"
+      | "flight"
       | "siteScript"
       | "popups"
       | "evaluate"
@@ -674,6 +670,11 @@ function isExtraStep(step: BrowserStep): step is Extract<
     "wait",
     "navigate",
     "diagnostics",
+    "console",
+    "stealth",
+    "control",
+    "session",
+    "flight",
     "siteScript",
     "popups",
     "evaluate",

@@ -490,6 +490,19 @@ var browser = Object.freeze({
     click: (element) => __step({op:'click',target,element:__wire(__element(target,element)),observe:false}),
     fill: (element, value) => __step({op:'fill',target,element:__wire(__element(target,element)),value:String(value),observe:false}),
     evaluate: async (fn, arg) => (await __step({op:'evaluate',target,expression:__expression(fn,arg)})).data.value,
+    control: async () => (await __step({op:'control', target, action:'status'})).data,
+    waitForControl: async (options = {}) =>
+      (await __step({op:'control', target, action:'wait', timeoutMs: Math.min(Number(options.timeoutMs ?? options.timeout ?? 30000) || 0, 120000)})).data,
+    giveBack: async () => (await __step({op:'control', target, action:'giveback'})).data,
+    flight: Object.freeze({
+      save: async (options = {}) => {
+        var recording = (await __step({op:'flight', target, action:'save'})).data;
+        if (!recording || !recording.data) throw Error('FLIGHT_EMPTY: no frames were recorded for this tab');
+        return __call({flight:{tabId: target.tabId, data: recording.data, frames: recording.frames, durationMs: recording.durationMs, startedAt: recording.startedAt, ...(options.name ? {name: String(options.name)} : {})}});
+      },
+      status: async () => (await __step({op:'flight', target, action:'status'})).data,
+      clear: async () => (await __step({op:'flight', target, action:'clear'})).data,
+    }),
     inspect: async (fn, arg) => (await __step({op:'evaluate',target,expression:__expression(fn,arg)},true)).data.value,
     // Functions the page exposes on window, with their arity: what a page script can be built on.
     functions: async () => browser.page(target).inspect(__pageFunctions),

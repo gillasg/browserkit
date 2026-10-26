@@ -1,5 +1,6 @@
 import { onEngineInstall } from "./native-engine-install.js";
 import { onBrowserDebuggerAttached, browserSessionOwner } from "./native-browser-session.js";
+import { stopFlight } from "./native-browser-flight.js";
 
 // Who is driving a tab. CDP's Input events are trusted, just like a real click, so the engine
 // records the moments it is dispatching input; a trusted event outside those moments came from
@@ -74,6 +75,7 @@ export function noteUserInput(tabId: number, at: number): void {
   if (!browserSessionOwner(tabId) || handoffActive(tabId) || agentInput(tabId, at)) return;
   if (controlled.has(tabId)) return;
   controlled.set(tabId, { at, reported: false });
+  void stopFlight(tabId);
   void injectTop(tabId, controlBanner);
   notify(tabId, "user");
 }

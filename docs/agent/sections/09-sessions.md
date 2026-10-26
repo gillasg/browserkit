@@ -33,6 +33,14 @@ ids change. If the user clicks or types in a tab the agent is driving, the agent
 `USER_TOOK_CONTROL`; `browser.tabs()` marks `control: "user"` and `page.waitForControl()` waits
 until the banner's button or `page.giveBack()` restores the agent.
 
+## A local DevTools endpoint
+
+`browserkit cdp` starts a 127.0.0.1-only DevTools endpoint over agent tabs and prints a tokenised
+URL. Playwright: `chromium.connectOverCDP(url)`; Puppeteer: `connect({browserURL: url})`.
+`browserkit cdp --status` reports it, `--stop` ends it. Tabs opened through the endpoint belong to
+that client and close when it disconnects; browser contexts, cookie/storage clearing and
+`Browser.close` are refused. The endpoint is off until started.
+
 ## Bulk work: sweeps, outcomes and evidence
 
 For "is this list of sites alive / does it have X", do not write the open-wait-capture-close loop:

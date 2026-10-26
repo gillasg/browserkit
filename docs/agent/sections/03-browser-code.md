@@ -50,3 +50,7 @@ const rows = await page.list("tr"); // every row, scrolling lists that draw lazi
   `.claim()` leaves the whole space to the user; `.spaces()` lists sessions and their status. Tabs
   carry stable labels (`p1`, `p2…`) in `browser.tabs()` and `bu.use("p2")`, re-bound by URL after
   a browser restart.
+- `page.flight.save()` writes the last two minutes of the tab as WebM under `BROWSERKIT_HOME/flight`
+  (or `--out`), returning its path, frame count and duration. A failed cell saves one automatically
+  and names the files in its result; `browserkit repl --no-flight` turns recording off for a run.
+  `page.flight.status()` says what is buffered; `clear()` drops it.

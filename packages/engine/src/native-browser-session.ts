@@ -10,6 +10,7 @@ import { currentInventoryTabs } from "./native-inventory-client.js";
 import { tidyAllChatTabs, tidyChatTabs, touchAgentTab } from "./native-browser-tab-cleanup.js";
 import type { BrowserExecutorRequest } from "@browserkit/protocol";
 import { onEngineInstall } from "./native-engine-install.js";
+import { startFlight, stopFlight } from "./native-browser-flight.js";
 
 interface Attachment {
   chatId: string;
@@ -73,6 +74,18 @@ export function bindBrowserSession(tabId: number, chatId: string): void {
   persistBrowserOwners(owners);
 }
 
+/** Attaches for a caller that sends its own debugger commands (CDP clients); errors stay its own. */
+export async function ensureBrowserAttachment(tabId: number, chatId: string): Promise<void> {
+  bindBrowserSession(tabId, chatId);
+  let entry = attachments.get(tabId);
+  if (!entry) {
+    entry = { chatId, attached: attach(tabId) };
+    attachments.set(tabId, entry);
+  }
+  await entry.attached;
+  touchAgentTab(tabId);
+}
+
 const NOT_READY =
   /different extension|Cannot access a chrome-extension|Cannot access a chrome: ?URL/i;
 
@@ -109,6 +122,7 @@ async function runWithBrowserDebugger<T>(
     await entry.attached;
     touchAgentTab(tabId);
     await ensureBrowserViewport(tabId);
+    void startFlight(tabId, chatId);
     if (attachments.get(tabId) !== entry) throw new Error("OPERATION_FAILED");
     if (entry.timer !== undefined) clearTimeout(entry.timer);
     entry.timer = globalThis.setTimeout(() => idleDetach(tabId), 90_000);
@@ -154,6 +168,7 @@ export async function releaseBrowserSessions(chatId?: string, reset = false): Pr
 }
 
 function forget(tabId: number): void {
+  void stopFlight(tabId);
   const entry = attachments.get(tabId);
   if (entry?.timer !== undefined) clearTimeout(entry.timer);
   attachments.delete(tabId);

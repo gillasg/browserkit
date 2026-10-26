@@ -10,6 +10,7 @@ import {
 } from "@browserkit/protocol";
 import { jobs, saveJobs } from "./code-runtime-jobs.js";
 import { browserErrorDetail, errorCode, targetIdentity } from "./native-browser-common.js";
+import { OFFSCREEN, toOffscreen } from "./code-offscreen-host.js";
 import { stepFailure } from "./code-step-errors.js";
 import { jobCall, finishJob, cancelJobs } from "./code-runtime-job-control.js";
 import { executeLocalBrowserStep } from "./native-browser-executor.js";
@@ -31,6 +32,8 @@ import { engineConfig } from "./engine-config.js";
 import { resetChatTabs, agentTabSummary, reapChatPopups } from "./native-browser-tab-cleanup.js";
 import { setOwnerTitle } from "./native-browser-owner.js";
 import { disableQuietTab, enableQuietTab } from "./native-browser-quiet.js";
+import { saveFlight } from "./native-browser-flight.js";
+import { setFlightAllowed } from "./native-browser-flight.js";
 import { networkCall } from "./native-browser-network.js";
 import { mediaCall, type MediaRequest } from "./native-browser-media.js";
 import { isLibraryRequest, libraryCall } from "./native-browser-library.js";
@@ -43,7 +46,6 @@ import { googleCall } from "./native-browser-google.js";
 import { fetchCall, isFetchRequest } from "./native-browser-fetch.js";
 import type { BrowserIdentity } from "./native-worker-identity.js";
 
-const OFFSCREEN = "code-offscreen.html";
 const MAX_STEPS = 1000;
 const MAX_TRACE = 256;
 
@@ -71,7 +73,6 @@ export interface Cell {
   startedAt?: number;
 }
 const cells = new Map<string, Cell>();
-let offscreen: Promise<void> | undefined;
 
 /** Handles browser.code.* frames from Core. Returns false for anything else. */
 export function handleBrowserCodeMessage(
@@ -129,6 +130,7 @@ export async function resetRealm(chatId: string): Promise<void> {
 
 async function startCell(identity: BrowserIdentity, socket: WebSocket, run: BrowserCodeRun) {
   setOwnerTitle(run.chatId, run.ownerTitle);
+  setFlightAllowed(run.chatId, run.flight !== false);
   const allowed = new Map(run.targets.map((target) => [targetIdentity(target), target]));
   const cell: Cell = {
     run,
@@ -182,9 +184,39 @@ function finish(
 ): void {
   if (cell.done) return;
   cell.done = true;
+  if (cell.progressTimer) clearTimeout(cell.progressTimer);
+  if (!result.error) {
+    finalize(cell, result, []);
+    return;
+  }
+  // A failed run keeps its last two minutes: encode for the tabs it opened, save through the host,
+  // and name the file in the result so a chat can link it.
+  void attachFlights(cell)
+    .then((flights) => finalize(cell, result, flights))
+    .catch(() => finalize(cell, result, []));
+}
+
+async function attachFlights(cell: Cell): Promise<Record<string, unknown>[]> {
+  if (cell.run.flight === false) return [];
+  const tabs = [...new Set([...cell.opened.values()].map((target) => target.tabId))].slice(0, 4);
+  const saved: Record<string, unknown>[] = [];
+  for (const tabId of tabs) {
+    const encoded = await saveFlight(tabId).catch(() => undefined);
+    if (!encoded) continue;
+    const written = (await callCore(cell, { flight: encoded }).catch(() => undefined)) as
+      Record<string, unknown> | undefined;
+    if (written) saved.push(written);
+  }
+  return saved;
+}
+
+function finalize(
+  cell: Cell,
+  result: { value?: unknown; output?: string; error?: string; reset?: boolean },
+  flights: Record<string, unknown>[],
+): void {
   cells.delete(cell.run.cellId);
   void releaseTabs(cell.guarded);
-  if (cell.progressTimer) clearTimeout(cell.progressTimer);
   for (const waiter of cell.calls.values()) waiter.reject(new Error("Browser cell finished"));
   send(cell.socket, {
     kind: "browser.code.result",
@@ -193,6 +225,7 @@ function finish(
     ...(result.value !== undefined ? { value: result.value } : {}),
     ...(result.error ? { error: result.error.slice(0, 20000) } : {}),
     ...(result.reset ? { reset: true } : {}),
+    ...(flights.length ? { flight: flights } : {}),
     steps: cell.steps.slice(-MAX_TRACE),
     ms: Math.max(0, Date.now() - (cell.startedAt ?? Date.now())),
     opened: [...cell.opened.values()],
@@ -563,35 +596,16 @@ function progressSteps(cell: Cell): Record<string, unknown>[] {
   }));
 }
 
-async function ensureOffscreen(): Promise<void> {
-  if (await chrome.offscreen.hasDocument()) return;
-  offscreen ??= chrome.offscreen
-    .createDocument({
-      url: OFFSCREEN,
-      reasons: [chrome.offscreen.Reason.WORKERS],
-      justification: "Runs browser_code cells in a persistent sandboxed JavaScript realm.",
-    })
-    .catch((error: unknown) => {
-      if (!String(error).includes("Only a single offscreen")) throw error;
-    })
-    .finally(() => {
-      offscreen = undefined;
-    });
-  await offscreen;
-}
-
-export async function toOffscreen(message: Record<string, unknown>): Promise<unknown> {
-  await ensureOffscreen();
-  return chrome.runtime.sendMessage(message);
-}
-
 // The receiving socket closes on frames over 4 MB, which would end every running cell. Larger
 // messages are refused here instead: a call fails on its own, a result drops its value.
 const MAX_MESSAGE_CHARS = 3_500_000;
 function send(socket: WebSocket, message: unknown): boolean {
   if (socket.readyState !== WebSocket.OPEN) return false;
   let text = JSON.stringify(message);
-  if (text.length > MAX_MESSAGE_CHARS) {
+  const limit = Array.isArray((message as { flight?: unknown }).flight)
+    ? 80_000_000
+    : MAX_MESSAGE_CHARS;
+  if (text.length > limit) {
     const result = message as { kind?: string; value?: unknown; steps?: unknown[] };
     if (result.kind !== "browser.code.result") return false;
     const size = (text.length / 1_000_000).toFixed(1);

@@ -97,6 +97,13 @@ export const browserExtraSteps = [
     .strict(),
   z
     .object({
+      op: z.literal("flight"),
+      target,
+      action: z.enum(["save", "status", "clear"]),
+    })
+    .strict(),
+  z
+    .object({
       op: z.literal("session"),
       target,
       action: z.enum(["list", "finish", "claim", "resolve"]),

@@ -1,9 +1,10 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { createHostHandler } from "@browserkit/tools/host";
-import { mkdir, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { WebSocket, WebSocketServer, type RawData } from "ws";
 import { dataDirectory, statePath, type BridgeState } from "./paths.js";
+import { CdpServer } from "./cdp/server.js";
 import { isSiteSkillRequest, siteSkillCall } from "./site-skills.js";
 import {
   appendJournalEntry,
@@ -63,6 +64,12 @@ export class Bridge {
   private readonly sessionQueued = new Map<string, number>();
   private restoredSessions = false;
   private saveTimer: ReturnType<typeof setTimeout> | undefined;
+  private cdp: CdpServer | undefined;
+  private cdpInfo: { port: number; token: string } | undefined;
+  private readonly cdpWaiters = new Map<
+    string,
+    { resolve: (value: Json) => void; reject: (error: Error) => void; timer: NodeJS.Timeout }
+  >();
 
   constructor(private readonly token: string) {}
 
@@ -245,6 +252,7 @@ export class Bridge {
         code: String(request.code ?? ""),
         targets,
         timeoutMs,
+        ...(request.flight === false ? { flight: false } : {}),
       });
     });
   }
@@ -307,6 +315,11 @@ export class Bridge {
       cell?.progress(message);
     } else if (message.kind === "browser.code.result") {
       this.complete(message);
+    } else if (message.kind === "cdp.result" || message.kind === "cdp.tab") {
+      this.completeCdp(message);
+    } else if (message.kind === "cdp.event" || message.kind === "cdp.detached") {
+      console.error("[cdp] engine", String(message.kind), String(message.method ?? ""));
+      this.cdp?.handleEngine(message);
     }
   }
 
@@ -386,7 +399,11 @@ export class Bridge {
         void this.sessionCleanup(name)
           .then(async (result) => ({ ...result, deleted: await removeNamedSession(name) }))
           .then(respond);
-      } else respond({ error: "Unknown request" });
+      } else if (request.kind === "cdp.start")
+        void this.startCdp(Number(request.port ?? 9333)).then(respond);
+      else if (request.kind === "cdp.status") void this.cdpStatus().then(respond);
+      else if (request.kind === "cdp.stop") void this.stopCdp().then(respond);
+      else respond({ error: "Unknown request" });
     });
   }
 
@@ -470,6 +487,136 @@ export class Bridge {
     targets.set(`${target.clientInstanceId}:${target.tabId}:${target.tabIncarnation}`, target);
     this.sessionTargets.set(session, targets);
     this.persistSessions();
+  }
+
+  /** Starts (or reports) the local DevTools endpoint. Off until asked for. */
+  async startCdp(port: number): Promise<Json> {
+    if (this.cdp && this.cdpInfo) return { running: true, ...this.cdpInfo, url: this.cdp.url };
+    const token = randomBytes(24).toString("base64url");
+    const server = new CdpServer(token, {
+      openTab: (session, url) => this.cdpOpenTab(session, url),
+      closeTab: (session, tabId) => this.cdpCloseTab(session, tabId),
+      command: (session, tabId, method, params, engineSessionId) =>
+        this.cdpCommand(session, tabId, method, params, engineSessionId),
+    });
+    const bound = await server.start(Math.max(0, Math.min(port, 65535)));
+    this.cdp = server;
+    this.cdpInfo = { port: bound, token };
+    const info = {
+      running: true,
+      port: bound,
+      token,
+      url: server.url,
+      connectUrl: `${server.url}?token=${token}`,
+      wsUrl: server.wsUrl,
+    };
+    await writeFile(join(dataDirectory(), "cdp.json"), JSON.stringify(info, null, 2)).catch(
+      () => undefined,
+    );
+    return info;
+  }
+
+  async cdpStatus(): Promise<Json> {
+    if (this.cdp && this.cdpInfo) return { running: true, ...this.cdpInfo, url: this.cdp.url };
+    try {
+      const info = JSON.parse(await readFile(join(dataDirectory(), "cdp.json"), "utf8")) as {
+        port?: number;
+        token?: string;
+      };
+      if (!info.port || !info.token) return { running: false };
+      const reply = await fetch(
+        `http://127.0.0.1:${info.port}/json/version?token=${encodeURIComponent(info.token)}`,
+        { signal: AbortSignal.timeout(800) },
+      );
+      if (!reply.ok) return { running: false };
+      return {
+        running: true,
+        port: info.port,
+        token: info.token,
+        url: `http://127.0.0.1:${info.port}`,
+        connectUrl: `http://127.0.0.1:${info.port}?token=${info.token}`,
+      };
+    } catch {
+      return { running: false };
+    }
+  }
+
+  async stopCdp(): Promise<Json> {
+    await this.cdp?.stop().catch(() => undefined);
+    this.cdp = undefined;
+    this.cdpInfo = undefined;
+    for (const waiter of this.cdpWaiters.values()) {
+      clearTimeout(waiter.timer);
+      waiter.reject(new Error("CDP endpoint stopped"));
+    }
+    this.cdpWaiters.clear();
+    await unlink(join(dataDirectory(), "cdp.json")).catch(() => undefined);
+    return { running: false };
+  }
+
+  private async cdpOpenTab(
+    session: string,
+    url: string,
+  ): Promise<{ tabId: number; url: string; title: string }> {
+    const reply = await this.cdpSend({ kind: "cdp.newTab", chatId: session, url });
+    const tab = reply.tab as Json | undefined;
+    const target = (tab?.target ?? {}) as Json;
+    if (reply.error || !tab) throw new Error(String(reply.error ?? "Could not open a tab"));
+    return {
+      tabId: Number(target.tabId ?? tab.tabId),
+      url: String(tab.url ?? url),
+      title: String(tab.title ?? ""),
+    };
+  }
+
+  private async cdpCloseTab(session: string, tabId: number): Promise<void> {
+    const reply = await this.cdpSend({ kind: "cdp.closeTab", chatId: session, tabId });
+    if (reply.error) throw new Error(String(reply.error));
+  }
+
+  private cdpCommand(
+    session: string,
+    tabId: number,
+    method: string,
+    params: Record<string, unknown>,
+    engineSessionId?: string,
+  ): Promise<unknown> {
+    return this.cdpSend({
+      kind: "cdp.command",
+      chatId: session,
+      tabId,
+      method,
+      params,
+      ...(engineSessionId ? { sessionId: engineSessionId } : {}),
+    }).then((reply) => {
+      if (reply.error) throw new Error(String(reply.error));
+      return reply.result ?? {};
+    });
+  }
+
+  private cdpSend(body: Json): Promise<Json> {
+    const executor = [...this.executors.values()].find(
+      (item) => item.socket.readyState === WebSocket.OPEN,
+    );
+    if (!executor) return Promise.reject(new Error("BROWSER_OFFLINE: no browser connected"));
+    const id = randomUUID();
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.cdpWaiters.delete(id);
+        reject(new Error("CDP command timed out"));
+      }, 30_000);
+      this.cdpWaiters.set(id, { resolve, reject, timer });
+      send(executor.socket, { ...body, id });
+    });
+  }
+
+  /** Replies from the engine for a CDP command or tab request. */
+  private completeCdp(message: Json): void {
+    const waiter = this.cdpWaiters.get(String(message.id ?? ""));
+    if (!waiter) return;
+    this.cdpWaiters.delete(String(message.id));
+    clearTimeout(waiter.timer);
+    waiter.resolve(message);
   }
 
   /** A freshly started bridge gives the extension a few seconds to (re)connect. */

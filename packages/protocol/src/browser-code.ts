@@ -16,6 +16,8 @@ export const BrowserCodeRunSchema = z
     ownerTitle: z.string().min(1).max(120).optional(),
     /** Where this run's tabs go unless a step chooses: a background window or the user's window. */
     space: z.enum(["window", "tabs"]).optional(),
+    /** Record a short screencast of agent tabs (default true); false turns it off for this run. */
+    flight: z.boolean().optional(),
   })
   .strict();
 export type BrowserCodeRun = z.infer<typeof BrowserCodeRunSchema>;
@@ -62,6 +64,8 @@ export const BrowserCodeResultSchema = z
     value: z.unknown().optional(),
     error: z.string().max(20000).optional(),
     reset: z.boolean().optional(),
+    /** Saved recordings from a failed run: {path, frames, durationMs, startedAt}. */
+    flight: z.array(z.record(z.string(), z.unknown())).max(4).optional(),
     steps: z.array(z.record(z.string(), z.unknown())).max(256),
     opened: z.array(BrowserTargetKeySchema).max(64),
     /** Tabs this run opened/closed, the ones still open, all tabs, and parked popups. */

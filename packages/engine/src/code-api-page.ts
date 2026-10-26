@@ -348,6 +348,16 @@ var bu = Object.freeze({
   },
   // The user clicked or typed in this tab: the agent is paused until they give it back.
   control: async () => (await __step({op:'control', target, action:'status'})).data,
+  // A low-frame-rate recording of the last two minutes, kept in the offscreen document.
+  flight: Object.freeze({
+    save: async (options = {}) => {
+      var recording = (await __step({op:'flight', target, action:'save'})).data;
+      if (!recording || !recording.data) throw Error('FLIGHT_EMPTY: no frames were recorded for this tab');
+      return __call({flight:{tabId: target.tabId, data: recording.data, frames: recording.frames, durationMs: recording.durationMs, startedAt: recording.startedAt, ...(options.name ? {name: String(options.name)} : {})}});
+    },
+    status: async () => (await __step({op:'flight', target, action:'status'})).data,
+    clear: async () => (await __step({op:'flight', target, action:'clear'})).data,
+  }),
   waitForControl: async (options = {}) =>
     (await __step({op:'control', target, action:'wait', timeoutMs: Math.min(Number(options.timeoutMs ?? options.timeout ?? 30000) || 0, 120000)})).data,
   giveBack: async () => (await __step({op:'control', target, action:'giveback'})).data,

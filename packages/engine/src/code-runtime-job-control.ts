@@ -3,7 +3,7 @@
 // status a caller can act on: result says lost, resume continues from the last finished item,
 // and cancel stops both the record and the realm.
 import type { Cell } from "./code-runtime-host.js";
-import { toOffscreen } from "./code-runtime-host.js";
+import { toOffscreen } from "./code-offscreen-host.js";
 import { jobCode, jobOptions } from "./code-job-code.js";
 import { sweepCode, sweepOptions, type SweepOptions } from "./code-sweep-code.js";
 import { judgeOutcome, registrableDomain, summarizeOutcomes, type Outcome } from "./outcomes.js";

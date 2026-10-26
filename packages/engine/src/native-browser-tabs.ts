@@ -63,3 +63,18 @@ export function attachTab(target: BrowserTargetKey): BrowserExecutorResult {
   if (!tab || !safePage(tab.url)) throw new Error("TARGET_LOST");
   return BrowserExecutorResultSchema.parse({ kind: "tab", tab });
 }
+
+/** Whether the tab still exists on an http(s) page. */
+export async function isLivePage(tabId: number): Promise<boolean> {
+  const tab = await chrome.tabs.get(tabId).catch(() => undefined);
+  return Boolean(tab?.url && safePage(tab.url));
+}
+
+/** A readable host for a tab caption. */
+export function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www./, "");
+  } catch {
+    return "page";
+  }
+}

@@ -93,6 +93,10 @@ const rows = await page.list("tr"); // every row, scrolling lists that draw lazi
   `.claim()` leaves the whole space to the user; `.spaces()` lists sessions and their status. Tabs
   carry stable labels (`p1`, `p2…`) in `browser.tabs()` and `bu.use("p2")`, re-bound by URL after
   a browser restart.
+- `page.flight.save()` writes the last two minutes of the tab as WebM under `BROWSERKIT_HOME/flight`
+  (or `--out`), returning its path, frame count and duration. A failed cell saves one automatically
+  and names the files in its result; `browserkit repl --no-flight` turns recording off for a run.
+  `page.flight.status()` says what is buffered; `clear()` drops it.
 
 ## Reading pages
 
@@ -210,6 +214,14 @@ Tabs also get stable labels (`p1`, `p2…`): `browser.tabs()` shows each tab's `
 ids change. If the user clicks or types in a tab the agent is driving, the agent pauses with
 `USER_TOOK_CONTROL`; `browser.tabs()` marks `control: "user"` and `page.waitForControl()` waits
 until the banner's button or `page.giveBack()` restores the agent.
+
+## A local DevTools endpoint
+
+`browserkit cdp` starts a 127.0.0.1-only DevTools endpoint over agent tabs and prints a tokenised
+URL. Playwright: `chromium.connectOverCDP(url)`; Puppeteer: `connect({browserURL: url})`.
+`browserkit cdp --status` reports it, `--stop` ends it. Tabs opened through the endpoint belong to
+that client and close when it disconnects; browser contexts, cookie/storage clearing and
+`Browser.close` are refused. The endpoint is off until started.
 
 ## Bulk work: sweeps, outcomes and evidence
 

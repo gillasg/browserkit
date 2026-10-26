@@ -30,6 +30,8 @@ import { askCommand, providersCommand } from "./ask.js";
 import { mediaCommand } from "./media.js";
 import { dnsCommand } from "./dns.js";
 import { profileCommand } from "./profile.js";
+import { cdpCommand } from "./cdp.js";
+import { flightCommand } from "./flight.js";
 
 // Every capability the MCP tools and the bundled packages have, as a command.
 export const COMMANDS: Command[] = [
@@ -64,5 +66,7 @@ export const COMMANDS: Command[] = [
   mediaCommand,
   dnsCommand,
   profileCommand,
+  cdpCommand,
+  flightCommand,
   commandsCommand,
 ];
