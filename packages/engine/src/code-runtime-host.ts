@@ -410,7 +410,7 @@ async function serve(cell: Cell, request: unknown): Promise<unknown> {
   const stepTab = "target" in step ? step.target.tabId : undefined;
   if (stepTab !== undefined) takeActionTiming(stepTab);
   let resultTab: number | undefined;
-  if ((step.op === "click" || step.op === "press") && "target" in step)
+  if (isSubmitLike(step) && "target" in step)
     await captureTypedPassword(step.target.tabId).catch(() => undefined);
   try {
     const result = await executeLocalBrowserStep(
@@ -440,7 +440,7 @@ async function serve(cell: Cell, request: unknown): Promise<unknown> {
         void finishVaultCapture(
           tabId,
           (request) => callCore(cell, request),
-          () => true,
+          () => browserSessionOwner(tabId) !== undefined,
         ).catch(() => undefined);
       void notePreviewActivity(cell.run.chatId, tabId);
       // Only work in a tab (not reads) brings its chat and the tab together in Split View.
@@ -461,6 +461,20 @@ async function serve(cell: Cell, request: unknown): Promise<unknown> {
     progress(cell);
   }
 }
+function isSubmitLike(step: BrowserStep): boolean {
+  if (step.op === "press") return /^(Enter|NumpadEnter)$/i.test(step.key);
+  if (step.op !== "click") return false;
+  const element = step.element;
+  if (element.kind === "locator")
+    return (
+      element.role === "button" &&
+      /submit|sign|log|continue|next|create|register|join/i.test(element.name)
+    );
+  if (element.kind === "query")
+    return /submit|sign|log|continue|next|create|register|join/i.test(element.value);
+  return false;
+}
+
 // Steps whose trace entries carry input timing, pixel ratio included.
 const INPUT_OPS = new Set([
   "click",
