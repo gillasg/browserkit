@@ -614,8 +614,8 @@ var browser = Object.freeze({
         }
       },
       body: (id) => __call({network:'body', target, id}),
-      har: () => __call({network:'har', target}),
-      save: async (name = 'network.har') => (await artifact(name, JSON.stringify(await __call({network:'har', target}))), {saved: name}),
+      har: (filter = {}) => __call({network:'har', target, ...filter}),
+      save: async (name = 'network.har', filter = {}) => (await artifact(name, JSON.stringify(await __call({network:'har', target, ...filter}))), {saved: name}),
       clear: () => __call({network:'clear', target}),
       stop: () => __call({network:'stop', target}),
     }),

@@ -5,6 +5,12 @@
 // what does the whole session look like as a HAR.
 
 import type { NetworkEntry } from "./native-browser-network-format.js";
+import {
+  redactHarBody,
+  redactHarHeaders,
+  redactHarQuery,
+  redactHarUrl,
+} from "./native-browser-network-format.js";
 
 export type StaticKind = "static" | "dynamic";
 
@@ -38,6 +44,8 @@ export interface StoreFilter {
   since?: number;
   until?: number;
   limit?: number;
+  /** Emit secret values instead of redacting them (HAR only). */
+  raw?: boolean;
 }
 
 const MAX_ENTRIES = 3000;
@@ -205,7 +213,9 @@ export function statsGlobal(): {
 }
 
 export function harGlobal(filter: StoreFilter = {}): unknown {
-  const rows = queryGlobal({ ...filter, limit: filter.limit ?? 1000 });
+  const raw = filter.raw === true;
+  const { raw: _raw, ...storeFilter } = filter;
+  const rows = queryGlobal({ ...storeFilter, limit: storeFilter.limit ?? 1000 });
   return {
     log: {
       version: "1.2",
@@ -215,33 +225,32 @@ export function harGlobal(filter: StoreFilter = {}): unknown {
         time: entry.durationMs ?? 0,
         request: {
           method: entry.method,
-          url: entry.url,
+          url: raw ? entry.url : redactHarUrl(entry.url),
           httpVersion: "HTTP/1.1",
-          headers: Object.entries(entry.requestHeaders ?? {}).map(([name, value]) => ({
-            name,
-            value,
-          })),
-          queryString: queryOf(entry.url),
+          headers: redactHarHeaders(entry.requestHeaders, raw),
+          queryString: redactHarQuery(entry.url, raw),
           cookies: [],
           headersSize: -1,
           bodySize: entry.requestBody?.length ?? 0,
           ...(entry.requestBody
-            ? { postData: { mimeType: entry.mimeType ?? "text/plain", text: entry.requestBody } }
+            ? {
+                postData: {
+                  mimeType: entry.mimeType ?? "text/plain",
+                  text: redactHarBody(entry.requestBody, raw) ?? "",
+                },
+              }
             : {}),
         },
         response: {
           status: entry.status,
           statusText: "",
           httpVersion: "HTTP/1.1",
-          headers: Object.entries(entry.responseHeaders ?? {}).map(([name, value]) => ({
-            name,
-            value,
-          })),
+          headers: redactHarHeaders(entry.responseHeaders, raw),
           cookies: [],
           content: {
             size: entry.body?.length ?? entry.size ?? 0,
             mimeType: entry.mimeType ?? "",
-            ...(entry.body === undefined ? {} : { text: entry.body }),
+            ...(entry.body === undefined ? {} : { text: redactHarBody(entry.body, raw) ?? "" }),
           },
           redirectURL: "",
           headersSize: -1,
@@ -253,14 +262,6 @@ export function harGlobal(filter: StoreFilter = {}): unknown {
       })),
     },
   };
-}
-
-function queryOf(url: string): { name: string; value: string }[] {
-  try {
-    return [...new URL(url).searchParams].map(([name, value]) => ({ name, value }));
-  } catch {
-    return [];
-  }
 }
 
 export function clearGlobal(): { cleared: number } {

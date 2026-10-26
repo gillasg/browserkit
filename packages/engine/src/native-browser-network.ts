@@ -430,7 +430,7 @@ export async function networkCall(
   }
   if (action === "get") return entryOf(recorder, options.id);
   if (action === "body") return bodyOf(tabId, recorder, options.id);
-  if (action === "har") return toHar([...recorder.entries.values()]);
+  if (action === "har") return toHar([...recorder.entries.values()], { raw: options.raw === true });
   if (action === "clear") {
     recorder.entries.clear();
     recorder.bodyBytes = 0;
