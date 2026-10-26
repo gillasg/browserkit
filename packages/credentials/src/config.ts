@@ -2,7 +2,7 @@ import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { Bitwarden } from "./bitwarden.js";
 import { ProtonPass } from "./proton.js";
-import type { Login } from "./match.js";
+import type { Login, SaveLogin } from "./match.js";
 
 // Which password manager signs the agent in. Set once (`setup`), or found by itself: an unlocked
 // Bitwarden (BW_SESSION) first, then a signed-in Proton Pass CLI.
@@ -20,6 +20,7 @@ export interface Provider {
   logins(host: string): Promise<Login[]>;
   totp(id: string): Promise<string | undefined>;
   status(): Promise<string>;
+  saveLogin(login: SaveLogin): Promise<boolean>;
 }
 
 export function configPath(directory: string): string {
@@ -52,6 +53,7 @@ function protonProvider(): Provider {
     logins: () => proton.logins(),
     totp: (id) => proton.totp(id),
     status: () => proton.status(),
+    saveLogin: (login) => proton.saveLogin(login),
   };
 }
 

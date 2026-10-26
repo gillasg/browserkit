@@ -4,7 +4,7 @@ import { ToolMissing } from "./run.js";
 
 export { activeProvider, readConfig, saveConfig, configPath, providerFor } from "./config.js";
 export type { CredentialConfig, Provider, ProviderName } from "./config.js";
-export { hostOf, loginsFor, sameSite, type Login } from "./match.js";
+export { hostOf, loginsFor, sameSite, type Login, type SaveLogin } from "./match.js";
 
 // What the browser engine asks the machine for when the agent signs in. The engine sends the
 // page's real address; the answer goes back to the engine, which types it into the page and
@@ -13,7 +13,8 @@ export { hostOf, loginsFor, sameSite, type Login } from "./match.js";
 
 export type CredentialRequest =
   | { credential: "login"; url: string; account?: string }
-  | { credential: "totp"; url: string; id: string };
+  | { credential: "totp"; url: string; id: string }
+  | { credential: "save"; url: string; username: string; password: string; name?: string };
 
 export interface LoginAnswer {
   provider: string | null;
@@ -25,7 +26,9 @@ export interface LoginAnswer {
 export function isCredentialRequest(value: unknown): value is CredentialRequest {
   const request = value as { credential?: unknown; url?: unknown } | null;
   return (
-    (request?.credential === "login" || request?.credential === "totp") &&
+    (request?.credential === "login" ||
+      request?.credential === "totp" ||
+      request?.credential === "save") &&
     typeof request.url === "string"
   );
 }
@@ -33,16 +36,30 @@ export function isCredentialRequest(value: unknown): value is CredentialRequest 
 export async function handleCredentialRequest(
   request: CredentialRequest,
   directory: string,
-): Promise<LoginAnswer | { code: string | null }> {
+  providerOverride?: import("./config.js").Provider,
+): Promise<LoginAnswer | { code: string | null } | { saved: boolean; provider: string | null }> {
   const host = hostOf(request.url);
   if (!host) throw new Error("INVALID_TARGET: sign-in needs an http(s) page");
-  const provider = await activeProvider(directory);
+  const provider = providerOverride ?? (await activeProvider(directory));
   if (request.credential === "totp") {
     if (!provider) return { code: null };
     const known = loginsFor(await provider.logins(host), host).some((l) => l.id === request.id);
     return { code: known ? ((await provider.totp(request.id)) ?? null) : null };
   }
   if (!provider) return { provider: null, error: "NO_PASSWORD_MANAGER", logins: [] };
+  if (request.credential === "save") {
+    try {
+      await provider.saveLogin({
+        url: request.url,
+        ...(request.name ? { name: request.name } : {}),
+        username: request.username,
+        password: request.password,
+      });
+      return { saved: true, provider: provider.name };
+    } catch {
+      return { saved: false, provider: provider.name };
+    }
+  }
   try {
     const logins = loginsFor(await provider.logins(host), host, request.account);
     return {

@@ -20,6 +20,11 @@ import { notePreviewActivity } from "./native-browser-preview.js";
 import { signInToPage } from "./native-browser-signin.js";
 import { sessionHeadersFor } from "./native-browser-session-headers.js";
 import {
+  captureTypedPassword,
+  finishVaultCapture,
+  vaultCandidate,
+} from "./native-browser-vault.js";
+import {
   NO_RULES,
   assertAllowed,
   combinedRules,
@@ -405,6 +410,8 @@ async function serve(cell: Cell, request: unknown): Promise<unknown> {
   const stepTab = "target" in step ? step.target.tabId : undefined;
   if (stepTab !== undefined) takeActionTiming(stepTab);
   let resultTab: number | undefined;
+  if ((step.op === "click" || step.op === "press") && "target" in step)
+    await captureTypedPassword(step.target.tabId).catch(() => undefined);
   try {
     const result = await executeLocalBrowserStep(
       cell.identity,
@@ -419,6 +426,8 @@ async function serve(cell: Cell, request: unknown): Promise<unknown> {
       cell.allowed.set(key, result.tab.target);
       cell.opened.set(key, result.tab.target);
     }
+    if (step.op === "fill" && vaultCandidate(step.target.tabId)?.password === step.value)
+      entry.action = { ...step, value: "[hidden password]" };
     Object.assign(entry, { disposition: "completed", result });
     const tabId = (resultTab =
       result.kind === "tab"
@@ -427,6 +436,12 @@ async function serve(cell: Cell, request: unknown): Promise<unknown> {
           ? step.target.tabId
           : undefined);
     if (tabId !== undefined) {
+      if (step.op === "click" || step.op === "press")
+        void finishVaultCapture(
+          tabId,
+          (request) => callCore(cell, request),
+          () => true,
+        ).catch(() => undefined);
       void notePreviewActivity(cell.run.chatId, tabId);
       // Only work in a tab (not reads) brings its chat and the tab together in Split View.
       if (presentsBrowserTask(step.op) && !("present" in step && step.present === false))

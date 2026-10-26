@@ -12,6 +12,13 @@ export interface Login {
   urls: string[];
 }
 
+export interface SaveLogin {
+  url: string;
+  name?: string;
+  username: string;
+  password: string;
+}
+
 export function hostOf(value: string): string | undefined {
   try {
     const url = new URL(/^[a-z][a-z0-9+.-]*:/i.test(value) ? value : "https://" + value);

@@ -38,6 +38,25 @@ export function runTool(
   });
 }
 
+/** For a native CLI that takes values with spaces: arguments go straight to execFile, no shell. */
+export function runToolDirect(command: string, args: readonly string[]): Promise<string> {
+  return new Promise((resolve, reject) => {
+    execFile(
+      command,
+      [...args],
+      { timeout: TIMEOUT_MS, maxBuffer: 32 * 1024 * 1024, windowsHide: true },
+      (error, stdout, stderr) => {
+        if (!error) return resolve(stdout);
+        const code = (error as NodeJS.ErrnoException).code;
+        const text = String(stderr || error.message);
+        if (code === "ENOENT" || /not recognized|not found/i.test(text))
+          return reject(new ToolMissing(command));
+        reject(new Error(text.trim().split("\n")[0]?.slice(0, 300) || "failed"));
+      },
+    );
+  });
+}
+
 export function parseJson(text: string): unknown {
   const start = text.search(/[[{]/);
   return JSON.parse(start > 0 ? text.slice(start) : text) as unknown;

@@ -1,6 +1,7 @@
 import { measureBox, noteActionTiming } from "./native-browser-action-timing.js";
 import { showAgentCursor, showAgentKeys, type CursorUpdate } from "./native-browser-cursor.js";
 import { onNode, nodeState, fillTextNode } from "./native-browser-dom.js";
+import { noteVaultFill } from "./native-browser-vault.js";
 import { humanMouse, paceKey } from "./native-browser-human-input.js";
 import {
   type BrowserExecutorRequest,
@@ -149,9 +150,13 @@ export async function fillNode(
   value: string,
 ): Promise<void> {
   const native = await onNode<string>(debuggee, id, setNativeValue, [value]);
-  if (native === "done") return;
+  if (native === "done") {
+    await noteVaultFill(debuggee, id).catch(() => undefined);
+    return;
+  }
   if (native !== "text") throw new Error(native);
   await fillTextNode(debuggee, id, value);
+  await noteVaultFill(debuggee, id).catch(() => undefined);
 }
 function setNativeValue(this: HTMLInputElement | HTMLSelectElement, value: string): string {
   if (this instanceof HTMLSelectElement) {

@@ -1,4 +1,4 @@
-import type { Login } from "./match.js";
+import { hostOf, type Login, type SaveLogin } from "./match.js";
 import { parseJson, runTool } from "./run.js";
 
 // Bitwarden through its official CLI, `bw`. The vault must be unlocked: the session key comes
@@ -29,6 +29,22 @@ export class Bitwarden {
   async totp(id: string): Promise<string | undefined> {
     const code = (await this.run(["get", "totp", id])).trim();
     return /^\d{6,8}$/.test(code) ? code : undefined;
+  }
+
+  async saveLogin(login: SaveLogin): Promise<boolean> {
+    const host = hostOf(login.url);
+    const item = {
+      type: 1,
+      name: login.name || host || "Saved login",
+      login: {
+        username: login.username,
+        password: login.password,
+        uris: host ? [{ uri: "https://" + host }] : [],
+      },
+    };
+    const encoded = Buffer.from(JSON.stringify(item), "utf8").toString("base64");
+    await this.run(["create", "item", encoded]);
+    return true;
   }
 
   async status(): Promise<string> {

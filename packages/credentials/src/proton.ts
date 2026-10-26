@@ -1,5 +1,5 @@
-import type { Login } from "./match.js";
-import { parseJson, runTool } from "./run.js";
+import { hostOf, type Login, type SaveLogin } from "./match.js";
+import { parseJson, runTool, runToolDirect } from "./run.js";
 
 // Proton Pass through its official CLI, `pass-cli` (paid plans). It keeps its own session after
 // `pass-cli login`. Its JSON output is not documented field by field, so items are read by the
@@ -21,6 +21,25 @@ export class ProtonPass {
   async totp(id: string): Promise<string | undefined> {
     const value = parseJson(await runTool("pass-cli", ["item", "totp", id, "--output", "json"]));
     return findCode(value);
+  }
+
+  async saveLogin(login: SaveLogin): Promise<boolean> {
+    const host = hostOf(login.url);
+    await runToolDirect("pass-cli", [
+      "item",
+      "create",
+      "login",
+      "--title",
+      login.name || host || "Saved login",
+      "--username",
+      login.username,
+      "--password",
+      login.password,
+      ...(host ? ["--url", "https://" + host] : []),
+      "--output",
+      "json",
+    ]);
+    return true;
   }
 
   async status(): Promise<string> {
