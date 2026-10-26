@@ -19,12 +19,20 @@ const folders = {
     "Library/Application Support/Microsoft Edge/NativeMessagingHosts",
     "Library/Application Support/Chromium/NativeMessagingHosts",
     "Library/Application Support/BraveSoftware/Brave-Browser/NativeMessagingHosts",
+    "Library/Application Support/Vivaldi/NativeMessagingHosts",
+    "Library/Application Support/com.operasoftware.Opera/NativeMessagingHosts",
+    "Library/Application Support/Arc/NativeMessagingHosts",
+    "Library/Application Support/net.imput.helium/NativeMessagingHosts",
   ],
   linux: [
     ".config/google-chrome/NativeMessagingHosts",
     ".config/microsoft-edge/NativeMessagingHosts",
     ".config/chromium/NativeMessagingHosts",
     ".config/BraveSoftware/Brave-Browser/NativeMessagingHosts",
+    ".config/vivaldi/NativeMessagingHosts",
+    ".config/opera/NativeMessagingHosts",
+    ".config/Arc/NativeMessagingHosts",
+    ".config/net.imput.helium/NativeMessagingHosts",
   ],
 };
 
@@ -90,3 +98,14 @@ function bootstrap(launcher, env) {
     host.stdin.end(Buffer.concat([header, body]));
   });
 }
+
+import { browsers } from "../apps/bridge/dist/setup.js";
+test("the browser manifest table names each new browser and ignores unknown names", () => {
+  for (const name of ["vivaldi", "opera", "arc", "helium"]) {
+    const entry = browsers[name];
+    assert.ok(entry.win && entry.mac && entry.linux, name);
+    assert.match(entry.linux, /NativeMessagingHosts$/);
+  }
+  assert.equal(browsers.unknown, undefined);
+  assert.match(browsers.opera.linux, /\/opera\//);
+});

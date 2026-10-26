@@ -13,7 +13,7 @@ const OLD_NATIVE_HOST = "com.browser_use_extension.bridge";
 const cli = fileURLToPath(new URL("./cli.js", import.meta.url));
 const extensionBuild = fileURLToPath(new URL("../../extension/build", import.meta.url));
 
-const browsers: Record<string, { win: string; mac: string; linux: string }> = {
+export const browsers: Record<string, { win: string; mac: string; linux: string }> = {
   chrome: {
     win: "Software\\Google\\Chrome\\NativeMessagingHosts",
     mac: "Library/Application Support/Google/Chrome/NativeMessagingHosts",
@@ -33,6 +33,26 @@ const browsers: Record<string, { win: string; mac: string; linux: string }> = {
     win: "Software\\BraveSoftware\\Brave-Browser\\NativeMessagingHosts",
     mac: "Library/Application Support/BraveSoftware/Brave-Browser/NativeMessagingHosts",
     linux: ".config/BraveSoftware/Brave-Browser/NativeMessagingHosts",
+  },
+  vivaldi: {
+    win: "Software\\Vivaldi\\NativeMessagingHosts",
+    mac: "Library/Application Support/Vivaldi/NativeMessagingHosts",
+    linux: ".config/vivaldi/NativeMessagingHosts",
+  },
+  opera: {
+    win: "Software\\Opera Software\\NativeMessagingHosts",
+    mac: "Library/Application Support/com.operasoftware.Opera/NativeMessagingHosts",
+    linux: ".config/opera/NativeMessagingHosts",
+  },
+  arc: {
+    win: "Software\\Arc\\NativeMessagingHosts",
+    mac: "Library/Application Support/Arc/NativeMessagingHosts",
+    linux: ".config/Arc/NativeMessagingHosts",
+  },
+  helium: {
+    win: "Software\\imput\\Helium\\NativeMessagingHosts",
+    mac: "Library/Application Support/net.imput.helium/NativeMessagingHosts",
+    linux: ".config/net.imput.helium/NativeMessagingHosts",
   },
 };
 
@@ -74,28 +94,38 @@ async function writeLauncher(folder: string): Promise<string> {
 async function register(manifest: string): Promise<void> {
   for (const browser of Object.values(browsers)) {
     if (process.platform === "win32") {
-      execFileSync(
-        "reg.exe",
-        [
-          "add",
-          `HKCU\\${browser.win}\\${NATIVE_HOST}`,
-          "/ve",
-          "/t",
-          "REG_SZ",
-          "/d",
-          manifest,
-          "/f",
-        ],
-        { stdio: "ignore", windowsHide: true },
-      );
-      unregisterWindows(browser.win);
+      try {
+        execFileSync(
+          "reg.exe",
+          [
+            "add",
+            `HKCU\\${browser.win}\\${NATIVE_HOST}`,
+            "/ve",
+            "/t",
+            "REG_SZ",
+            "/d",
+            manifest,
+            "/f",
+          ],
+          { stdio: "ignore", windowsHide: true },
+        );
+        unregisterWindows(browser.win);
+      } catch {
+        // Arc/Helium and other Chromium builds vary by release; one missing key must not stop
+        // the browsers that do answer.
+      }
       continue;
     }
     const directory = join(homedir(), process.platform === "darwin" ? browser.mac : browser.linux);
-    await mkdir(directory, { recursive: true });
-    const { copyFile, rm } = await import("node:fs/promises");
-    await copyFile(manifest, join(directory, NATIVE_HOST + ".json"));
-    await rm(join(directory, OLD_NATIVE_HOST + ".json"), { force: true });
+    try {
+      await mkdir(directory, { recursive: true });
+      const { copyFile, rm } = await import("node:fs/promises");
+      await copyFile(manifest, join(directory, NATIVE_HOST + ".json"));
+      await rm(join(directory, OLD_NATIVE_HOST + ".json"), { force: true });
+    } catch {
+      // A browser without this directory is not installed; report the others and keep going.
+      continue;
+    }
   }
 }
 
@@ -113,7 +143,7 @@ function unregisterWindows(key: string): void {
 
 export function nextSteps(): string {
   return [
-    "Native host registered for Chrome, Edge, Chromium and Brave.",
+    "Native host registered for Chrome, Edge, Chromium, Brave, Vivaldi, Opera, Arc and Helium.",
     "",
     "1. Load the extension: open chrome://extensions, turn on Developer mode, click",
     `   "Load unpacked" and choose: ${extensionBuild}`,
