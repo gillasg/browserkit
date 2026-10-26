@@ -28,12 +28,12 @@ function __withTimeout(promise, ms, code) {
 // red-marked PNG. Images arrive in chunks because a single evaluate expression is capped at
 // 20k characters and a screenshot is much larger. Used by page.diffScreenshot.
 function __diffImageParts(options) {
-  var store = window.__aeonDiffParts || {};
+  var store = window.__browserkitDiffParts || {};
   var beforeSource = (store[options.id + ':before'] || []).join('');
   var afterSource = (store[options.id + ':after'] || []).join('');
   delete store[options.id + ':before'];
   delete store[options.id + ':after'];
-  if (!Object.keys(store).length) delete window.__aeonDiffParts;
+  if (!Object.keys(store).length) delete window.__browserkitDiffParts;
   function load(source) {
     return new Promise(function (resolve, reject) {
       var image = new Image();
@@ -77,10 +77,11 @@ function __diffImageParts(options) {
 async function __diffPush(target, id, side, data) {
   var size = 12000;
   for (var i = 0; i < data.length; i += size) {
-    await browser.page(target).inspect(function (part) {
-      var store = window.__aeonDiffParts || (window.__aeonDiffParts = {});
+    var part = { key: id + ':' + side, chunk: data.slice(i, i + size) };
+    await __isolatedEval(target, '(' + function (part) {
+      var store = window.__browserkitDiffParts || (window.__browserkitDiffParts = {});
       (store[part.key] || (store[part.key] = [])).push(part.chunk);
-    }, { key: id + ':' + side, chunk: data.slice(i, i + size) });
+    }.toString() + ')(' + JSON.stringify(part) + ')');
   }
 }
 async function __diffScreenshot(target, baseline, options) {
@@ -110,15 +111,15 @@ async function __diffScreenshot(target, baseline, options) {
   await __diffPush(target, id, 'after', after);
   var result;
   try {
-    result = await browser.page(target).inspect(__diffImageParts, { id: id, threshold: threshold, wantImage: Boolean(options.path) });
+    result = await __isolatedEval(target, '(' + __diffImageParts.toString() + ')(' + JSON.stringify({ id: id, threshold: threshold, wantImage: Boolean(options.path) }) + ')');
   } finally {
-    await browser.page(target).inspect(function (key) {
-      var store = window.__aeonDiffParts;
+    await __isolatedEval(target, '(' + function (key) {
+      var store = window.__browserkitDiffParts;
       if (!store) return;
       delete store[key + ':before'];
       delete store[key + ':after'];
-      if (!Object.keys(store).length) delete window.__aeonDiffParts;
-    }, id).catch(function () {});
+      if (!Object.keys(store).length) delete window.__browserkitDiffParts;
+    }.toString() + ')(' + JSON.stringify(id) + ')').catch(function () {});
   }
   if (options.path) {
     var name = String(options.path);
