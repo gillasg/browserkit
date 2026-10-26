@@ -46,7 +46,7 @@ import { showAgentCaption } from "./native-browser-cursor.js";
 import { openTab } from "./native-browser-open-tab.js";
 import { attachTab, listTabs } from "./native-browser-tabs.js";
 import { injectedScripts, judgeStealth, noteInjectedScript, type StealthProbe } from "./stealth.js";
-import { controlError, controlOf } from "./native-browser-control.js";
+import { controlError, controlOf, stepInput } from "./native-browser-control.js";
 import { controlOrSessionStep } from "./native-browser-extra-session.js";
 
 function hostOf(url: string): string {
@@ -533,7 +533,14 @@ async function executeStep(
   bindBrowserSession(step.target.tabId, request.chatId);
   // One step per tab at a time, and writes one at a time browser-wide: two sessions cannot type
   // into each other's page, and a session's own steps keep their order.
-  return scheduleStep(step, step.target.tabId, () => dispatchStep(request, step, tab));
+  return scheduleStep(step, step.target.tabId, async () => {
+    stepInput(step.target.tabId, true);
+    try {
+      return await dispatchStep(request, step, tab);
+    } finally {
+      stepInput(step.target.tabId, false);
+    }
+  });
 }
 
 async function dispatchStep(

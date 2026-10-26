@@ -34,6 +34,14 @@ export function endDispatch(tabId: number): void {
   if (last && last.end === undefined) last.end = Date.now();
 }
 
+let wrappedDispatch = false;
+/** A fallback window around a whole step, used only when the dispatch API cannot be wrapped. */
+export function stepInput(tabId: number, active: boolean): void {
+  if (wrappedDispatch) return;
+  if (active) beginDispatch(tabId);
+  else endDispatch(tabId);
+}
+
 function agentInput(tabId: number, at: number): boolean {
   return (windows.get(tabId) ?? []).some(
     (window) => at >= window.start - 60 && at <= (window.end ?? Date.now()) + 250,
@@ -189,6 +197,7 @@ onEngineInstall(() => {
       done();
       return result;
     }) as typeof debuggerApi.sendCommand;
+    wrappedDispatch = true;
   } catch {
     // A frozen API object cannot be wrapped; quiet input is then reported as the user's.
   }
