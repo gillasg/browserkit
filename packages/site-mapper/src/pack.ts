@@ -22,6 +22,7 @@ const TOP_FILES = [
   "actions.json",
   "recipes.json",
   "tools.json",
+  "agents.json",
   "health.json",
   "docs.md",
 ];

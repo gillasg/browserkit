@@ -4,6 +4,7 @@ import { onNode, nodeState, fillTextNode } from "./native-browser-dom.js";
 import { beginReceipt, takeReceipt } from "./native-browser-receipts.js";
 import { noteVaultFill } from "./native-browser-vault.js";
 import { humanMouse, paceKey } from "./native-browser-human-input.js";
+import { toOffscreen } from "./code-offscreen-host.js";
 import {
   type BrowserExecutorRequest,
   type BrowserElementTarget,
@@ -341,6 +342,76 @@ async function keyboard(debuggee: chrome.debugger.Debuggee, combo: string): Prom
   return { pressed: combo };
 }
 
+async function pasteNode(
+  debuggee: chrome.debugger.Debuggee,
+  id: number,
+  text: string,
+  html: string,
+): Promise<void> {
+  const swap = (await toOffscreen({
+    target: "aeon-code-offscreen",
+    kind: "clipboardSwap",
+    text,
+    html,
+  }).catch((error: unknown) => ({ error: String(error) }))) as { error?: string } | undefined;
+  let backup: string | undefined;
+  let pageWritten = false;
+  if (swap?.error) {
+    backup = await pageClipboard(debuggee, "read");
+    pageWritten = Boolean(await pageClipboard(debuggee, "write", text, html));
+    if (!pageWritten) throw new BrowserActionError("CLIPBOARD_UNAVAILABLE", swap.error);
+  }
+  try {
+    await onNode(debuggee, id, function (this: HTMLElement) {
+      this.focus();
+    });
+    for (const type of ["rawKeyDown", "keyUp"] as const) {
+      await chrome.debugger.sendCommand(debuggee, "Input.dispatchKeyEvent", {
+        type,
+        key: "v",
+        code: "KeyV",
+        modifiers: 2,
+        windowsVirtualKeyCode: 86,
+        ...(type === "rawKeyDown" ? { commands: ["paste"] } : {}),
+      });
+    }
+    await new Promise((done) => setTimeout(done, 30));
+    const landed = await onNode<string>(debuggee, id, function (this: HTMLElement) {
+      return this.innerHTML || this.innerText || "";
+    });
+    if (!landed || (!landed.includes(text.slice(0, 20)) && !/text/i.test(landed)))
+      await fillTextNode(debuggee, id, text);
+  } finally {
+    if (pageWritten) await pageClipboard(debuggee, "restore", backup ?? "");
+    else
+      await toOffscreen({ target: "aeon-code-offscreen", kind: "clipboardRestore" }).catch(
+        () => undefined,
+      );
+  }
+}
+
+async function pageClipboard(
+  debuggee: chrome.debugger.Debuggee,
+  action: string,
+  text = "",
+  html = "",
+): Promise<string | undefined> {
+  const expression =
+    action === "read"
+      ? "navigator.clipboard.readText().catch(()=> '')"
+      : action === "restore"
+        ? `navigator.clipboard.writeText(${JSON.stringify(text)}).then(()=> 'ok',()=> 'fail')`
+        : `navigator.clipboard.write([new ClipboardItem({"text/plain": new Blob([${JSON.stringify(text)}],{type:"text/plain"}), "text/html": new Blob([${JSON.stringify(html)}],{type:"text/html"})})]).then(()=> 'ok',()=> 'fail')`;
+  const result = (await chrome.debugger
+    .sendCommand(debuggee, "Runtime.evaluate", {
+      expression,
+      awaitPromise: true,
+      returnByValue: true,
+    })
+    .catch(() => undefined)) as { result?: { value?: unknown } } | undefined;
+  if (action === "read") return String(result?.result?.value ?? "");
+  return result?.result?.value === "ok" ? "ok" : undefined;
+}
 function elementCaption(
   request: BrowserExecutorRequest,
   node: AxRef,
@@ -424,7 +495,7 @@ function normalizePreparationError(error: unknown): unknown {
 }
 
 type ActionRequest = BrowserExecutorRequest & {
-  step: Extract<BrowserStep, { op: "click" | "fill" | "scroll" }>;
+  step: Extract<BrowserStep, { op: "click" | "fill" | "paste" | "scroll" }>;
 };
 export async function clickScreenshotPoint(
   debuggee: chrome.debugger.Debuggee,
@@ -634,6 +705,8 @@ async function dispatchAction(
       : clickAt(debuggee, top.x, top.y));
   else if (request.step.op === "fill")
     await fillNode(frame, node.backendNodeId, request.step.value);
+  else if (request.step.op === "paste")
+    await pasteNode(frame, node.backendNodeId, request.step.text, request.step.html);
   else await scrollAt(debuggee, top.x, top.y, request.step.direction, request.step.amount);
 }
 

@@ -94,6 +94,16 @@ export const BrowserStepSchema = z.discriminatedUnion("op", [
     .strict(),
   z
     .object({
+      op: z.literal("paste"),
+      target: BrowserTargetKeySchema,
+      element: SemanticTargetSchema,
+      text: z.string().max(100000),
+      html: z.string().max(200000),
+      observe: z.boolean().optional(),
+    })
+    .strict(),
+  z
+    .object({
       op: z.literal("scroll"),
       target: BrowserTargetKeySchema,
       element: SemanticTargetSchema.optional(),

@@ -489,6 +489,7 @@ var browser = Object.freeze({
     recordDemonstration: (options = {}) => __recordDemonstration(target, options),
     click: (element) => __step({op:'click',target,element:__wire(__element(target,element)),observe:false}),
     fill: (element, value) => __step({op:'fill',target,element:__wire(__element(target,element)),value:String(value),observe:false}),
+    paste: (element, html, text = '') => __step({op:'paste',target,element:__wire(__element(target,element)),html:String(html),text:String(text || html.replace(/<[^>]+>/g, ' ')),observe:false}),
     evaluate: async (fn, arg) => (await __step({op:'evaluate',target,expression:__expression(fn,arg)})).data.value,
     control: async () => (await __step({op:'control', target, action:'status'})).data,
     waitForControl: async (options = {}) =>

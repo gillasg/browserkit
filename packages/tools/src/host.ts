@@ -11,6 +11,7 @@ import {
   type SecretRequest,
   type SecretValues,
 } from "./secrets.js";
+import { isSiteDocRequest, siteDoc } from "./site-doc.js";
 import {
   isSiteToolRequest,
   listSiteTools,
@@ -140,6 +141,7 @@ export function createHostHandler(
     if (isFlightRequest(request)) return saveFlightRecording(request, home);
     if (isSiteToolRequest(request)) return handleSiteTool(request);
     if (isSecretRequest(request)) return handleSecretRequest(request, home);
+    if (isSiteDocRequest(request)) return siteDoc(String(request.siteDoc.url ?? ""));
     if (isLearnRequest(request)) return answerLearn(request);
     if (isLearnedRequest(request)) return answerLearned(request);
     if (isSiteMapperRequest(request))

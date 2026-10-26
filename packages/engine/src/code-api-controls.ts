@@ -675,13 +675,13 @@ function __pageChallengeInfo() {
 }
 async function __pageWebmcpList() {
   var ctx = navigator.modelContext || document.modelContext;
-  if (!ctx) return {available: false, tools: [], note: "this page registers no WebMCP tools"};
+  if (!ctx || typeof ctx.getTools !== "function") return {available: false, tools: [], note: "this page registers no WebMCP tools"};
   var tools = await Promise.resolve(typeof ctx.getTools === "function" ? ctx.getTools() : []).catch(() => []);
-  return {available: true, tools: (tools || []).filter((tool) => !tool.window || tool.window === window).slice(0, 100).map((tool) => ({name: String(tool.name || "").slice(0, 120), description: String(tool.description || "").slice(0, 1000)}))};
+  var listed = (tools || []).filter((tool) => !tool.window || tool.window === window);\n  if (!listed.length) return {available: false, tools: [], note: "this page registers no WebMCP tools"};\n  return {available: true, tools: listed.slice(0, 100).map((tool) => ({name: String(tool.name || "").slice(0, 120), description: String(tool.description || "").slice(0, 1000)}))};
 }
 async function __pageWebmcpCall(arg) {
   var ctx = navigator.modelContext || document.modelContext;
-  if (!ctx) return {available: false, tools: [], note: "this page registers no WebMCP tools"};
+  if (!ctx || typeof ctx.getTools !== "function") return {available: false, tools: [], note: "this page registers no WebMCP tools"};
   var tools = await Promise.resolve(typeof ctx.getTools === "function" ? ctx.getTools() : []).catch(() => []);
   var tool = (tools || []).find((item) => item.name === arg.name && (!item.window || item.window === window));
   if (!tool) return {available: true, error: "tool not found"};

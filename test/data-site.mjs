@@ -172,5 +172,19 @@ export function dataRoutes(request, response) {
     );
     return true;
   }
+  if (url.pathname === "/clip") {
+    response.setHeader("content-type", "text/html");
+    response.end(
+      `<title>Clip</title><div id="ed" contenteditable="true" style="min-height:40px;border:1px solid #999"></div><script>navigator.clipboard.writeText("marker").catch(()=>{});</script>`,
+    );
+    return true;
+  }
+  if (url.pathname === "/webmcp") {
+    response.setHeader("content-type", "text/html");
+    response.end(
+      `<title>WebMCP</title><p>tools</p><script>const tool={name:"echo",description:"Echo input",window:window}; navigator.modelContext={getTools:()=>[tool],executeTool:(item,input)=>JSON.parse(input)};</script>`,
+    );
+    return true;
+  }
   return false;
 }

@@ -131,6 +131,8 @@ async function __here(target, url) {
     var reads = facts.operations.filter(op => !op.writes).map(op => op.id), writes = facts.operations.filter(op => op.writes).map(op => op.id);
     parts.push('site API (siteMapper.call): ' + reads.slice(0, 6).join(', ') + (reads.length > 6 ? ' +' + (reads.length - 6) : '') + (writes.length ? ' · writes: ' + writes.slice(0, 4).join(', ') : ''));
   }
+  var doc = await __call({siteDoc: {url}}).catch(() => null);
+  if (doc?.actions?.length) parts.push("agent manifest: " + doc.actions.length + " actions");
   var webmcp = await browser.page(target).webmcp.list().catch(() => ({tools: []}));
   if (webmcp?.tools?.length) parts.push("webmcp: " + webmcp.tools.length + " tool(s) (" + webmcp.tools.slice(0, 3).map((t) => t.name).join(", ") + ")");
   if (facts.tools?.tools?.length || facts.tools?.pageTools?.length)

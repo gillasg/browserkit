@@ -88,6 +88,19 @@ test(
       assert.equal(gridResult.first.needsVision, true, grid.stdout);
       assert.deepEqual(gridResult.clicked, [3, 7], grid.stdout);
       assert.equal(gridResult.second.cleared, true, grid.stdout);
+      const web = await cell(
+        `page = await browser.openTab(${JSON.stringify(siteUrl + "webmcp")});
+         const listed = await page.webmcp.list();
+         const called = await page.webmcp.call("echo", {x: 1});
+         const plain = await browser.openTab(${JSON.stringify(siteUrl + "deals")});
+         const empty = await plain.webmcp.list();
+         console.log("WEBMCP " + JSON.stringify({listed, called, empty}));`,
+        ["--challenge-assist"],
+      );
+      const webResult = JSON.parse(/WEBMCP (.*)/.exec(web.stdout)[1]);
+      assert.equal(webResult.listed.tools[0].name, "echo", web.stdout);
+      assert.deepEqual(webResult.called.result, { x: 1 }, web.stdout);
+      assert.equal(webResult.empty.available, false, web.stdout);
       const denied = await cell(`page.challenges.solve({stage: "checkbox"})`).catch(
         (error) => error,
       );

@@ -560,7 +560,7 @@ async function dispatchStep(
     return step.kind === "semantic"
       ? observeSemantic(request, tab, revalidateTarget)
       : captureScreenshot(request, tab, revalidateTarget);
-  if (step.op === "click" || step.op === "fill" || step.op === "scroll")
+  if (step.op === "click" || step.op === "fill" || step.op === "paste" || step.op === "scroll")
     return performAction({ ...request, step }, revalidateTarget);
   if (isExtraStep(step)) return performExtra({ ...request, step }, revalidateTarget);
   throw new Error("UNSUPPORTED");

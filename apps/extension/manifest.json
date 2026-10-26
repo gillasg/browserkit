@@ -29,7 +29,9 @@
     "bookmarks",
     "cookies",
     "declarativeNetRequest",
-    "contentSettings"
+    "contentSettings",
+    "clipboardRead",
+    "clipboardWrite"
   ],
   "host_permissions": ["http://*/*", "https://*/*"],
   "sandbox": {
