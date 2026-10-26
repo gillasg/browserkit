@@ -1,5 +1,4 @@
 // Human-like pointer and keyboard timing for input sent through the debugger.
-// Behavior adapted from OpenCode Browser's human-input.ts (MIT).
 
 type Point = { x: number; y: number };
 type Params = Record<string, unknown>;
