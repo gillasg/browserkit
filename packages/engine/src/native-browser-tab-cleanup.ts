@@ -32,6 +32,8 @@ const grouped = new Set<number>();
 const closing = new Set<number>();
 let restored: Promise<void> | undefined;
 let saveTimer: ReturnType<typeof setTimeout> | undefined;
+let tabTouchListener: ((tabId: number) => void) | undefined;
+let tabIdleListener: (() => void) | undefined;
 
 export function trackAgentTab(
   tabId: number,
@@ -58,11 +60,34 @@ export function touchAgentTab(tabId: number): void {
   const entry = tracked.get(tabId);
   if (!entry) return;
   entry.touched = Date.now();
+  tabTouchListener?.(tabId);
   save();
 }
 
+/** The freezing module registers here; cleanup never imports it, so there is no cycle. */
+export function setAgentTabTouchListener(listener: (tabId: number) => void): void {
+  tabTouchListener = listener;
+}
+
+export function setAgentTabIdleListener(listener: () => void): void {
+  tabIdleListener = listener;
+}
+
+/** Tracked tabs idle for at least `busyMs`, whether or not they are safe to freeze. */
+export function idleAgentTabIds(now = Date.now(), busyMs = BUSY_MS): number[] {
+  return [...tracked].filter(([, entry]) => now - entry.touched >= busyMs).map(([tabId]) => tabId);
+}
+
+export function isAgentTabSeen(tabId: number): boolean {
+  return tracked.get(tabId)?.seen === true;
+}
+
+export function isAgentTabGuarded(tabId: number): boolean {
+  return guarded.has(tabId);
+}
+
 /** The user switched to the tab: they may want it after the run, so the run's tidy-up keeps it. */
-function seeAgentTab(tabId: number): void {
+export function seeAgentTab(tabId: number): void {
   const entry = tracked.get(tabId);
   if (!entry) return;
   entry.seen = true;
@@ -362,6 +387,7 @@ onEngineInstall(() => {
   });
   chrome.alarms.onAlarm.addListener((alarm) => {
     if (alarm.name === ALARM) void cleanupAgentTabs();
+    if (alarm.name === ALARM) tabIdleListener?.();
   });
   void chrome.alarms.create(ALARM, { periodInMinutes: 1 });
 });

@@ -49,6 +49,7 @@ import { handleCdpMessage, noteCdpSocket } from "./native-browser-cdp.js";
 import { handleBrowserViewMessage, installBrowserView } from "./native-browser-view.js";
 import { handleBrowserDnsMessage, installBrowserDns } from "./native-browser-dns.js";
 import { guardPrivateTab } from "./native-browser-private-rules.js";
+import { unparkAgentTab } from "./native-browser-park.js";
 import { withManualScreencast } from "./native-browser-flight.js";
 import { injectedScripts, judgeStealth, noteInjectedScript, type StealthProbe } from "./stealth.js";
 import { controlError, controlOf, stepInput } from "./native-browser-control.js";
@@ -484,8 +485,7 @@ export function handleBrowserExecutorMessage(
   );
   return true;
 }
-// Polling or disposing an event subscription only reads its buffer (checked against the chat that
-// made it), so it skips the tab's queue and claim: a long poll never blocks or cancels actions.
+// Polling/disposing an event subscription only reads its buffer, so it skips the tab queue/claim.
 function isEventDrain(step: BrowserStep): boolean {
   return step.op === "event" && step.action !== "subscribe";
 }
@@ -546,6 +546,7 @@ async function executeStep(
   // One step per tab at a time, and writes one at a time browser-wide: two sessions cannot type
   // into each other's page, and a session's own steps keep their order.
   return scheduleStep(step, step.target.tabId, async () => {
+    await unparkAgentTab(step.target.tabId);
     stepInput(step.target.tabId, true);
     try {
       return await dispatchStep(request, step, tab);
@@ -574,9 +575,8 @@ async function dispatchStep(
   if (isExtraStep(step)) return performExtra({ ...request, step }, revalidateTarget);
   throw new Error("UNSUPPORTED");
 }
-// Chrome only reports activation for a focused window, so a tab opened in a background or
-// headless window can sit in the inventory as inactive. Ask each window which tab is active at
-// list time, so browser.tabs() and browser.activeTab() both describe Chrome as it is now.
+// Chrome only reports activation for a focused window, so a background tab can look inactive;
+// ask each window at list time so browser.tabs() and browser.activeTab() describe it as it is now.
 async function assertTarget(request: BrowserExecutorRequest): Promise<chrome.tabs.Tab> {
   if (!isTargetStep(request.step)) throw new Error("INVALID_TARGET");
   const target = request.step.target;

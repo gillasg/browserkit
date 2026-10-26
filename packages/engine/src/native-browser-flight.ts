@@ -79,6 +79,14 @@ export async function withManualScreencast<T>(
   }
 }
 
+export function isManualScreencast(tabId: number): boolean {
+  return manual.has(tabId);
+}
+
+export function isFlightActive(tabId: number): boolean {
+  return active.has(tabId);
+}
+
 export function subscribeViewer(
   tabId: number,
   send: (data: string, at: number) => void,
