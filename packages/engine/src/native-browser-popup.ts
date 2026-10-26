@@ -11,6 +11,7 @@ import { ungroupAgentIntruder } from "./native-browser-groups.js";
 import { trackAgentTab } from "./native-browser-tab-cleanup.js";
 import { isQuietTab } from "./native-browser-quiet.js";
 import { onEngineInstall } from "./native-engine-install.js";
+import { noteReceiptPopup } from "./native-browser-receipts.js";
 const children = new Map<number, Set<number>>();
 const active = new Map<number, number>(),
   previous = new Map<number, number>();
@@ -83,6 +84,7 @@ async function adopt(tabId: number, openerId: number): Promise<void> {
     // A popup is tracked and parked for its opener, but it is not the agent's own tab: it never
     // joins the agent group, even when Chrome copied the opener's group onto it.
     trackAgentTab(tabId, owner, { popup: true, url: tab.url ?? "" });
+    noteReceiptPopup(openerId, tabId, tab.url ?? "");
     await ungroupAgentIntruder(tabId);
     publishBrowserEvent(openerId, "popup", { tabId, openerId });
     await publishPopup(tabId, openerId, owner, connection);

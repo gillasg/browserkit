@@ -394,6 +394,18 @@ async function pageFingerprint(debuggee: chrome.debugger.Debuggee): Promise<stri
   const value = result?.result?.value;
   return typeof value === "string" ? value : undefined;
 }
+export function hintEvaluateError(description: string): string {
+  const text = String(description ?? "");
+  if (/^ReferenceError/.test(text) && /\b(window|document|location|self|localStorage)\b/.test(text))
+    return `${text}\nHint: this cell runs in the sandbox; use page.evaluate(...) or page.inspect(...) to run code in the page.`;
+  if (
+    /^TypeError/.test(text) &&
+    /Cannot read properties of undefined \(reading 'querySelector'\)/.test(text)
+  )
+    return `${text}\nHint: this looks like page code running in the sandbox; use page.evaluate(...) or page.inspect(...).`;
+  return text;
+}
+
 async function evaluatePage(
   debuggee: chrome.debugger.Debuggee,
   expression: string,
@@ -411,10 +423,10 @@ async function evaluatePage(
   if (result.exceptionDetails)
     throw new BrowserActionError(
       "OPERATION_FAILED",
-      (
+      hintEvaluateError(
         result.exceptionDetails.exception?.description ??
-        result.exceptionDetails.text ??
-        "Page evaluation failed"
+          result.exceptionDetails.text ??
+          "Page evaluation failed",
       ).slice(0, 1800),
     );
   return result.result?.value;

@@ -1,6 +1,7 @@
 import { measureBox, noteActionTiming } from "./native-browser-action-timing.js";
 import { showAgentCursor, showAgentKeys, type CursorUpdate } from "./native-browser-cursor.js";
 import { onNode, nodeState, fillTextNode } from "./native-browser-dom.js";
+import { beginReceipt, takeReceipt } from "./native-browser-receipts.js";
 import { noteVaultFill } from "./native-browser-vault.js";
 import { humanMouse, paceKey } from "./native-browser-human-input.js";
 import {
@@ -539,6 +540,7 @@ export async function performAction(
   const tabId = request.step.target.tabId;
   let outcome: "navigated" | "changed" | "unchanged" | "unknown" = "unknown";
   let note: string | undefined;
+  beginReceipt(tabId);
   const scroll = await withDebugger(tabId, async (debuggee) => {
     await revalidateTarget(request, tabId);
     if (request.step.op === "scroll")
@@ -565,12 +567,15 @@ export async function performAction(
           liveTab,
           revalidateTarget,
         );
+  const receipt = takeReceipt(tabId);
+  receipt.navigated ||= String(outcome) === "navigated";
   return BrowserExecutorResultSchema.parse({
     kind: "action",
     target: current.target,
     documentEpoch: current.documentEpoch,
     url: liveTab.url,
     outcome,
+    receipt,
     ...(note ? { note } : {}),
     ...(observation ? { observation } : {}),
     ...(scroll ? { scroll } : {}),

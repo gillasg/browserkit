@@ -69,6 +69,7 @@ export const BrowserStepSchema = z.discriminatedUnion("op", [
       summary: z.boolean().optional(),
       includeHidden: z.boolean().optional(),
       noText: z.boolean().optional(),
+      diff: z.boolean().optional(),
       depth: z.number().int().min(0).max(80).optional(),
       compact: z.boolean().optional(),
       maxBytes: z.number().int().min(500).max(400_000).optional(),
@@ -172,6 +173,16 @@ const SemanticObservationSchema = z
     nodes: z.array(BrowserSemanticNodeSchema).max(180),
     truncated: z.boolean(),
     text: z.string().max(20000).optional(),
+    diff: z
+      .object({
+        added: z.array(z.number().int()),
+        removed: z.array(z.number().int()),
+        changed: z.array(z.number().int()),
+        unchanged: z.number().int(),
+        reset: z.boolean().optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 
@@ -248,6 +259,31 @@ export const BrowserExecutorResultSchema = z.discriminatedUnion("kind", [
       observation: SemanticObservationSchema.optional(),
       scroll: BrowserScrollStateSchema.optional(),
       outcome: z.enum(["navigated", "changed", "unchanged", "unknown"]).optional(),
+      receipt: z
+        .object({
+          popups: z
+            .array(z.object({ tabId: z.number().int(), url: z.string().max(8192) }).strict())
+            .max(20),
+          dialog: z
+            .object({
+              type: z.string().max(40),
+              message: z.string().max(300),
+              accepted: z.boolean(),
+            })
+            .strict()
+            .optional(),
+          navigated: z.boolean(),
+          download: z
+            .object({
+              url: z.string().max(2000),
+              filename: z.string().max(300),
+              token: z.string().max(200).optional(),
+            })
+            .strict()
+            .optional(),
+        })
+        .strict()
+        .optional(),
       /** A click that visibly did nothing: what was clicked and what to try instead. */
       note: z.string().max(1000).optional(),
     })

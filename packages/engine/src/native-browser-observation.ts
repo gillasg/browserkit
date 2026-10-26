@@ -368,6 +368,7 @@ function collectVisibleText() {
 const SCREENSHOT_MAX_AGE_MS = 60_000;
 const refs = new Map<string, Map<string, AxRef>>();
 const latestSnapshots = new Map<string, string>();
+const previousTrees = new Map<string, { documentEpoch: number; nodes: Map<number, string> }>();
 const screenshots = new Map<string, ScreenshotRef>();
 export const browserObservationRefs = { refs, latestSnapshots };
 
@@ -433,6 +434,9 @@ export async function observeSemantic(
   refs.set(snapshotId, semantic.refs);
   latestSnapshots.set(key, snapshotId);
   trimOldRefs(snapshotId);
+  const diff = (options as { diff?: boolean }).diff
+    ? compareTree(key, current.documentEpoch, semantic.nodes)
+    : undefined;
   return BrowserExecutorResultSchema.parse({
     kind: "semantic",
     source: "website",
@@ -444,7 +448,49 @@ export async function observeSemantic(
     nodes: semantic.nodes,
     truncated: semantic.truncated,
     text,
+    ...(diff ? { diff } : {}),
   });
+}
+
+export function compareTree(
+  key: string,
+  documentEpoch: number,
+  nodes: readonly Record<string, unknown>[],
+): { added: number[]; removed: number[]; changed: number[]; unchanged: number; reset?: boolean } {
+  const next = new Map<number, string>();
+  for (const node of nodes) {
+    if (typeof node.backendNodeId !== "number") continue;
+    next.set(
+      node.backendNodeId,
+      [
+        node.role,
+        node.name,
+        node.value,
+        node.disabled,
+        node.checked,
+        node.expanded,
+        node.selected,
+        node.pressed,
+      ].join("|"),
+    );
+  }
+  const previous = previousTrees.get(key);
+  if (!previous || previous.documentEpoch !== documentEpoch) {
+    previousTrees.set(key, { documentEpoch, nodes: next });
+    return { added: [...next.keys()], removed: [], changed: [], unchanged: 0, reset: true };
+  }
+  const added: number[] = [];
+  const changed: number[] = [];
+  let unchanged = 0;
+  for (const [id, fingerprint] of next) {
+    const before = previous.nodes.get(id);
+    if (before === undefined) added.push(id);
+    else if (before === fingerprint) unchanged++;
+    else changed.push(id);
+  }
+  const removed = [...previous.nodes.keys()].filter((id) => !next.has(id));
+  previousTrees.set(key, { documentEpoch, nodes: next });
+  return { added, removed, changed, unchanged };
 }
 
 function targetForRequest(request: BrowserExecutorRequest): BrowserTargetKey {

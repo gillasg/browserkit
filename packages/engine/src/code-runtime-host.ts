@@ -225,10 +225,24 @@ function finalize(
   cells.delete(cell.run.cellId);
   void releaseTabs(cell.guarded);
   for (const waiter of cell.calls.values()) waiter.reject(new Error("Browser cell finished"));
+  const used = new Set<number>();
+  for (const entry of cell.steps) {
+    const target = (entry.action as { target?: { tabId?: unknown } } | undefined)?.target;
+    if (typeof target?.tabId === "number") used.add(target.tabId);
+  }
+  const tabs = currentInventoryTabs();
+  const live = new Set(tabs.map((tab) => tab.target.tabId));
+  const unused = [...cell.opened.values()].filter(
+    (tab) => !used.has(tab.tabId) && live.has(tab.tabId),
+  );
+  const urlOf = new Map(tabs.map((tab) => [tab.target.tabId, tab.url]));
+  const note = unused.length
+    ? `\nNote: ${unused.length} tab${unused.length === 1 ? "" : "s"} you opened were never used (${unused.map((tab) => `${tab.tabId} ${urlOf.get(tab.tabId) ?? ""}`).join(", ")}); page.close() or browser.closeTab() closes them.`
+    : "";
   send(cell.socket, {
     kind: "browser.code.result",
     cellId: cell.run.cellId,
-    output: (result.output ?? "").slice(0, 1_000_000),
+    output: ((result.output ?? "") + note).slice(0, 1_000_000),
     ...(result.value !== undefined ? { value: result.value } : {}),
     ...(result.error ? { error: result.error.slice(0, 20000) } : {}),
     ...(result.reset ? { reset: true } : {}),
@@ -236,6 +250,7 @@ function finalize(
     steps: cell.steps.slice(-MAX_TRACE),
     ms: Math.max(0, Date.now() - (cell.startedAt ?? Date.now())),
     opened: [...cell.opened.values()],
+    openedUnused: unused,
     tabStats: (() => {
       const summary = agentTabSummary(cell.run.chatId);
       return { ...summary, popups: Math.max(0, summary.popups - cell.popupsAtStart) };

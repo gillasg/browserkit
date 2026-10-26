@@ -238,6 +238,16 @@ function __repeats(nodes) {
 }
 // delta: the observation that ends a cell. On the same document it prints only what changed.
 function __formatState(state, max = 3000, delta = false) {
+  if (state.diff) {
+    var d = state.diff;
+    return [
+      state.url,
+      'diff reset=' + Boolean(d.reset) + ' added=' + d.added.length + ' removed=' + d.removed.length + ' changed=' + d.changed.length + ' unchanged=' + d.unchanged,
+      d.added.length ? 'added: ' + d.added.join(',') : '',
+      d.removed.length ? 'removed: ' + d.removed.join(',') : '',
+      d.changed.length ? 'changed: ' + d.changed.join(',') : '',
+    ].filter(Boolean).join('\\n');
+  }
   var key = __key(state.target) + ':' + state.documentEpoch;
   var previous = __seen.get(key) || new Map(), next = new Map();
   var lines = [state.url], repeats = __repeats(state.nodes), printed = new Set(), unchanged = 0;
