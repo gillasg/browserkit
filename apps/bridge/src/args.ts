@@ -63,11 +63,15 @@ export function parseArgs(argv: string[]): Args {
     }
     const [name, inline] = arg.slice(2).split("=", 2) as [string, string | undefined];
     const next = argv[index + 1];
-    if (inline !== undefined) flags[name] = inline;
+    let value: string | undefined;
+    if (inline !== undefined) value = inline;
     else if (!BOOLEAN.has(name) && next !== undefined && !next.startsWith("--")) {
-      flags[name] = next;
+      value = next;
       index++;
-    } else flags[name] = true;
+    }
+    if (name === "domain" && value !== undefined && typeof flags.domain === "string")
+      flags.domain = `${flags.domain},${value}`;
+    else flags[name] = value ?? true;
     if (name === "param") {
       const [key, value] = String(flags.param).split("=", 2);
       flags[`param.${key ?? ""}`] = value ?? "";

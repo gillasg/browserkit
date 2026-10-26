@@ -287,3 +287,12 @@ test("a missing operation input is reported with its exit code", async () => {
     await rm(home, { recursive: true, force: true });
   }
 });
+
+// Cookies accept one comma-separated domain list or repeated --domain flags.
+test("repeated --domain flags are one list", () => {
+  assert.equal(
+    parseArgs(["import", "--domain", "a.com", "--domain", "b.com"]).flags.domain,
+    "a.com,b.com",
+  );
+  assert.equal(parseArgs(["import", "--domain=a.com,b.com"]).flags.domain, "a.com,b.com");
+});

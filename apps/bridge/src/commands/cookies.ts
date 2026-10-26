@@ -130,6 +130,7 @@ async function importCookies(args: Args): Promise<number> {
     skipped: 0,
     skippedV20: read.skippedV20,
     skippedEncrypted: read.skippedEncrypted,
+    errors: [] as string[],
   };
   const dry = has(args, "dry-run");
   if (!dry) {
@@ -138,10 +139,14 @@ async function importCookies(args: Args): Promise<number> {
       for (const cookie of read.cookies) {
         const reply = await bridge.request("run", {
           session: SESSION,
-          code: `browser.cookies.set(${JSON.stringify(cookie)})`,
+          code: `const tabs = await browser.tabs();
+                 if (tabs[0]) await browser.attachTab(tabs[0].target);
+                 browser.cookies.set(${JSON.stringify(cookie)})`,
         });
-        if (reply.error) result.skipped += 1;
-        else result.imported += 1;
+        if (reply.error) {
+          result.skipped += 1;
+          result.errors.push(String(reply.error));
+        } else result.imported += 1;
       }
     } finally {
       bridge.close();
@@ -176,7 +181,7 @@ export const cookiesCommand: Command = {
        browserkit cookies clear --domain <host> [--json]
        browserkit cookies import --from firefox|edge|brave|opera --profile <name> --domain a,b [--include-session] [--dry-run] [--json]
 
-For import, --domain takes one comma-separated list (repeat flags are not supported).
+For import, --domain takes one comma-separated list or repeated --domain flags; both are the same.
 
 Values are hidden unless --values is passed, so a listing does not put a session token in your
 terminal by accident. Uses the open browser; the active tab is only borrowed to answer.`,
