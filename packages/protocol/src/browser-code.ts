@@ -70,6 +70,7 @@ export const BrowserCodeResultSchema = z
     flight: z.array(z.record(z.string(), z.unknown())).max(4).optional(),
     steps: z.array(z.record(z.string(), z.unknown())).max(256),
     opened: z.array(BrowserTargetKeySchema).max(64),
+    openedUnused: z.array(BrowserTargetKeySchema).max(64).optional(),
     /** Tabs this run opened/closed, the ones still open, all tabs, and parked popups. */
     tabStats: z
       .object({
