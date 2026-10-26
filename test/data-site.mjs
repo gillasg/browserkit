@@ -155,7 +155,20 @@ export function dataRoutes(request, response) {
   if (url.pathname === "/challenge") {
     response.setHeader("content-type", "text/html");
     response.end(
-      `<title>Verify you are human</title><main><h1>Verify</h1><div role="checkbox" aria-label="I am not a robot" style="width:32px;height:32px;border:1px solid #555" onclick="setTimeout(function(){document.querySelector('input[name=g-recaptcha-response]').value='token';document.title='cleared'},300)"></div><input type="hidden" name="g-recaptcha-response"></main>`,
+      `<title>Verify you are human</title><main><h1>Verify</h1><input type="checkbox" id="remember" aria-label="Remember me" onclick="window.__decoyClicked=true"><div role="checkbox" aria-label="I am not a robot" style="width:32px;height:32px;border:1px solid #555" onclick="setTimeout(function(){document.querySelector('input[name=g-recaptcha-response]').value='token';document.title='cleared'},300)"></div><input type="hidden" name="g-recaptcha-response"></main>`,
+    );
+    return true;
+  }
+  if (url.pathname === "/challenge-grid") {
+    response.setHeader("content-type", "text/html");
+    response.end(
+      `<title>Verify</title><main><p>click the blue squares</p><div id="challenge-grid" class="captcha" style="width:180px;height:180px;position:relative">${Array.from(
+        { length: 9 },
+        (_, i) =>
+          `<div class="tile" data-i="${i}" style="position:absolute;left:${(i % 3) * 60}px;top:${Math.floor(i / 3) * 60}px;width:58px;height:58px;border:1px solid #999" onclick="window.__tilesClicked=(window.__tilesClicked||[]).concat(${i + 1})"></div>`,
+      ).join(
+        "",
+      )}</div><button onclick="document.querySelector('input[name=h-captcha-response]').value='ok'">Verify</button><input type="hidden" name="h-captcha-response"></main>`,
     );
     return true;
   }

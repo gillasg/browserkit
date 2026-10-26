@@ -32,41 +32,6 @@ export function tileCentre(tile: ChallengeBox): { x: number; y: number } {
   return { x: tile.x + tile.width / 2, y: tile.y + tile.height / 2 };
 }
 
-/**
- * The darkest column in a strip, as an offset from the handle. A slider gap is a vertical band
- * darker than the track's median column; noise below `minFraction` is ignored.
- */
-export function columnGap(
-  rgba: Uint8ClampedArray,
-  width: number,
-  height: number,
-  handleX: number,
-  minFraction = 0.08,
-): number | undefined {
-  const fractions: number[] = [];
-  for (let x = 0; x < width; x++) {
-    let dark = 0;
-    for (let y = 0; y < height; y++) {
-      const at = (y * width + x) * 4;
-      const value = (rgba[at] ?? 0) + (rgba[at + 1] ?? 0) + (rgba[at + 2] ?? 0);
-      if (value < 330) dark++;
-    }
-    fractions.push(dark / height);
-  }
-  const median = [...fractions].sort((a, b) => a - b)[Math.floor(fractions.length / 2)] ?? 0;
-  let peak = -1;
-  let score = 0;
-  for (let x = 0; x < fractions.length; x++) {
-    const excess = (fractions[x] ?? 0) - median;
-    if (excess > score) {
-      score = excess;
-      peak = x;
-    }
-  }
-  if (peak < 0 || score < minFraction) return undefined;
-  return peak - handleX;
-}
-
 /** Every token must be filled, or the widget must be gone. */
 export function challengeCleared(tokens: readonly boolean[], framePresent: boolean): boolean {
   if (tokens.some(Boolean)) return true;
