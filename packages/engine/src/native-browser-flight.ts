@@ -12,6 +12,7 @@ interface Active {
 }
 const active = new Map<number, Active>();
 const allowed = new Map<string, boolean>();
+const manual = new Set<number>();
 const FRAME_MS = 500;
 
 export function setFlightAllowed(chatId: string, allowedNow: boolean): void {
@@ -21,6 +22,7 @@ export function setFlightAllowed(chatId: string, allowedNow: boolean): void {
 export async function startFlight(tabId: number, chatId: string): Promise<void> {
   if (allowed.get(chatId) === false || active.has(tabId)) return;
   active.set(tabId, { chatId, startedAt: Date.now(), lastFrameAt: 0 });
+  if (manual.has(tabId)) return;
   await chrome.debugger
     .sendCommand({ tabId }, "Page.startScreencast", {
       format: "jpeg",
@@ -34,7 +36,44 @@ export async function startFlight(tabId: number, chatId: string): Promise<void> 
 
 export async function stopFlight(tabId: number): Promise<void> {
   if (!active.delete(tabId)) return;
+  if (manual.has(tabId)) return;
   await chrome.debugger.sendCommand({ tabId }, "Page.stopScreencast").catch(() => undefined);
+}
+
+export function beginManualScreencast(tabId: number): void {
+  manual.add(tabId);
+}
+
+export async function endManualScreencast(tabId: number): Promise<void> {
+  if (!manual.delete(tabId)) return;
+  if (!active.has(tabId)) return;
+  await chrome.debugger
+    .sendCommand({ tabId }, "Page.startScreencast", {
+      format: "jpeg",
+      quality: 60,
+      maxWidth: 1280,
+      maxHeight: 800,
+      everyNthFrame: 1,
+    })
+    .catch(() => undefined);
+}
+
+export async function withManualScreencast<T>(
+  tabId: number,
+  method: string,
+  run: () => Promise<T>,
+): Promise<T> {
+  const start = method === "Page.startScreencast";
+  const stop = method === "Page.stopScreencast";
+  if (start) beginManualScreencast(tabId);
+  try {
+    return await run();
+  } catch (error) {
+    if (start) await endManualScreencast(tabId);
+    throw error;
+  } finally {
+    if (stop) await endManualScreencast(tabId);
+  }
 }
 
 export function forgetFlight(tabId: number): void {
@@ -89,11 +128,7 @@ export async function clearFlight(tabId: number): Promise<Record<string, unknown
 onEngineInstall(() => {
   chrome.debugger.onEvent.addListener((source, method, raw) => {
     if (method !== "Page.screencastFrame" || source.tabId === undefined) return;
-    const params = (raw ?? {}) as { data?: string; sessionId?: number };
-    if (params.sessionId !== undefined)
-      void chrome.debugger
-        .sendCommand(source, "Page.screencastFrameAck", { sessionId: params.sessionId })
-        .catch(() => undefined);
+    const params = (raw ?? {}) as { data?: string };
     const entry = active.get(source.tabId);
     if (!entry || !params.data) return;
     const now = Date.now();
@@ -114,6 +149,7 @@ onEngineInstall(() => {
   });
   chrome.tabs.onRemoved.addListener((tabId) => {
     active.delete(tabId);
+    manual.delete(tabId);
     void toOffscreen({ target: "aeon-code-offscreen", kind: "flightClear", tabId }).catch(
       () => undefined,
     );

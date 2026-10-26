@@ -45,6 +45,7 @@ import { showAgentCaption } from "./native-browser-cursor.js";
 import { openTab } from "./native-browser-open-tab.js";
 import { attachTab, hostOf, isLivePage, listTabs } from "./native-browser-tabs.js";
 import { handleCdpMessage, noteCdpSocket } from "./native-browser-cdp.js";
+import { withManualScreencast } from "./native-browser-flight.js";
 import { injectedScripts, judgeStealth, noteInjectedScript, type StealthProbe } from "./stealth.js";
 import { controlError, controlOf, stepInput } from "./native-browser-control.js";
 import { controlOrSessionStep, flightStep } from "./native-browser-extra-session.js";
@@ -261,7 +262,9 @@ export async function performExtra(
           !String((step.params as { worldName?: unknown }).worldName ?? "").startsWith("browserkit")
         )
           noteInjectedScript(tabId, "a page script runs on every document");
-        return executePageCode(debuggee, { ...request, step }, () => revalidate(request, tabId));
+        return withManualScreencast(tabId, step.op === "cdp" ? step.method : "", () =>
+          executePageCode(debuggee, { ...request, step }, () => revalidate(request, tabId)),
+        );
       }
       if (step.op === "press")
         return pressElement(debuggee, request, () => revalidate(request, tabId));
@@ -309,7 +312,6 @@ export async function performExtra(
   };
 }
 type NetworkStoreStep = Extract<BrowserStep, { op: "networkStore" }>;
-
 /** Only the fields the store filters on, so undefined options never reach it. */
 function storeFilterOf(step: NetworkStoreStep): StoreFilter {
   return {
