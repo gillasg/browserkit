@@ -13,9 +13,11 @@ void chrome.runtime
   });
 const share = document.getElementById("share") as HTMLButtonElement | null;
 const shareState = document.getElementById("share-state");
-void chrome.tabs.query({ active: true, currentWindow: true }).then(async ([tab]) => {
-  if (!tab?.id || !share || !shareState) return;
-  const state = await chrome.runtime.sendMessage({ kind: "bue.tabState", tabId: tab.id });
+const requestedTab = Number(new URLSearchParams(location.search).get("tab") ?? 0);
+void chrome.tabs.query({ active: true, currentWindow: true }).then(async ([active]) => {
+  const tabId = requestedTab || active?.id;
+  if (!tabId || !share || !shareState) return;
+  const state = await chrome.runtime.sendMessage({ kind: "bue.tabState", tabId });
   const update = () => {
     share.textContent = state?.shared ? "Stop sharing this tab" : "Hand this tab to agents";
     shareState.textContent = state?.shared ? "Shared with agents" : "";
@@ -23,7 +25,7 @@ void chrome.tabs.query({ active: true, currentWindow: true }).then(async ([tab])
   update();
   share.disabled = false;
   share.onclick = async () => {
-    const next = await chrome.runtime.sendMessage({ kind: "bue.shareTab", tabId: tab.id });
+    const next = await chrome.runtime.sendMessage({ kind: "bue.shareTab", tabId });
     state.shared = Boolean(next?.shared);
     update();
   };
