@@ -54,6 +54,21 @@ export { performFlow, editApi, nameOperations, type ModelLike } from "./agent.js
 export { explore, EXPLORE_BRIEF, type ExploreOptions, type ExploreResult } from "./explore.js";
 export { watch, type WatchOptions, type WatchResult } from "./watch.js";
 export * from "./recipes.js";
+export {
+  isSiteToolRequest,
+  listSiteTools,
+  readPageTool,
+  readSiteTools,
+  runSiteTool,
+  setSiteToolsEnabled,
+  siteToolSummaryFor,
+  writeSiteTools,
+  type SiteTool,
+  type SiteToolFile,
+  type SiteToolParam,
+  type SiteToolParamType,
+  type SiteToolSummary,
+} from "./site-tools.js";
 export { readLearned, learnAbout, learnedHint, type LearnedNote } from "./learned.js";
 export {
   runRecipe,

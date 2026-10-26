@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import {
   exportSitePack,
+  setSiteToolsEnabled,
   installSitePack,
   readSitePack,
   skillsForSite,
@@ -12,6 +13,7 @@ import { flag, has, type Args } from "../args.js";
 import { dataDirectory } from "../paths.js";
 import { printJson } from "../output.js";
 import { enableSiteSkills, importSiteSkills, readSiteSkills } from "../site-skills.js";
+import { readToolsCode } from "./site-tools.js";
 import type { Command } from "../usage.js";
 
 // Site packs: one zip a site can move in. Export includes the mapped site (model, spec, client,
@@ -83,6 +85,7 @@ async function importPack(args: Args): Promise<number> {
   const pack = await readSitePack(file);
   const installed = await installSitePack(pack);
   const skills = await importSiteSkills(join(dataDirectory(), "site-skills"), pack.skills);
+  const toolCode = await readToolsCode(installed.site);
   const boosts: { id?: string; name: string }[] = [];
   let boostWarning: string | undefined;
   if (pack.boosts.length) {
@@ -100,6 +103,7 @@ async function importPack(args: Args): Promise<number> {
       site: installed.site,
       files: installed.written,
       skills: skills.map((skill) => ({ name: skill.name, enabled: false, code: skill.code })),
+      tools: toolCode.map((tool) => ({ ...tool, enabled: false })),
       boosts,
       ...(boostWarning ? { warning: boostWarning } : {}),
     });
@@ -113,6 +117,8 @@ async function importPack(args: Args): Promise<number> {
       `\n--- skill ${skill.name} (${skill.domains.join(", ")}) ---\n${skill.code}\n`,
     );
   }
+  for (const tool of toolCode)
+    process.stdout.write(`\n--- ${tool.kind} ${tool.name} (DISABLED) ---\n${tool.code}\n`);
   for (const boost of pack.boosts) {
     const code = typeof boost.js === "string" ? boost.js : "";
     process.stdout.write(`\n--- boost ${boost.name}${code ? " (js)" : ""} ---\n`);
@@ -129,6 +135,7 @@ async function enablePack(args: Args): Promise<number> {
   const site = args.positional[1];
   if (!site) throw new Error("Usage: browserkit pack enable <site>");
   const skills = await enableSiteSkills(join(dataDirectory(), "site-skills"), site);
+  const tools = await setSiteToolsEnabled(site, "all", undefined, true);
   let boosts: { id?: string; name?: string }[] = [];
   let boostWarning: string | undefined;
   try {
@@ -139,10 +146,10 @@ async function enablePack(args: Args): Promise<number> {
     boostWarning = `Boosts not enabled: ${error instanceof Error ? error.message : String(error)}`;
   }
   if (has(args, "json"))
-    printJson({ site, skills, boosts, ...(boostWarning ? { warning: boostWarning } : {}) });
+    printJson({ site, skills, tools, boosts, ...(boostWarning ? { warning: boostWarning } : {}) });
   else {
     process.stdout.write(
-      `Enabled ${skills.length} skills and ${boosts.length} boosts for ${site}.\n`,
+      `Enabled ${skills.length} skills, ${tools} tools and ${boosts.length} boosts for ${site}.\n`,
     );
     for (const name of skills) process.stdout.write(`  skill ${name}\n`);
     for (const boost of boosts) process.stdout.write(`  boost ${String(boost.name ?? boost.id)}\n`);

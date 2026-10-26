@@ -81,6 +81,33 @@ var siteMapper=Object.freeze({
   action:(site,name,inputs={})=>__call({siteMapper:'action', ...(__siteObject(site) || {site,name,params:inputs})}),
   channel:(site,id,options={})=>__call({siteMapper:'channel', ...(__siteObject(site) || {site,name:id,params:options})}),
 });
+// Site pack tools: callable helpers saved with the site. Node tools run through the host; page
+// tools run here in the page with the current document. Only the current host's tools resolve.
+function __siteToolTarget() {
+  if (!__lastTarget) throw Error('NO_TAB: open a tab before using site tools');
+  return __lastTarget;
+}
+async function __siteToolHost() {
+  var url = String(browser.page(__siteToolTarget()).url);
+  return {url, host: new URL(url).hostname.replace(/^www\./, '')};
+}
+function __siteToolGroup(kind) {
+  return new Proxy({}, {
+    get: (_target, name) => {
+      if (typeof name !== 'string') return undefined;
+      if (name === 'list')
+        return async () => (await __call({siteTool: {action: 'list', ...(await __siteToolHost())}}));
+      return async (args = {}) => {
+        var where = await __siteToolHost();
+        if (kind === 'tool') return __call({siteTool: {action: 'run', url: where.url, name, args}});
+        var tool = await __call({siteTool: {action: 'page', url: where.url, name}});
+        return browser.page(__siteToolTarget()).inspect('(' + tool.code + ')(' + JSON.stringify(args) + ')');
+      };
+    },
+  });
+}
+var site = Object.freeze({tools: __siteToolGroup('tool'), pageTools: __siteToolGroup('pageTool')});
+
 // The here: line at the top of bu.state(): what already exists for this page and site (its
 // embedded data, the API the site learned, its boosts), printed only when it changes, so the
 // agent reaches for them without being told twice.
@@ -92,14 +119,17 @@ async function __here(target, url) {
   var facts = __siteFacts.get(host);
   if (!facts || Date.now() - facts.at > 60000) {
     var operations = await __call({siteMapper: 'operations', site: host}).catch(() => []);
+    var tools = await __call({siteTool: {action: 'summary', url}}).catch(() => ({tools: [], pageTools: []}));
     var boosts = await browser.boosts.list(String(url)).catch(() => []);
-    facts = {at: Date.now(), operations: Array.isArray(operations) ? operations : [], boosts: Array.isArray(boosts) ? boosts : []};
+    facts = {at: Date.now(), operations: Array.isArray(operations) ? operations : [], boosts: Array.isArray(boosts) ? boosts : [], tools: tools || {tools: [], pageTools: []}};
     __siteFacts.set(host, facts);
   }
   if (facts.operations.length) {
     var reads = facts.operations.filter(op => !op.writes).map(op => op.id), writes = facts.operations.filter(op => op.writes).map(op => op.id);
     parts.push('site API (siteMapper.call): ' + reads.slice(0, 6).join(', ') + (reads.length > 6 ? ' +' + (reads.length - 6) : '') + (writes.length ? ' · writes: ' + writes.slice(0, 4).join(', ') : ''));
   }
+  if (facts.tools?.tools?.length || facts.tools?.pageTools?.length)
+    parts.push('site tools: ' + [...(facts.tools.tools || []), ...(facts.tools.pageTools || [])].slice(0, 8).join(', '));
   if (facts.boosts.length) parts.push('boosts: ' + facts.boosts.slice(0, 3).map(b => b.name).join(', '));
   var text = parts.length ? 'here: ' + parts.join(' · ') : '';
   if (!text || __hereShown.get(host) === text) return '';

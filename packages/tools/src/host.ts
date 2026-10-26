@@ -3,6 +3,13 @@ import { learnAbout, readLearned, learnedHint } from "@browserkit/site-mapper";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { handleCredentialRequest, isCredentialRequest } from "@browserkit/credentials";
 import {
+  isSiteToolRequest,
+  listSiteTools,
+  readPageTool,
+  runSiteTool,
+  siteToolSummaryFor,
+} from "@browserkit/site-mapper";
+import {
   bridgeDataDirectory,
   handleSiteMapperRequest,
   isSiteMapperRequest,
@@ -122,6 +129,7 @@ export function createHostHandler(
     if (isCredentialRequest(request)) return handleCredentialRequest(request, home);
     if (isSiteRulesRequest(request)) return answerSiteRules(context, options, home);
     if (isFlightRequest(request)) return saveFlightRecording(request, home);
+    if (isSiteToolRequest(request)) return handleSiteTool(request);
     if (isLearnRequest(request)) return answerLearn(request);
     if (isLearnedRequest(request)) return answerLearned(request);
     if (isSiteMapperRequest(request))
@@ -145,8 +153,46 @@ export function isFlightRequest(value: unknown): value is FlightRequest {
   return Boolean(value && typeof (value as { flight?: unknown }).flight === "object");
 }
 
-/** Writes a saved flight recording under BROWSERKIT_HOME/flight and returns its path. */
-async function saveFlightRecording(request: FlightRequest, home: string): Promise<unknown> {
+interface SiteToolRequest {
+  siteTool: {
+    action: "summary" | "run" | "page" | "list";
+    site?: unknown;
+    url?: unknown;
+    name?: unknown;
+    args?: unknown;
+  };
+}
+
+function handleSiteTool(value: unknown): Promise<unknown> {
+  const request = value as SiteToolRequest;
+  const site = siteNameFrom(request.siteTool);
+  if (request.siteTool.action === "summary") return siteToolSummaryFor(site);
+  if (request.siteTool.action === "page")
+    return readPageTool(site, String(request.siteTool.name ?? ""));
+  if (request.siteTool.action === "list") return listSiteTools(site);
+  return runSiteTool(
+    site,
+    String(request.siteTool.name ?? ""),
+    (request.siteTool.args ?? {}) as Record<string, unknown>,
+  );
+}
+
+function siteNameFrom(request: SiteToolRequest["siteTool"]): string {
+  const value = String(request.site ?? request.url ?? "");
+  try {
+    return new URL(value.includes("://") ? value : `https://${value}`).hostname.replace(
+      /^www\./,
+      "",
+    );
+  } catch {
+    return value.replace(/^https?:\/\//, "").split("/")[0] ?? "";
+  }
+}
+
+/** Writes a saved flight recording under BROWSERKIT_HOME/flight and returns its path. */ async function saveFlightRecording(
+  request: FlightRequest,
+  home: string,
+): Promise<unknown> {
   const flight = request.flight;
   const data = typeof flight.data === "string" ? flight.data : "";
   if (!data) throw new Error("FLIGHT_EMPTY: no frames were recorded");

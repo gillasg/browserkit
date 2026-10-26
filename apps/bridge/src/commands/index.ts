@@ -18,6 +18,7 @@ import { blockGroup } from "./block-sites.js";
 import { signinCommand } from "./signin.js";
 import { packCommand } from "./pack.js";
 import { useGroup } from "./site-use.js";
+import { siteToolsCommand } from "./site-tools.js";
 import { workflowCommand } from "./workflow.js";
 import { recipeCommand } from "./recipe.js";
 import { cookiesCommand } from "./cookies.js";
@@ -47,6 +48,7 @@ export const COMMANDS: Command[] = [
   syncCommand,
   ...mapGroup,
   ...useGroup,
+  siteToolsCommand,
   recipeCommand,
   ...keepGroup,
   ...blockGroup,

@@ -21,6 +21,7 @@ const TOP_FILES = [
   "overrides.json",
   "actions.json",
   "recipes.json",
+  "tools.json",
   "health.json",
   "docs.md",
 ];
@@ -200,14 +201,28 @@ export async function installSitePack(
   const written: string[] = [];
   for (const [path, content] of pack.files) {
     const relative = safePath(path);
+    const installed = relative === "tools.json" ? disabledTools(content) : content;
     const full = resolve(target, relative);
     if (!full.startsWith(resolve(target) + (process.platform === "win32" ? "\\" : "/")))
       throw new Error(`The pack contains an unsafe path: ${path}`);
     await mkdir(dirname(full), { recursive: true });
-    await writeFile(full, content);
+    await writeFile(full, installed);
     written.push(relative);
   }
   return { site: name, written };
+}
+
+/** Imported tools are code: write every entry disabled and let the user review and enable it. */
+function disabledTools(content: string): string {
+  try {
+    const file = JSON.parse(content) as { tools?: unknown; pageTools?: unknown };
+    for (const list of [file.tools, file.pageTools])
+      if (Array.isArray(list))
+        for (const tool of list) if (tool && typeof tool === "object") tool.enabled = false;
+    return JSON.stringify(file, null, 2) + "\n";
+  } catch {
+    return content;
+  }
 }
 
 /** Skills whose domains cover the site. */
