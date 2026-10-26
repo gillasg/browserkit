@@ -8,7 +8,7 @@ import { collapseAgentGroups, agentGroupsReady, isAgentGroupId } from "./native-
 import { currentInventoryTabs } from "./native-inventory-client.js";
 import { onEngineInstall } from "./native-engine-install.js";
 
-type Tracked = { touched: number; chatId?: string; seen?: boolean; url?: string; popup?: boolean };
+type Tracked = { touched: number; chatId?: string; seen?: boolean; url?: string; popup?: boolean; used?: boolean };
 type Stats = { opened: number; closed: number; popups: number };
 
 const STORAGE_KEY = "aeon-agent-tab-cleanup";
@@ -57,8 +57,10 @@ export function touchAgentTab(tabId: number): void {
 /** The user switched to the tab: they may want it after the run, so the run's tidy-up keeps it. */
 function seeAgentTab(tabId: number): void {
   const entry = tracked.get(tabId);
-  if (entry) entry.seen = true;
-  touchAgentTab(tabId);
+  if (!entry) return;
+  entry.seen = true;
+  entry.touched = Date.now();
+  save();
 }
 
 export function forgetAgentTab(tabId: number): string | undefined {
@@ -89,6 +91,13 @@ export function isAgentTab(tabId: number): boolean {
 /** A list request must wait for session-storage state before it marks each tab's owner. */
 export function ensureAgentTabsRestored(): Promise<void> {
   return restore();
+}
+
+/** Opened popups nobody touched, live only. */
+export function unusedAgentTabs(chatId: string): { tabId: number; url: string }[] {
+  return chatTabs(chatId)
+    .filter(([, entry]) => entry.popup && !entry.used)
+    .map(([tabId, entry]) => ({ tabId, url: entry.url ?? "" }));
 }
 
 /** Tabs this chat or session opened, for browser.tabs().mine. */

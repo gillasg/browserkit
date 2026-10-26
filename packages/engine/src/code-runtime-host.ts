@@ -35,7 +35,7 @@ import {
 import { handOffToUser } from "./native-browser-handoff.js";
 import { presentBrowserTask, presentsBrowserTask } from "./native-browser-layout.js";
 import { engineConfig } from "./engine-config.js";
-import { resetChatTabs, agentTabSummary, reapChatPopups } from "./native-browser-tab-cleanup.js";
+import { resetChatTabs, agentTabSummary, reapChatPopups, unusedAgentTabs } from "./native-browser-tab-cleanup.js";
 import { setOwnerTitle } from "./native-browser-owner.js";
 import { disableQuietTab, enableQuietTab } from "./native-browser-quiet.js";
 import { saveFlight } from "./native-browser-flight.js";
@@ -236,8 +236,12 @@ function finalize(
     (tab) => !used.has(tab.tabId) && live.has(tab.tabId),
   );
   const urlOf = new Map(tabs.map((tab) => [tab.target.tabId, tab.url]));
-  const note = unused.length
-    ? `\nNote: ${unused.length} tab${unused.length === 1 ? "" : "s"} you opened were never used (${unused.map((tab) => `${tab.tabId} ${urlOf.get(tab.tabId) ?? ""}`).join(", ")}); page.close() or browser.closeTab() closes them.`
+  const popupsUnused = unusedAgentTabs(cell.run.chatId).filter((tab) => live.has(tab.tabId));
+  const note = unused.length || popupsUnused.length
+    ? `\nNote: ${unused.length + popupsUnused.length} tab${unused.length + popupsUnused.length === 1 ? "" : "s"} you opened were never used (${[
+        ...unused.map((tab) => `${tab.tabId} ${urlOf.get(tab.tabId) ?? ""}`),
+        ...popupsUnused.map((tab) => `${tab.tabId} ${tab.url}`),
+      ].join(", ")}); page.close() or browser.closeTab() closes them.`
     : "";
   send(cell.socket, {
     kind: "browser.code.result",
@@ -251,6 +255,7 @@ function finalize(
     ms: Math.max(0, Date.now() - (cell.startedAt ?? Date.now())),
     opened: [...cell.opened.values()],
     openedUnused: unused,
+    popupsUnused,
     tabStats: (() => {
       const summary = agentTabSummary(cell.run.chatId);
       return { ...summary, popups: Math.max(0, summary.popups - cell.popupsAtStart) };

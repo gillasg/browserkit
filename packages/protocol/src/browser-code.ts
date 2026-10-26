@@ -71,6 +71,10 @@ export const BrowserCodeResultSchema = z
     steps: z.array(z.record(z.string(), z.unknown())).max(256),
     opened: z.array(BrowserTargetKeySchema).max(64),
     openedUnused: z.array(BrowserTargetKeySchema).max(64).optional(),
+    popupsUnused: z
+      .array(z.object({ tabId: z.number().int(), url: z.string().max(8192) }).strict())
+      .max(64)
+      .optional(),
     /** Tabs this run opened/closed, the ones still open, all tabs, and parked popups. */
     tabStats: z
       .object({
