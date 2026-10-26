@@ -414,23 +414,72 @@ async function evaluatePage(
   expression: string,
   timeout: number,
 ) {
-  const result = (await chrome.debugger.sendCommand(debuggee, "Runtime.evaluate", {
-    expression,
-    returnByValue: true,
-    awaitPromise: true,
-    timeout,
-  })) as {
+  let result: {
     result?: { value?: unknown };
     exceptionDetails?: { text?: string; exception?: { description?: string } };
   };
-  if (result.exceptionDetails)
-    throw new BrowserActionError(
-      "OPERATION_FAILED",
-      hintEvaluateError(
-        result.exceptionDetails.exception?.description ??
-          result.exceptionDetails.text ??
-          "Page evaluation failed",
-      ).slice(0, 1800),
-    );
+  try {
+    result = (await chrome.debugger.sendCommand(debuggee, "Runtime.evaluate", {
+      expression,
+      returnByValue: true,
+      awaitPromise: true,
+      timeout,
+    })) as typeof result;
+  } catch (error) {
+    if (!isEvaluationTimeout(error instanceof Error ? error.message : String(error))) throw error;
+    throw await evaluationTimeout(debuggee, timeout, String(error));
+  }
+  if (result.exceptionDetails) {
+    const detail =
+      result.exceptionDetails.exception?.description ??
+      result.exceptionDetails.text ??
+      "Page evaluation failed";
+    if (isEvaluationTimeout(detail)) throw await evaluationTimeout(debuggee, timeout, detail);
+    throw new BrowserActionError("OPERATION_FAILED", hintEvaluateError(detail).slice(0, 1800));
+  }
   return result.result?.value;
+}
+
+function isEvaluationTimeout(text: string): boolean {
+  return /timed out|timeout|execution (?:was )?terminated|script execution|internal error/i.test(
+    text,
+  );
+}
+
+/**
+ * A timeout is already enforced by Runtime.evaluate. Terminate explicitly too, then probe with a
+ * trivial evaluation so a late terminate cannot cancel the next call; the probe also tells the
+ * caller whether the runaway script actually stopped.
+ */
+async function evaluationTimeout(
+  debuggee: chrome.debugger.Debuggee,
+  timeout: number,
+  detail: string,
+): Promise<BrowserActionError> {
+  let terminated = false;
+  try {
+    await chrome.debugger.sendCommand(debuggee, "Runtime.terminateExecution", {});
+    terminated = true;
+  } catch {
+    /* The execution may already be gone. */
+  }
+  let stopped = false;
+  for (let attempt = 0; attempt < 2 && !stopped; attempt++) {
+    if (attempt) await new Promise((resolve) => setTimeout(resolve, 80));
+    stopped = await chrome.debugger
+      .sendCommand(debuggee, "Runtime.evaluate", {
+        expression: "1+1",
+        returnByValue: true,
+        timeout: 1000,
+      })
+      .then(
+        (probe) => (probe as { result?: { value?: unknown } }).result?.value === 2,
+        () => false,
+      );
+  }
+  const flags = `{"executionStopped":${stopped && terminated},"mayHaveLateEffects":true}`;
+  return new BrowserActionError(
+    "TIMEOUT",
+    `${detail.slice(0, 1200)}\nPage evaluation exceeded ${timeout}ms. ${flags}`,
+  );
 }
