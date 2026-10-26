@@ -26,6 +26,8 @@ export interface StealthProbe {
   wrapped?: string[];
   geolocationShim?: boolean;
   isolatedNames?: string[];
+  /** Wrapped functions or the window carrying enumerable own names/symbols an agent added. */
+  leaks?: string[];
 }
 
 export interface StealthState {
@@ -54,6 +56,8 @@ export function judgeStealth(probe: StealthProbe, state: StealthState): StealthR
     signals.push(`${name} is wrapped and its function source is not native`);
   if (probe.geolocationShim === true)
     signals.push("navigator.geolocation is answered by the agent's location shim");
+  for (const name of probe.leaks ?? [])
+    signals.push(`a wrapper leaves a detectable property: ${name}`);
   for (const name of state.injectedScripts)
     signals.push(`a script is queued for every document of this tab: ${name}`);
   return {

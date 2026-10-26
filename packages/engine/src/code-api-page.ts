@@ -151,17 +151,23 @@ async function __isolatedEval(target, expression) {
 function __stealthProbe() {
   var globals = Object.getOwnPropertyNames(window).filter((name) => /^(__aeon|__browserkit|browserkit-)/.test(name));
   var overlays = [...document.querySelectorAll('[id^="aeon-"],[id^="browserkit-"],[data-aeon-overlay],[data-browserkit-overlay]')].map((node) => node.id ? '#' + node.id : node.tagName.toLowerCase());
-  var wrapped = [];
+  var wrapped = [], leaks = [];
   var native = /\\{\\s*\\[native code\\]\\s*\\}/;
-  for (var name of ['open', 'confirm', 'prompt', 'alert']) {
-    var fn = window[name];
-    if (typeof fn === 'function' && !native.test(Function.prototype.toString.call(fn))) wrapped.push('window.' + name);
+  var functions = [['window.open', window.open], ['window.confirm', window.confirm], ['window.prompt', window.prompt], ['window.alert', window.alert], ['HTMLMediaElement.play', HTMLMediaElement.prototype.play]];
+  for (var pair of functions) {
+    var fn = pair[1];
+    if (typeof fn !== 'function') continue;
+    if (!native.test(Function.prototype.toString.call(fn))) wrapped.push(pair[0]);
+    if (Object.getOwnPropertyNames(fn).includes('toString')) leaks.push(pair[0] + ' has its own toString');
+    for (var sym of Object.getOwnPropertySymbols(fn)) leaks.push(pair[0] + ' has ' + String(sym));
   }
-  var play = HTMLMediaElement.prototype.play;
-  if (!native.test(Function.prototype.toString.call(play))) wrapped.push('HTMLMediaElement.play');
+  for (var symbol of Object.getOwnPropertySymbols(window)) {
+    var name = Symbol.keyFor(symbol) || String(symbol);
+    if (/browserkit|aeon/i.test(name)) leaks.push('window has ' + name);
+  }
   var geolocationShim = false;
   try { geolocationShim = !native.test(Function.prototype.toString.call(navigator.geolocation.getCurrentPosition)); } catch {}
-  return {webdriver: navigator.webdriver === true, globals, overlays, wrapped, geolocationShim};
+  return {webdriver: navigator.webdriver === true, globals, overlays, wrapped, geolocationShim, leaks};
 }
 function __beginCell() { __dirty.clear(); __hasDelivered=false; __deliveryValue=undefined; }
 async function __step(step, readOnly = false) {
@@ -239,11 +245,11 @@ function __formatState(state, max = 3000, delta = false) {
   for (var n of state.nodes) {
     if (n.role.toLowerCase() === 'heading') {lines.push('## '+n.name);continue;}
     if (['statictext','paragraph'].includes(n.role.toLowerCase())) {lines.push(n.name);continue;}
-    var text = (n.backendNodeId ? '[' + n.backendNodeId + '] ' : '[' + n.ref + '] ') + n.role + ' ' + JSON.stringify(n.name);
+    var text = (n.frame || !n.backendNodeId ? '[' + n.ref + '] ' : '[' + n.backendNodeId + '] ') + n.role + ' ' + JSON.stringify(n.name);
     if (n.value !== undefined) text += ' = ' + JSON.stringify(n.value);
     for (var prop of ['disabled','checked','focused','expanded','selected','pressed','mixed'])
       if (n[prop] !== undefined) text += ' ' + prop + '=' + n[prop];
-    var id = n.backendNodeId || n.ref;
+    var id = n.frame || !n.backendNodeId ? n.ref : n.backendNodeId;
     var changed = previous.size && previous.get(id) !== text;
     next.set(id,text);
     var group = repeats.get(n.role + '|' + n.name);

@@ -1,16 +1,14 @@
 // The browser_code page API, evaluated once in each chat's sandbox realm. Browser steps go through __call.
+import { nativeSourcePreamble } from "./native-source.js";
 export const browserCodeApi = `
 // Chrome accepts every alert/confirm/prompt by default; this lets the agent decline or answer them.
 function __dialogShim(policy) {
+  ${nativeSourcePreamble}
   var accept = policy.mode !== 'dismiss';
-  var keepNative = (wrapper, source) => {
-    Object.defineProperty(wrapper, 'toString', { value: source.toString.bind(source), configurable: true });
-    return wrapper;
-  };
   var confirm = window.confirm, prompt = window.prompt, alert = window.alert;
-  window.confirm = keepNative((message) => { console.info('[dialog confirm] ' + message + (accept ? ' (accepted)' : ' (dismissed)')); return accept; }, confirm);
-  window.prompt = keepNative((message, value) => { console.info('[dialog prompt] ' + message); return accept ? (policy.promptText || value || '') : null; }, prompt);
-  window.alert = keepNative((message) => { console.info('[dialog alert] ' + message); }, alert);
+  window.confirm = __keepNative((message) => { console.info('[dialog confirm] ' + message + (accept ? ' (accepted)' : ' (dismissed)')); return accept; }, confirm);
+  window.prompt = __keepNative((message, value) => { console.info('[dialog prompt] ' + message); return accept ? (policy.promptText || value || '') : null; }, prompt);
+  window.alert = __keepNative((message) => { console.info('[dialog alert] ' + message); }, alert);
 }
 var __devices = {
   iphone: {width: 390, height: 844, scale: 3, userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1'},
@@ -18,17 +16,14 @@ var __devices = {
   ipad: {width: 820, height: 1180, scale: 2, userAgent: 'Mozilla/5.0 (iPad; CPU OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1'},
 };
 function __geolocationShim(coords) {
+  ${nativeSourcePreamble}
   var geo = navigator.geolocation;
   if (!geo || !/native code/.test(Function.prototype.toString.call(geo.getCurrentPosition))) return;
   var real = { get: geo.getCurrentPosition.bind(geo), watch: geo.watchPosition.bind(geo) };
   var position = () => ({ coords: { ...coords, altitude: null, altitudeAccuracy: null, heading: null, speed: null }, timestamp: Date.now() });
   var fallback = (ok, fail) => (error) => (error && error.code === 1 ? ok(position()) : fail && fail(error));
-  var keepNative = (wrapper, source) => {
-    Object.defineProperty(wrapper, 'toString', { value: source.toString.bind(source), configurable: true });
-    return wrapper;
-  };
-  geo.getCurrentPosition = keepNative((ok, fail, options) => real.get(ok, fallback(ok, fail), options), real.get);
-  geo.watchPosition = keepNative((ok, fail, options) => real.watch(ok, fallback(ok, fail), options), real.watch);
+  geo.getCurrentPosition = __keepNative((ok, fail, options) => real.get(ok, fallback(ok, fail), options), real.get);
+  geo.watchPosition = __keepNative((ok, fail, options) => real.watch(ok, fallback(ok, fail), options), real.watch);
 }
 // What the engine's strict step schema accepts of a locator; filters and regexes resolve in the page.
 function __wire(element) {
