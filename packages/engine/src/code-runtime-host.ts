@@ -27,6 +27,7 @@ import {
 } from "./native-browser-site-rules.js";
 import { handOffToUser } from "./native-browser-handoff.js";
 import { presentBrowserTask, presentsBrowserTask } from "./native-browser-layout.js";
+import { engineConfig } from "./engine-config.js";
 import { resetChatTabs, agentTabSummary, reapChatPopups } from "./native-browser-tab-cleanup.js";
 import { setOwnerTitle } from "./native-browser-owner.js";
 import { disableQuietTab, enableQuietTab } from "./native-browser-quiet.js";
@@ -470,6 +471,11 @@ async function prepare(cell: Cell, value: Record<string, unknown>): Promise<Brow
     throw new Error(`Browser workflow reached its ${MAX_STEPS}-operation limit`);
   if (value.op === "openTab" && !value.clientInstanceId)
     value.clientInstanceId = cell.identity.clientInstanceId;
+  if (value.op === "openTab" && value.space === undefined)
+    value.space =
+      value.quiet === true
+        ? "window"
+        : (cell.run.space ?? engineConfig.defaultSpace(cell.run.chatId));
   if (value.op === "upload" && Array.isArray(value.files))
     value.files = await callCore(cell, { validateUpload: value.files });
   const parsed = BrowserStepSchema.safeParse(value);

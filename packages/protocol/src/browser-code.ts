@@ -14,6 +14,8 @@ export const BrowserCodeRunSchema = z
     timeoutMs: z.number().int().min(1000).max(600000),
     /** The chat, routine or session name for its tab group. */
     ownerTitle: z.string().min(1).max(120).optional(),
+    /** Where this run's tabs go unless a step chooses: a background window or the user's window. */
+    space: z.enum(["window", "tabs"]).optional(),
   })
   .strict();
 export type BrowserCodeRun = z.infer<typeof BrowserCodeRunSchema>;

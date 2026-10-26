@@ -18,6 +18,11 @@ export interface EngineConfig {
    */
   agentInFront: () => Promise<boolean>;
   /**
+   * Where a new tab goes when the caller did not choose: its own background window for bulk or
+   * outside work, or the user's window for an interactive chat. Hosts decide from their origin.
+   */
+  defaultSpace: (owner: string) => "window" | "tabs";
+  /**
    * Whether to hide the agent cursor and its caption. Off by default. Screen recorders (Aperture)
    * draw their own cursor and rely on this; keep it.
    */
@@ -33,6 +38,7 @@ export const engineConfig: EngineConfig = {
   agentView: () => Promise.resolve("split"),
   agentInFront: () => Promise.resolve(false),
   hideAgentCursor: () => Promise.resolve(false),
+  defaultSpace: () => "tabs",
 };
 
 export function configureEngine(patch: Partial<EngineConfig>): void {

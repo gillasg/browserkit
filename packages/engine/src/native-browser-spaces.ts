@@ -21,26 +21,61 @@ interface SpaceRecord {
   windowId?: number;
   labels: LabelRecord[];
   createdAt: number;
+  updatedAt: number;
 }
 const STORAGE_KEY = "browserkit-spaces";
+const LABEL_DAYS = 7;
 const spaces = new Map<string, SpaceRecord>();
 let restored: Promise<void> | undefined;
 
+// Labels survive a browser restart (chrome.storage.session does not): the tab id is re-bound by
+// URL. Window ids belong to this run only and are never written to local storage.
 export function ensureSpacesRestored(): Promise<void> {
   restored ??=
-    chrome.storage?.session
-      ?.get(STORAGE_KEY)
-      .then((stored) => {
-        for (const record of (stored[STORAGE_KEY] as SpaceRecord[] | undefined) ?? [])
-          spaces.set(record.chatId, record);
-      })
-      .catch(() => undefined) ?? Promise.resolve();
+    Promise.all([
+      chrome.storage?.local?.get(STORAGE_KEY).catch(() => ({})),
+      chrome.storage?.session?.get(STORAGE_KEY).catch(() => ({})),
+    ]).then(([local, session]) => {
+      const localStored = (local as Record<string, unknown>)[STORAGE_KEY] as
+        Partial<SpaceRecord>[] | undefined;
+      const sessionStored = (session as Record<string, unknown>)[STORAGE_KEY] as
+        Partial<SpaceRecord>[] | undefined;
+      const stored = [...(localStored ?? []), ...(sessionStored ?? [])];
+      const cutoff = Date.now() - LABEL_DAYS * 24 * 60 * 60 * 1000;
+      for (const saved of stored) {
+        if (!saved.chatId || !Array.isArray(saved.labels)) continue;
+        if ((saved.updatedAt ?? saved.createdAt ?? 0) < cutoff) continue;
+        const record = spaces.get(saved.chatId) ?? {
+          chatId: saved.chatId,
+          space: saved.space ?? ("tabs" as const),
+          ...(saved.windowId !== undefined ? { windowId: saved.windowId } : {}),
+          labels: [],
+          createdAt: saved.updatedAt ?? Date.now(),
+          updatedAt: saved.updatedAt ?? Date.now(),
+        };
+        if (saved.windowId !== undefined) {
+          record.space = saved.space ?? record.space;
+          record.windowId = saved.windowId;
+        }
+        for (const label of saved.labels)
+          if (!record.labels.some((entry) => entry.label === label.label))
+            record.labels.push({ label: label.label, tabId: label.tabId, url: label.url });
+        spaces.set(saved.chatId, record);
+      }
+      save();
+    }) ?? Promise.resolve();
   return restored;
 }
 
 function save(): void {
-  if (!chrome.storage?.session) return;
-  void chrome.storage.session.set({ [STORAGE_KEY]: [...spaces.values()] }).catch(() => undefined);
+  const cutoff = Date.now() - LABEL_DAYS * 24 * 60 * 60 * 1000;
+  const records: { chatId: string; labels: LabelRecord[]; updatedAt: number }[] = [];
+  for (const [chatId, record] of spaces)
+    if (record.updatedAt >= cutoff && record.labels.length)
+      records.push({ chatId, labels: record.labels, updatedAt: record.updatedAt });
+    else if (record.updatedAt < cutoff) spaces.delete(chatId);
+  if (chrome.storage?.local)
+    void chrome.storage.local.set({ [STORAGE_KEY]: records }).catch(() => undefined);
 }
 
 export function spaceOf(chatId: string): SpaceKind | undefined {
@@ -48,8 +83,15 @@ export function spaceOf(chatId: string): SpaceKind | undefined {
 }
 
 export function noteSpace(chatId: string, space: SpaceKind, windowId?: number): void {
-  const record = spaces.get(chatId) ?? { chatId, space, labels: [], createdAt: Date.now() };
+  const record = spaces.get(chatId) ?? {
+    chatId,
+    space,
+    labels: [],
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  };
   record.space = space;
+  record.updatedAt = Date.now();
   if (space === "tabs") delete record.windowId;
   else if (windowId !== undefined) record.windowId = windowId;
   spaces.set(chatId, record);
@@ -57,13 +99,15 @@ export function noteSpace(chatId: string, space: SpaceKind, windowId?: number): 
 }
 
 /** One window per session, reused; created behind the user's window and never minimized. */
-export async function spaceWindow(chatId: string): Promise<number> {
+export async function spaceWindow(
+  chatId: string,
+): Promise<{ windowId: number; freshTabId?: number }> {
   await ensureSpacesRestored();
   const record = spaces.get(chatId);
   const existing = record?.windowId;
   if (existing !== undefined) {
     const window = await chrome.windows.get(existing).catch(() => undefined);
-    if (window) return existing;
+    if (window) return { windowId: existing };
   }
   const userWindow = currentFocusedWindowId();
   const created = await chrome.windows.create({
@@ -78,13 +122,15 @@ export async function spaceWindow(chatId: string): Promise<number> {
   noteSpace(chatId, "window", created.id);
   if (userWindow !== undefined)
     await chrome.windows.update(userWindow, { focused: true }).catch(() => undefined);
-  return created.id;
+  const freshTabId = created.tabs?.[0]?.id;
+  return { windowId: created.id, ...(freshTabId !== undefined ? { freshTabId } : {}) };
 }
 
 /** A stable label for a tab in this session; the same URL keeps its label after a restart. */
 export function noteLabel(chatId: string, tabId: number, url: string): string {
   const record = spaces.get(chatId);
   if (!record) return "";
+  record.updatedAt = Date.now();
   const byId = record.labels.find((entry) => entry.tabId === tabId);
   if (byId) {
     byId.url = url;
@@ -128,6 +174,7 @@ export async function resolveLabel(
   const found = candidates.find((tab) => tab?.id !== undefined && tab.url === entry.url);
   if (!found?.id) return undefined;
   entry.tabId = found.id;
+  record.updatedAt = Date.now();
   save();
   return { tabId: found.id, ...(found.url ? { url: found.url } : {}) };
 }

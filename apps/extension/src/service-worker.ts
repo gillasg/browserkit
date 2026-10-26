@@ -44,6 +44,8 @@ configureEngine({
   controllingTitle: (session) => "An agent is controlling this tab · " + session.slice(0, 8),
   idleTitle: "browserkit",
   notificationIcon: "icon-128.png",
+  // Every browserkit caller is outside a chat UI (CLI, MCP, bridge sessions): bulk work.
+  defaultSpace: () => "window",
 });
 installEngineListeners();
 void chrome.storage.session.setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" });

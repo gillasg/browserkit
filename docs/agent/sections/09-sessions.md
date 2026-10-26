@@ -20,9 +20,9 @@ another session is `TAB_OWNED_ELSEWHERE`; `browser.tabs({all:true})` shows them)
 ## Spaces, labels and taking a tab back
 
 A session can keep its tabs in one window of its own (`browser.openTab(url, {space: "window"})`,
-the default for background work) or in the user's window (`{space: "tabs"}`, right for an
-interactive chat). The window is normal (never minimized, so Chrome keeps painting it), created
-behind the user's window, and reused for that session's tabs. `browser.session.finish({keep:
+which jobs, sweeps and outside sessions use) or in the user's window (`{space: "tabs"}`, the
+default for an interactive chat). The window is normal (never minimized, so Chrome keeps painting
+it), created behind the user's window, and reused for that session's tabs. `browser.session.finish({keep:
 ["p2"]})` moves the named tabs to the user's window, closes the rest and ends the session;
 `browser.session.claim()` hands every tab and the window to the user; `browser.session.spaces()`
 lists sessions with `running`, `waiting`, `user` or `idle`.

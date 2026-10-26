@@ -32,7 +32,7 @@ export async function openTab(
   request: BrowserExecutorRequest,
 ): Promise<BrowserExecutorResult> {
   const step = validOpenTab(request, identity);
-  const space = step.window ? "tabs" : (step.space ?? "tabs");
+  const space = step.window ? "tabs" : (step.space ?? engineConfig.defaultSpace(request.chatId));
   await ensureSpacesRestored();
   const created = await createTab(step, request.chatId, space);
   if (created.id === undefined) throw new Error("TARGET_LOST");
@@ -93,8 +93,16 @@ async function createTab(
 ): Promise<chrome.tabs.Tab> {
   if (!step.window) {
     if (space === "window") {
-      const windowId = await spaceWindow(chatId);
-      return chrome.tabs.create({ url: "about:blank", active: false, windowId });
+      const window = await spaceWindow(chatId);
+      // The new window's first tab becomes the agent tab: active inside its unfocused window,
+      // so Chrome keeps painting it and every later tab starts from a real page, not a stray blank.
+      if (window.freshTabId !== undefined) {
+        await chrome.tabs.update(window.freshTabId, { active: true });
+        const tab = await chrome.tabs.get(window.freshTabId).catch(() => undefined);
+        if (!tab) throw new Error("TARGET_LOST");
+        return tab;
+      }
+      return chrome.tabs.create({ url: "about:blank", active: true, windowId: window.windowId });
     }
     const front = step.foreground || (await engineConfig.agentInFront().catch(() => false));
     return chrome.tabs.create({ url: "about:blank", active: front });
