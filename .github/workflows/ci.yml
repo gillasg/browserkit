@@ -43,9 +43,21 @@ jobs:
         env:
           CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
           REQUIRE_E2E: "1"
-      # Several suites drive real Chrome, so a slow macOS runner runs them side by side; each file
-      # gets a generous deadline rather than a share of one.
-      - run: node --test --test-timeout=300000 test/*.test.mjs
+      # Non-browser suites run together; Chrome suites run one at a time so three Chromes do not
+      # compete for one runner. The generous timeout applies to each file, not one shared wrapper.
+      - name: Unit and CLI tests
+        shell: bash
+        run: |
+          files=$(ls test/*.test.mjs | grep -v '\.e2e\.test\.mjs$')
+          node --test --test-timeout=300000 $files
+        env:
+          CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
+          REQUIRE_E2E: "1"
+      - name: Real Chrome suites
+        shell: bash
+        run: |
+          files=$(ls test/*.e2e.test.mjs)
+          node --test --test-concurrency=1 --test-timeout=900000 $files
         env:
           CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
           REQUIRE_E2E: "1"

@@ -19,7 +19,17 @@ const chromePath =
 const extension = resolve("apps/extension/build");
 const cli = resolve("apps/bridge/dist/cli.js");
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
-const run = promisify(execFile);
+const execRun = promisify(execFile);
+// Keep stderr in a failed run's message: CI otherwise shows only "code 1".
+const run = async (...args) => {
+  try {
+    return await execRun(...args);
+  } catch (error) {
+    const detail = [error.stdout, error.stderr].filter(Boolean).join("\n");
+    if (detail) error.message = `${error.message}\n${detail}`;
+    throw error;
+  }
+};
 // A 1x1 PNG.
 const PNG =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==";
@@ -799,14 +809,19 @@ test(
           console.log("JOB " + JSON.stringify(job));`);
         const job = JSON.parse(/JOB (.*)/.exec(started.stdout)[1]);
         assert.equal(job.status, "running", started.stdout);
-        await sleep(4000);
-        const result = await cell(`
-          const state = await browser.job.status(job.jobId);
-          const done = await browser.job.result(job.jobId);
-          console.log("JOBRESULT " + JSON.stringify({ state, done }));`);
-        const seen = JSON.parse(/JOBRESULT (.*)/.exec(result.stdout)[1]);
-        assert.equal(seen.state.status, "complete", result.stdout);
-        assert.equal(seen.done.results.length, 2, result.stdout);
+        let seen;
+        const deadline = Date.now() + 20_000;
+        while (Date.now() < deadline) {
+          const result = await cell(`
+            const state = await browser.job.status(job.jobId);
+            const done = await browser.job.result(job.jobId);
+            console.log("JOBRESULT " + JSON.stringify({ state, done }));`);
+          seen = JSON.parse(/JOBRESULT (.*)/.exec(result.stdout)[1]);
+          if (seen.state.status === "complete") break;
+          await sleep(500);
+        }
+        assert.equal(seen.state.status, "complete", JSON.stringify(seen));
+        assert.equal(seen.done.results.length, 2, JSON.stringify(seen));
         assert.deepEqual(
           seen.done.results.map((item) => item.value.title),
           ["Job 1", "Job 2"],
@@ -1066,7 +1081,7 @@ test(
             stdout,
           );
           assert.deepEqual(JSON.parse(/TAB (.*)/.exec(stdout)[1]), {
-            keys: ["id", "title", "url", "active", "mine"],
+            keys: ["id", "title", "url", "active", "mine", "label", "control"],
             hasTarget: true,
           });
           const missing = await run(
