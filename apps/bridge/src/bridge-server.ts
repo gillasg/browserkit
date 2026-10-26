@@ -4,7 +4,7 @@ import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { WebSocket, WebSocketServer, type RawData } from "ws";
 import { dataDirectory, statePath, type BridgeState } from "./paths.js";
-import { CdpServer } from "./cdp/server.js";
+import { CdpServer } from "@browserkit/cdp";
 import { isSiteSkillRequest, siteSkillCall } from "./site-skills.js";
 import {
   appendJournalEntry,

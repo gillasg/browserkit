@@ -28,6 +28,9 @@ importers:
 
   apps/bridge:
     dependencies:
+      "@browserkit/cdp":
+        specifier: workspace:*
+        version: link:../../packages/cdp
       "@browserkit/credentials":
         specifier: workspace:*
         version: link:../../packages/credentials
@@ -139,6 +142,16 @@ importers:
       ws:
         specifier: 8.22.0
         version: 8.22.0
+
+  packages/cdp:
+    dependencies:
+      ws:
+        specifier: ^8.18.1
+        version: 8.22.0
+    devDependencies:
+      "@types/ws":
+        specifier: ^8.18.1
+        version: 8.18.1
 
   packages/crawl:
     dependencies:
