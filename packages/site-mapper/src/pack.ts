@@ -201,7 +201,9 @@ export async function installSitePack(
   const written: string[] = [];
   for (const [path, content] of pack.files) {
     const relative = safePath(path);
-    const installed = relative === "tools.json" ? disabledTools(content) : content;
+    // Windows file names are case-insensitive: "Tools.json" lands on the same file readSiteTools
+    // opens, so compare without case or an imported pack could arrive with its tools enabled.
+    const installed = relative.toLowerCase() === "tools.json" ? disabledTools(content) : content;
     const full = resolve(target, relative);
     if (!full.startsWith(resolve(target) + (process.platform === "win32" ? "\\" : "/")))
       throw new Error(`The pack contains an unsafe path: ${path}`);

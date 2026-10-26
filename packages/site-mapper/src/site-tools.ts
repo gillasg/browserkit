@@ -233,6 +233,6 @@ function summary(tool: SiteTool): SiteToolSummary {
     name: tool.name,
     ...(tool.description ? { description: tool.description } : {}),
     params: tool.params ?? [],
-    enabled: tool.enabled !== false,
+    enabled: tool.enabled === true,
   };
 }
