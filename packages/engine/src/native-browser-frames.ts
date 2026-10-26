@@ -244,7 +244,7 @@ export async function collectFrameAx(
 ): Promise<AxNode[]> {
   const nodes = rootNodes.map((node) => ({ ...node, frameId: rootFrameId }));
   const seen = new Set<string>();
-  for (const node of nodes) seen.add("root:" + (node.nodeId ?? node.backendDOMNodeId));
+  for (const node of nodes) seen.add("root:" + (node.backendDOMNodeId ?? node.nodeId));
   const frames = await discoverFrames(debuggee).catch(() => []);
   const sessions = [
     debuggee,
@@ -261,8 +261,16 @@ export async function collectFrameAx(
       frame.sessionId ? {} : { frameId: frame.frameId },
     ).catch(() => undefined);
     for (const node of tree?.nodes ?? []) {
-      const key = (frame.sessionId ?? "root") + ":" + (node.nodeId ?? node.backendDOMNodeId);
-      if (seen.has(key) && !frame.sessionId) continue;
+      const key = (frame.sessionId ?? "root") + ":" + (node.backendDOMNodeId ?? node.nodeId);
+      if (seen.has(key) && !frame.sessionId) {
+        // Chrome can return the root tree's copy of an iframe node first; give that copy the
+        // iframe's real frame id instead of dropping it.
+        const existing = nodes.find(
+          (entry) => "root:" + (entry.backendDOMNodeId ?? entry.nodeId) === key,
+        );
+        if (existing) existing.frameId = frame.frameId;
+        continue;
+      }
       seen.add(key);
       nodes.push({
         ...node,
@@ -320,7 +328,7 @@ export async function rootFramePoint(
   point: { x: number; y: number },
 ): Promise<RootPoint> {
   const root = await rootFrameId(debuggee);
-  if (!root || root === frameId) return { ...point, offsetX: 0, offsetY: 0 };
+  if (root === frameId) return { ...point, offsetX: 0, offsetY: 0 };
   const sources: chrome.debugger.Debuggee[] = [
     debuggee,
     ...[...(sessions.get(debuggee.tabId ?? -1)?.values() ?? [])].map((sessionId) => ({
@@ -377,10 +385,12 @@ async function frameOwner(
       frameId,
     }).catch(() => undefined);
     if (owner?.backendNodeId === undefined) continue;
-    const model = await send<{ content?: number[]; border?: number[] }>(source, "DOM.getBoxModel", {
-      backendNodeId: owner.backendNodeId,
-    }).catch(() => undefined);
-    if (model) return { source, backendNodeId: owner.backendNodeId, model };
+    const box = await send<{ model?: { content?: number[]; border?: number[] } }>(
+      source,
+      "DOM.getBoxModel",
+      { backendNodeId: owner.backendNodeId },
+    ).catch(() => undefined);
+    if (box?.model) return { source, backendNodeId: owner.backendNodeId, model: box.model };
   }
   return undefined;
 }
