@@ -91,6 +91,10 @@ export const signinCommand: Command = {
 
 bu.signIn() in browser code then fills a site's sign-in form from that password manager. The
 agent never sees the password or the one-time code; the first sign-in on a site is approved on
-the page itself.`,
+the page itself.
+
+Saving a new login hands the item to the configured password manager CLI. Bitwarden receives a
+base64 item and Proton Pass receives \`--password\` as an argument; that argument is visible to
+processes of the same user. No password is written to browserkit logs or files.`,
   run: signin,
 };
