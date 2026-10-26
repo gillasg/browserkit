@@ -108,6 +108,7 @@ var browser = Object.freeze({
       var result = await __step({op:'listTabs',
         ...(options.query ? {query: options.query} : {}),
         ...(options.mine === true ? {mine:true} : {}),
+        ...(options.shared === true ? {shared:true} : {}),
         ...(options.all === true ? {all:true} : {})});
       __focusedWindowId = result.focusedWindowId;
       var listed = result.tabs.map(tab => __listedTab(__compactTab(tab)));

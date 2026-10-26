@@ -11,3 +11,20 @@ void chrome.runtime
     status.innerHTML =
       '<span class="off">● Not connected.</span> Run <code>npx browserkit setup</code>, then reopen this popup.';
   });
+const share = document.getElementById("share") as HTMLButtonElement | null;
+const shareState = document.getElementById("share-state");
+void chrome.tabs.query({ active: true, currentWindow: true }).then(async ([tab]) => {
+  if (!tab?.id || !share || !shareState) return;
+  const state = await chrome.runtime.sendMessage({ kind: "bue.tabState", tabId: tab.id });
+  const update = () => {
+    share.textContent = state?.shared ? "Stop sharing this tab" : "Hand this tab to agents";
+    shareState.textContent = state?.shared ? "Shared with agents" : "";
+  };
+  update();
+  share.disabled = false;
+  share.onclick = async () => {
+    const next = await chrome.runtime.sendMessage({ kind: "bue.shareTab", tabId: tab.id });
+    state.shared = Boolean(next?.shared);
+    update();
+  };
+});
