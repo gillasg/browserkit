@@ -7,7 +7,10 @@ import { browserSitesApi } from "../packages/engine/dist/code-api-sites.js";
 // error there leaves every browser cell hanging; execute the real strings with the smallest stubs.
 test("the sites API evaluates before the sandbox listener is installed", () => {
   assert.doesNotThrow(() =>
-    new Function("__siteToolGroup", "__call", browserSitesApi)(() => ({}), () => undefined),
+    new Function("__siteToolGroup", "__call", browserSitesApi)(
+      () => ({}),
+      () => undefined,
+    ),
   );
   assert.doesNotMatch(browserSitesApi, /Object\.Freeze\(/);
 });

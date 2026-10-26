@@ -8,7 +8,14 @@ import { collapseAgentGroups, agentGroupsReady, isAgentGroupId } from "./native-
 import { currentInventoryTabs } from "./native-inventory-client.js";
 import { onEngineInstall } from "./native-engine-install.js";
 
-type Tracked = { touched: number; chatId?: string; seen?: boolean; url?: string; popup?: boolean; used?: boolean };
+type Tracked = {
+  touched: number;
+  chatId?: string;
+  seen?: boolean;
+  url?: string;
+  popup?: boolean;
+  used?: boolean;
+};
 type Stats = { opened: number; closed: number; popups: number };
 
 const STORAGE_KEY = "aeon-agent-tab-cleanup";

@@ -49,7 +49,13 @@ import { withManualScreencast } from "./native-browser-flight.js";
 import { injectedScripts, judgeStealth, noteInjectedScript, type StealthProbe } from "./stealth.js";
 import { controlError, controlOf, stepInput } from "./native-browser-control.js";
 import { controlOrSessionStep, flightStep } from "./native-browser-extra-session.js";
-
+import {
+  clearReadOnly,
+  isReadOnly,
+  refusedCdp,
+  setReadOnly,
+  stepChangesPage,
+} from "./native-browser-guards.js";
 import {
   executeInteraction,
   interactFrame,
@@ -103,7 +109,6 @@ import {
 } from "./network-store.js";
 import { scheduleStep, schedulerStatus } from "./native-browser-scheduler.js";
 import type { BrowserIdentity } from "./native-worker-identity.js";
-
 type Capability = Extract<
   BrowserStep,
   { op: "event" | "frames" | "upload" | "downloads" | "pointer" | "keys" | "reconnect" }
@@ -178,11 +183,9 @@ async function frameSnapshot(
   })) as { nodes: AxNode[] };
   return createSemanticNodes(tree.nodes);
 }
-
 function frameValue(step: Extract<BrowserStep, { op: "frames" }>): string | undefined {
   return step.action === "fill" ? (step.value ?? "") : undefined;
 }
-
 type ExtraRequest = BrowserExecutorRequest & {
   step: Extract<
     BrowserExecutorRequest["step"],
@@ -326,7 +329,6 @@ function storeFilterOf(step: NetworkStoreStep): StoreFilter {
     ...(step.limit === undefined ? {} : { limit: step.limit }),
   };
 }
-
 function networkStoreAction(step: NetworkStoreStep): unknown {
   const filter = storeFilterOf(step);
   switch (step.action) {
@@ -354,7 +356,6 @@ function networkStoreAction(step: NetworkStoreStep): unknown {
       return harGlobal(filter);
   }
 }
-
 async function readOrWait(
   debuggee: chrome.debugger.Debuggee,
   request: ExtraRequest,
@@ -416,7 +417,6 @@ async function evaluate(debuggee: chrome.debugger.Debuggee, expression: string):
   if (result.exceptionDetails) throw new Error("INVALID_TARGET");
   return result.result?.value;
 }
-
 async function pressElement(
   debuggee: chrome.debugger.Debuggee,
   request: ExtraRequest,
@@ -438,13 +438,10 @@ async function pressElement(
   await pressKey(debuggee, request.step.key);
   return { pressed: request.step.key, settle: await settleBrowserPage(debuggee) };
 }
-
 export { releaseBrowserExecutor } from "./native-browser-session.js";
-
 const claimGenerations = new Map<string, number>();
 const usedClaims = new Set<string>();
 const targetChains = new Map<string, Promise<BrowserExecutorResult>>();
-
 export function handleBrowserExecutorMessage(
   identity: BrowserIdentity,
   socket: WebSocket,
@@ -476,7 +473,6 @@ export function handleBrowserExecutorMessage(
   );
   return true;
 }
-
 // Polling or disposing an event subscription only reads its buffer (checked against the chat that
 // made it), so it skips the tab's queue and claim: a long poll never blocks or cancels actions.
 function isEventDrain(step: BrowserStep): boolean {
@@ -497,11 +493,9 @@ async function drainEvents(request: BrowserExecutorRequest): Promise<BrowserExec
     data,
   };
 }
-
 function needsClaim(step: BrowserStep): boolean {
   return step.op !== "listTabs" && step.op !== "openTab";
 }
-
 function claimIsFresh(request: BrowserExecutorRequest): boolean {
   if (
     !request.claimId ||
@@ -528,9 +522,15 @@ async function executeStep(
   if (step.op === "listTabs") return listTabs(request);
   if (step.op === "openTab") return openTab(identity, request);
   if (step.op === "attachTab") return attachTab(step.target);
+  if (step.op === "session") {
+    if (step.action === "claim") setReadOnly(step.target.tabId, step.readOnly);
+    if (step.action === "finish") clearReadOnly(step.target.tabId);
+  }
   if (controlOf(step.target.tabId) === "user" && step.op !== "control" && step.op !== "session")
     throw new Error(controlError(step.target.tabId));
   activateClaim(request);
+  if (isReadOnly(step.target.tabId) && stepChangesPage(step))
+    throw new Error("READ_ONLY: this tab was claimed for reading only");
   const tab = await assertTarget(request);
   bindBrowserSession(step.target.tabId, request.chatId);
   // One step per tab at a time, and writes one at a time browser-wide: two sessions cannot type

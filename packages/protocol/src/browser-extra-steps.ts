@@ -109,6 +109,8 @@ export const browserExtraSteps = [
       action: z.enum(["list", "finish", "claim", "resolve"]),
       keep: z.array(z.string().max(40)).max(20).default([]),
       label: z.string().max(40).optional(),
+      /** Claim the tab for reading only: ordinary write steps are refused. */
+      readOnly: z.boolean().default(false),
     })
     .strict(),
   z

@@ -1,6 +1,7 @@
 import { noteDeviceEmulation } from "./native-browser-session.js";
 import type { BrowserExecutorRequest } from "@browserkit/protocol";
 import { BrowserActionError } from "./native-browser-common.js";
+import { refusedCdp } from "./native-browser-guards.js";
 import { onEngineInstall } from "./native-engine-install.js";
 
 interface Activity {
@@ -374,6 +375,8 @@ export async function executePageCode(
         "UNSUPPORTED",
         "Use browser.openTab/attachTab for target management; page.cdp addresses the selected page only.",
       );
+    const refused = refusedCdp(step.method, step.params as Record<string, unknown>);
+    if (refused) throw new BrowserActionError("UNSUPPORTED", refused);
     value = await chrome.debugger.sendCommand(debuggee, step.method, step.params);
     if (debuggee.tabId !== undefined) noteDeviceEmulation(debuggee.tabId, step.method, step.params);
   }

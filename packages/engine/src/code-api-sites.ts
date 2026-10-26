@@ -131,6 +131,8 @@ async function __here(target, url) {
     var reads = facts.operations.filter(op => !op.writes).map(op => op.id), writes = facts.operations.filter(op => op.writes).map(op => op.id);
     parts.push('site API (siteMapper.call): ' + reads.slice(0, 6).join(', ') + (reads.length > 6 ? ' +' + (reads.length - 6) : '') + (writes.length ? ' · writes: ' + writes.slice(0, 4).join(', ') : ''));
   }
+  var webmcp = await browser.page(target).webmcp.list().catch(() => ({tools: []}));
+  if (webmcp?.tools?.length) parts.push("webmcp: " + webmcp.tools.length + " tool(s) (" + webmcp.tools.slice(0, 3).map((t) => t.name).join(", ") + ")");
   if (facts.tools?.tools?.length || facts.tools?.pageTools?.length)
     parts.push('site tools: ' + [...(facts.tools.tools || []), ...(facts.tools.pageTools || [])].slice(0, 8).join(', '));
   if (facts.boosts.length) parts.push('boosts: ' + facts.boosts.slice(0, 3).map(b => b.name).join(', '));

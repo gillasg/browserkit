@@ -673,6 +673,22 @@ function __pageChallengeInfo() {
     gridFrame: gridFrame ? rect(gridFrame) : null, frames: boxes, tiles: tiles.slice(0, 20),
     slider: Boolean(handle) || /slide|drag.*slider|puzzle|handle/i.test(text), grid: Boolean(gridFrame) || /click.*(square|tile|image)|select all/i.test(text), text:text.slice(0,120)};
 }
+async function __pageWebmcpList() {
+  var ctx = navigator.modelContext || document.modelContext;
+  if (!ctx) return {available: false, tools: [], note: "this page registers no WebMCP tools"};
+  var tools = await Promise.resolve(typeof ctx.getTools === "function" ? ctx.getTools() : []).catch(() => []);
+  return {available: true, tools: (tools || []).filter((tool) => !tool.window || tool.window === window).slice(0, 100).map((tool) => ({name: String(tool.name || "").slice(0, 120), description: String(tool.description || "").slice(0, 1000)}))};
+}
+async function __pageWebmcpCall(arg) {
+  var ctx = navigator.modelContext || document.modelContext;
+  if (!ctx) return {available: false, tools: [], note: "this page registers no WebMCP tools"};
+  var tools = await Promise.resolve(typeof ctx.getTools === "function" ? ctx.getTools() : []).catch(() => []);
+  var tool = (tools || []).find((item) => item.name === arg.name && (!item.window || item.window === window));
+  if (!tool) return {available: true, error: "tool not found"};
+  var run = typeof ctx.executeTool === "function" ? ctx.executeTool(tool, JSON.stringify(arg.input || {})) : typeof ctx.invokeTool === "function" ? ctx.invokeTool(arg.name, arg.input || {}) : Promise.reject(new Error("no executeTool"));
+  var timeout = new Promise((resolve) => setTimeout(() => resolve({error: "webmcp timeout"}), 4000));
+  return {available: true, result: await Promise.race([Promise.resolve(run), timeout])};
+}
 function __pageGridOverlay(arg) {
   document.querySelectorAll('[data-browserkit-grid]').forEach((el) => el.remove());
   var host = document.createElement('div'); host.setAttribute('data-browserkit-grid', ''); host.style.cssText = 'position:fixed;inset:0;z-index:2147483646;pointer-events:none';
@@ -771,6 +787,10 @@ function __extendPageControls(target, base) {
       manifest: () => __mediaManifest(target),
     }),
     challenges: Object.assign(async () => __challenges(target), {solve: (options = {}) => __solveChallenge(target, options)}),
+    webmcp: Object.freeze({
+      list: () => browser.page(target).inspect(__pageWebmcpList),
+      call: (name, input = {}) => browser.page(target).inspect(__pageWebmcpCall, {name, input}),
+    }),
   });
 }
 `;

@@ -41,7 +41,8 @@ onEngineInstall(() => {
         accepted: true,
       };
     } else if (method === "Page.javascriptDialogClosed") {
-      if (receipt.dialog) receipt.dialog.accepted = Boolean((params as { result?: unknown }).result);
+      if (receipt.dialog)
+        receipt.dialog.accepted = Boolean((params as { result?: unknown }).result);
     } else if (method === "Page.downloadWillBegin") {
       const value = params as { url?: string; suggestedFilename?: string; guid?: string };
       receipt.download = {
