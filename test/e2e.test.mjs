@@ -267,6 +267,29 @@ test(
         assert.match(stdout, /→ bought/);
       });
 
+      await t.test("challenges.solve clears a checkbox and returns text only", async () => {
+        const { stdout } = await run(
+          process.execPath,
+          [
+            cli,
+            "repl",
+            "--session",
+            "challenge",
+            "--challenge-assist",
+            `page = await browser.openTab(${JSON.stringify(siteUrl + "challenge")});
+             const found = await page.challenges();
+             const solved = await page.challenges.solve({stage: "checkbox"});
+             console.log("CHALLENGE " + JSON.stringify({found, solved}));`,
+          ],
+          { env },
+        );
+        const result = JSON.parse(/CHALLENGE (.*)/.exec(stdout)[1]);
+        assert.equal(result.solved.stage, "checkbox");
+        assert.equal(result.solved.cleared, true, stdout);
+        assert.match(result.solved.action, /checkbox clicked/);
+        assert.doesNotMatch(stdout, /base64|data:image/);
+      });
+
       await t.test("the CLI session keeps its variables and tabs between calls", async () => {
         const { stdout } = await run(process.execPath, [cli, "repl", "page.url"], { env });
         assert.match(stdout, new RegExp("→ " + siteUrl.replaceAll(".", "\\.")));

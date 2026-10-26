@@ -166,6 +166,7 @@ async function startCell(identity: BrowserIdentity, socket: WebSocket, run: Brow
       code: run.code,
       timeoutMs: run.timeoutMs,
       attached: run.targets[0],
+      challengeAssist: run.challengeAssist === true,
     })) as { value?: unknown; output?: string; error?: string; reset?: boolean } | undefined;
     finish(
       cell,

@@ -152,5 +152,12 @@ export function dataRoutes(request, response) {
     response.end(`<title>Item ${id}</title><h1>Item ${id}</h1>`);
     return true;
   }
+  if (url.pathname === "/challenge") {
+    response.setHeader("content-type", "text/html");
+    response.end(
+      `<title>Verify you are human</title><main><h1>Verify</h1><div role="checkbox" aria-label="I am not a robot" style="width:32px;height:32px;border:1px solid #555" onclick="setTimeout(function(){document.querySelector('input[name=g-recaptcha-response]').value='token';document.title='cleared'},300)"></div><input type="hidden" name="g-recaptcha-response"></main>`,
+    );
+    return true;
+  }
   return false;
 }

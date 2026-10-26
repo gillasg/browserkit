@@ -46,6 +46,7 @@ async function repl(args: Args): Promise<number> {
       session: flag(args, "session") ?? "cli",
       ...(timeout ? { timeoutMs: Number(timeout) } : {}),
       ...(has(args, "no-flight") ? { flight: false } : {}),
+      ...(has(args, "challenge-assist") ? { challengeAssist: true } : {}),
     });
     if (!has(args, "quiet")) {
       const text = await spillText(formatResult(result).text, flag(args, "session") ?? "cli");

@@ -24,6 +24,7 @@ const BOOLEAN = new Set([
   "media",
   "no-build",
   "no-flight",
+  "challenge-assist",
   "no-boosts",
   "no-color",
   "no-gate",

@@ -244,7 +244,13 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
   cells.set(message.cellId, { chatId: message.chatId, reply });
   void target.ready.then(() =>
     target.frame.contentWindow?.postMessage(
-      { kind: "cell", cellId: message.cellId, code: message.code, attached: message.attached },
+      {
+        kind: "cell",
+        cellId: message.cellId,
+        code: message.code,
+        attached: message.attached,
+        challengeAssist: message.challengeAssist,
+      },
       "*",
     ),
   );

@@ -18,6 +18,8 @@ export const BrowserCodeRunSchema = z
     space: z.enum(["window", "tabs"]).optional(),
     /** Record a short screencast of agent tabs (default true); false turns it off for this run. */
     flight: z.boolean().optional(),
+    /** Human-verification assistance is allowed only for chat-sourced cells. */
+    challengeAssist: z.boolean().optional(),
   })
   .strict();
 export type BrowserCodeRun = z.infer<typeof BrowserCodeRunSchema>;

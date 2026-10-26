@@ -253,6 +253,7 @@ export class Bridge {
         targets,
         timeoutMs,
         ...(request.flight === false ? { flight: false } : {}),
+        ...(request.challengeAssist === true ? { challengeAssist: true } : {}),
       });
     });
   }
