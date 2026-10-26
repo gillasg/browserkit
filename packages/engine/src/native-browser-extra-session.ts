@@ -9,11 +9,10 @@ type ControlStep = Extract<BrowserStep, { op: "control" | "session" }>;
 /** The control and session steps: who drives a tab, and ending or handing over its space. */
 export async function controlOrSessionStep(step: ControlStep, chatId: string): Promise<unknown> {
   if (step.op === "control") {
-    if (step.action === "giveback")
-      return {
-        control: giveBack(step.target.tabId) ? "agent" : controlOf(step.target.tabId),
-        changed: true,
-      };
+    if (step.action === "giveback") {
+      const changed = giveBack(step.target.tabId);
+      return { control: controlOf(step.target.tabId), changed };
+    }
     if (step.action === "wait") {
       const given = await waitForGiveBack(step.target.tabId, step.timeoutMs);
       if (!given)
