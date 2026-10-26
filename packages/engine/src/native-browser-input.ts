@@ -348,6 +348,7 @@ async function pasteNode(
   text: string,
   html: string,
 ): Promise<void> {
+  await chrome.debugger.sendCommand(debuggee, "Page.bringToFront").catch(() => undefined);
   const swap = (await toOffscreen({
     target: "aeon-code-offscreen",
     kind: "clipboardSwap",

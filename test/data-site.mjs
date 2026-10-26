@@ -68,6 +68,16 @@ setTimeout(function () {
 </body></html>`;
 
 export function dataRoutes(request, response) {
+  if (request.url === "/.well-known/webagents.json") {
+    response.setHeader("content-type", "application/json");
+    response.end(
+      JSON.stringify({
+        version: 1,
+        actions: [{ name: "one" }, { name: "two" }, { name: "three" }],
+      }),
+    );
+    return true;
+  }
   const url = new URL(request.url ?? "/", "http://localhost");
   if (url.pathname === "/virtual") {
     response.setHeader("content-type", "text/html");
