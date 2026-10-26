@@ -34,6 +34,13 @@ export const BrowserTabSchema = z
     documentEpoch: z.number().int().nonnegative(),
     /** Set by browser.tabs(): true only for tabs this chat or session opened. */
     mine: z.boolean().optional(),
+    /** Who is driving: the agent (default) or the user, after taking the tab over. */
+    control: z.enum(["agent", "user"]).optional(),
+    /** Stable session label (p1, p2…), accepted anywhere a tab id is. */
+    label: z
+      .string()
+      .regex(/^p[0-9]{1,3}$/)
+      .optional(),
   })
   .strict();
 export type BrowserTab = z.infer<typeof BrowserTabSchema>;

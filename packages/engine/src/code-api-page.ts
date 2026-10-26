@@ -2,6 +2,7 @@
 // readiness, sessions and emulation. Evaluated in the same sandbox realm as code-api.ts.
 export const browserFastApi = `
 var __states = new Map(), __tabs = new Map(), __seen = new Map(), __dirty = new Map(), __opened = new Map(), __busy = new Set(), __keptTabs = new Set(), __closedTabs = new Map(), __focusedWindowId, __attachedTarget, __lastTarget;
+var __labels = new Map();
 var __key = target => JSON.stringify(target);
 // The last navigation failure per tab: page.lastError = { code, url, stage, message, at }.
 var __lastErrors = new Map();
@@ -15,6 +16,8 @@ function __noteNavError(target, url, stage, error) {
 function __compactTab(tab) {
   var entry = {id: tab.target.tabId, title: tab.title, url: tab.url, active: tab.active};
   if (typeof tab.mine === 'boolean') entry.mine = tab.mine;
+  if (typeof tab.label === 'string') entry.label = tab.label;
+  if (typeof tab.control === 'string') entry.control = tab.control;
   for (var [key, value] of Object.entries({...tab, tabId: tab.target.tabId}))
     if (!(key in entry)) Object.defineProperty(entry, key, {value, enumerable: false});
   return entry;
@@ -62,6 +65,15 @@ async function __tabTarget(target) {
   if (!tab) throw Error('TARGET_LOST: tab ' + target + ' is not open (closed, or never opened); browser.tabs() lists live tabs');
   return tab.target;
 }
+// A label (p2) stands for a tab whose id may have changed; the engine re-binds it by URL.
+async function __labelTarget(label) {
+  var known = __labels.get(label);
+  if (known && __tabs.get(__key(known))) return known;
+  var found = (await __step({op:'session', target: __hostTarget(), action:'resolve', label: String(label)})).data;
+  __labels.set(found.label || String(label), found.tab.target);
+  __tabs.set(__key(found.tab.target), found.tab);
+  return found.tab.target;
+}
 function __clamp(value, min, max) { return Math.min(max, Math.max(min, Math.round(Number(value)) || min)); }
 function __sleep(ms) { return new Promise((done) => setTimeout(done, Math.min(30000, Math.max(0, Number(ms) || 0)))); }
 // A browser.fetch failure that named its kind and host (see native-browser-fetch): the message
@@ -107,6 +119,50 @@ function __waitSelector(target, selector, options) {
 function __waitCondition(target, expression, timeout) {
   return __untilDeadline(timeout, (timeoutMs) => __step({op:'waitFor', target, expression, timeoutMs}));
 }
+// Page-side helpers (recording, media) run in an isolated world: the page cannot see their
+// variables, and they still see the page's DOM and events. One context per tab, remade after a
+// navigation drops it.
+var __worlds = new Map();
+async function __isolatedEval(target, expression) {
+  var key = __key(target);
+  for (var attempt = 0; ; attempt++) {
+    var contextId = __worlds.get(key);
+    if (!contextId) {
+      var tree = (await __step({op:'cdp', target, method:'Page.getFrameTree', params:{}}, true)).data.value;
+      var frame = tree && tree.frameTree && tree.frameTree.frame;
+      if (!frame || !frame.id) throw Error('NO_FRAME');
+      var made = (await __step({op:'cdp', target, method:'Page.createIsolatedWorld', params:{frameId: frame.id, worldName: 'browserkit-helper'}}, true)).data.value;
+      contextId = made && made.executionContextId;
+      if (!contextId) throw Error('NO_CONTEXT');
+      __worlds.set(key, contextId);
+    }
+    try {
+      var reply = (await __step({op:'cdp', target, method:'Runtime.evaluate', params:{expression, contextId, returnByValue:true, awaitPromise:true}}, true)).data.value;
+      if (reply && reply.exceptionDetails)
+        throw Error(reply.exceptionDetails.exception && reply.exceptionDetails.exception.description || reply.exceptionDetails.text || 'HELPER_FAILED');
+      return reply && reply.result ? reply.result.value : undefined;
+    } catch (error) {
+      __worlds.delete(key);
+      if (attempt >= 1 || !/context|Cannot find/i.test(String(error && error.message || error))) throw error;
+    }
+  }
+}
+// What the page itself can check about being driven. Never patches anything: it only reads.
+function __stealthProbe() {
+  var globals = Object.getOwnPropertyNames(window).filter((name) => /^(__aeon|__browserkit|browserkit-)/.test(name));
+  var overlays = [...document.querySelectorAll('[id^="aeon-"],[id^="browserkit-"],[data-aeon-overlay],[data-browserkit-overlay]')].map((node) => node.id ? '#' + node.id : node.tagName.toLowerCase());
+  var wrapped = [];
+  var native = /\\{\\s*\\[native code\\]\\s*\\}/;
+  for (var name of ['open', 'confirm', 'prompt', 'alert']) {
+    var fn = window[name];
+    if (typeof fn === 'function' && !native.test(Function.prototype.toString.call(fn))) wrapped.push('window.' + name);
+  }
+  var play = HTMLMediaElement.prototype.play;
+  if (!native.test(Function.prototype.toString.call(play))) wrapped.push('HTMLMediaElement.play');
+  var geolocationShim = false;
+  try { geolocationShim = !native.test(Function.prototype.toString.call(navigator.geolocation.getCurrentPosition)); } catch {}
+  return {webdriver: navigator.webdriver === true, globals, overlays, wrapped, geolocationShim};
+}
 function __beginCell() { __dirty.clear(); __hasDelivered=false; __deliveryValue=undefined; }
 async function __step(step, readOnly = false) {
   var startedAt = Date.now();
@@ -131,8 +187,8 @@ async function __step(step, readOnly = false) {
     action = false;
   }
   if (result.url && step.target && __tabs.has(__key(step.target))) __tabs.set(__key(step.target), {...__tabs.get(__key(step.target)), url: result.url});
-  if (result.kind === 'tab') { __lastTarget = result.tab.target; __tabs.set(__key(__lastTarget),result.tab); await __learnOn(__lastTarget); }
-  if (result.kind === 'tabs') for (var tab of result.tabs) __tabs.set(__key(tab.target),tab);
+  if (result.kind === 'tab') { __lastTarget = result.tab.target; __tabs.set(__key(__lastTarget),result.tab); if (result.tab.label) __labels.set(result.tab.label, result.tab.target); await __learnOn(__lastTarget); }
+  if (result.kind === 'tabs') for (var tab of result.tabs) { __tabs.set(__key(tab.target),tab); if (tab.label) __labels.set(tab.label, tab.target); }
   var observation = result.kind === 'semantic' ? result : result.observation;
   if (observation) {
     __states.set(__key(step.target), observation);
@@ -154,13 +210,13 @@ function __element(target, element) {
   }
   if (typeof element !== 'number' && typeof element !== 'string') return element;
   // A string that is not an observed id is a CSS selector, as in Playwright's page.click(selector).
-  var looksLikeId = typeof element === 'number' || /^(\\d+|e\\d+|[a-z]\\d+)$/i.test(element);
+  var looksLikeId = typeof element === 'number' || /^(\\d+|e\\d+|f\\d+:e\\d+|[a-z]\\d+)$/i.test(element);
   if (!looksLikeId) return {kind:'query',by:'css',value:element};
   var state = __states.get(__key(target));
   if (!state) throw Error('Observe this page with bu.state() before using an id');
   var node = state.nodes.find(n => n.backendNodeId === element || n.ref === element || (typeof element === "string" && n.backendNodeId === Number(element)));
   if (!node) throw Error('STALE_REF: id absent from the latest state; observe again');
-  return node.backendNodeId ? {kind:'backend',backendNodeId:node.backendNodeId,documentEpoch:state.documentEpoch}
+  return node.backendNodeId && !node.frame ? {kind:'backend',backendNodeId:node.backendNodeId,documentEpoch:state.documentEpoch}
     : {kind:'ref',snapshotId:state.snapshotId,ref:node.ref};
 }
 // Many controls with the same role and name (YouTube's 40 "Action menu" buttons) print as one
@@ -241,6 +297,10 @@ var bu = Object.freeze({
   },
   use: target => {
     if (typeof target === 'number') return __tabTarget(target).then(bu.use);
+    if (typeof target === 'string') {
+      if (!/^p\\d{1,3}$/.test(target)) throw Error('TARGET_LOST: bu.use takes a tab, a tab id or a session label (p1, p2…)');
+      return __labelTarget(target).then(bu.use);
+    }
     if (!target || typeof target !== 'object') throw Error('TARGET_LOST: bu.use needs a tab from browser.tabs(), a tab id, or a target');
     var entry = __tabs.get(__key(target));
     if (!entry && __attachedTarget && __key(target) === __key(__attachedTarget))
@@ -280,6 +340,11 @@ var bu = Object.freeze({
     if (outcome === 'cancelled') throw Error('HANDOFF_CANCELLED: the user cancelled the hand-off');
     return 'done';
   },
+  // The user clicked or typed in this tab: the agent is paused until they give it back.
+  control: async () => (await __step({op:'control', target, action:'status'})).data,
+  waitForControl: async (options = {}) =>
+    (await __step({op:'control', target, action:'wait', timeoutMs: Math.min(Number(options.timeoutMs ?? options.timeout ?? 30000) || 0, 120000)})).data,
+  giveBack: async () => (await __step({op:'control', target, action:'giveback'})).data,
   signIn: async (options = {}) => {
     var target = options.target || __lastTarget;
     if (!target) throw Error('Use bu.use(attachedTarget) or browser.page(target) first');

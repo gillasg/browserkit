@@ -1,6 +1,7 @@
 import { engineConfig } from "./engine-config.js";
 import { guardAgentTab } from "./native-browser-tab-cleanup.js";
 import { withBrowserDebugger } from "./native-browser-session.js";
+import { handoffActive } from "./native-browser-control.js";
 
 // The first sign-in to a site asks the user, on the page itself: not now, this once, or always
 // for this site. "Always" is remembered in the extension, per site, until the user clears it.
@@ -65,12 +66,14 @@ export async function approveSignIn(
     })
     .catch(() => undefined);
   guardAgentTab(tabId, true);
+  handoffActive(tabId, true);
   try {
     const answer = await waitForAnswer(tabId, detail, active);
     if (answer === "always") await rememberAlways(site);
     return answer;
   } finally {
     guardAgentTab(tabId, false);
+    handoffActive(tabId, false);
     void chrome.notifications.clear("signin-approval-" + tabId).catch(() => undefined);
     void evaluate(tabId, CLEAR).catch(() => undefined);
   }

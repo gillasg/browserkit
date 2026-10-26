@@ -107,7 +107,7 @@ function __demoInstall(options) {
 }
 function __demoDrain() {
   var state = window.__aeonDemo;
-  return state ? state.steps.splice(0, state.steps.length) : [];
+  return state ? state.steps.splice(0, state.steps.length) : null;
 }
 function __demoUninstall(options) {
   if (window.__aeonDemo && window.__aeonDemo.id === options.id && window.__aeonDemoCleanup) window.__aeonDemoCleanup();
@@ -168,18 +168,23 @@ async function __recordDemonstration(target, options) {
     if (step.kind === 'navigation' && previous && previous.kind === 'navigation' && previous.url === step.url) return;
     steps.push(step);
   }
-  await page.inspect(__demoInstall, { id: id }).catch(function () {});
-  var source = '(' + __demoInstall.toString() + ')(' + JSON.stringify({ id: id }) + ')';
-  var installed = await page.cdp('Page.addScriptToEvaluateOnNewDocument', { source: source }).catch(function () { return null; });
-  var scriptId = installed && installed.identifier;
+  var install = '(' + __demoInstall.toString() + ')(' + JSON.stringify({ id: id }) + ')';
+  var drain = '(' + __demoDrain.toString() + ')()';
+  var uninstall = '(' + __demoUninstall.toString() + ')(' + JSON.stringify({ id: id }) + ')';
+  await __isolatedEval(target, install).catch(function () {});
   var lastUrl = startedUrl;
   var loop = (async function () {
     while (running) {
       await __sleep(120);
       try {
-        var drained = await page.inspect(__demoDrain);
-        if (Array.isArray(drained)) for (var i = 0; i < drained.length; i++) append(drained[i]);
-        var url = await page.inspect(function () { return location.href; });
+        var drained = await __isolatedEval(target, drain);
+        if (drained === null) {
+          // A new document starts without the recorder; install it again.
+          await __isolatedEval(target, install);
+        } else if (Array.isArray(drained)) {
+          for (var i = 0; i < drained.length; i++) append(drained[i]);
+        }
+        var url = await __isolatedEval(target, 'location.href');
         if (typeof url === 'string' && url && url !== lastUrl) {
           append({ kind: 'navigation', url: url });
           lastUrl = url;
@@ -191,10 +196,9 @@ async function __recordDemonstration(target, options) {
     if (!running) throw new Error('DEMONSTRATION_STOPPED: the recorder has already stopped');
     running = false;
     await loop.catch(function () {});
-    await page.inspect(__demoUninstall, { id: id }).catch(function () {});
-    if (scriptId) await page.cdp('Page.removeScriptToEvaluateOnNewDocument', { identifier: scriptId }).catch(function () {});
+    await __isolatedEval(target, uninstall).catch(function () {});
     try {
-      var drained = await page.inspect(__demoDrain);
+      var drained = await __isolatedEval(target, drain);
       if (Array.isArray(drained)) for (var i = 0; i < drained.length; i++) append(drained[i]);
     } catch (error) {}
     var formatted = __demoFormat(steps, startedUrl);

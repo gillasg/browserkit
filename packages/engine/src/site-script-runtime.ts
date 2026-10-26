@@ -122,7 +122,7 @@ export async function previewSiteScript(
     if (!script.matches.some((pattern) => matches(pattern, url))) throw new Error("INVALID_TARGET");
     const world = (await chrome.debugger.sendCommand(debuggee, "Page.createIsolatedWorld", {
       frameId: tree.frameTree.frame.id,
-      worldName: "aeon-preview-" + script.scriptId,
+      worldName: "browserkit-site-" + script.scriptId,
     })) as { executionContextId: number };
     worlds.set(tabId + ":" + script.scriptId, world.executionContextId);
     await assertActive();

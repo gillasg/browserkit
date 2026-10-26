@@ -45,7 +45,7 @@ export function jobCode(spec: {
     if (!url) return {ok:false, item, error:'ITEM_NEEDS_URL: each job item needs a url', kind:'failed', ms:0};
     let tab, timer;
     try {
-      tab = await browser.openTab(String(url), {newTab:true, quiet:options.quiet});
+      tab = await browser.openTab(String(url), {newTab:true, quiet:options.quiet, space:'window'});
       const cutoff = new Promise((_, reject) => {
         timer = setTimeout(() => reject(Object.assign(new Error('TIMEOUT: item took longer than ' + options.timeoutMs + 'ms'), {timeout:true})), options.timeoutMs);
       });

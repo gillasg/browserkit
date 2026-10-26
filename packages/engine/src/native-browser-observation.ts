@@ -93,6 +93,8 @@ interface Options {
   compact?: boolean | undefined;
   /** Drop nodes from the end until the observation fits. */
   maxBytes?: number | undefined;
+  /** Only this ref's subtree (or, for an iframe ref, that frame's document). */
+  root?: string | undefined;
 }
 
 const SUMMARY_ROLES = new Set([
@@ -196,10 +198,29 @@ function selectionKey(node: AxNode, region: number): number {
   const rank = priority(node);
   return rank <= 1 ? rank : region * 5 + rank;
 }
+/** Puts a frame's nodes right after the iframe element that owns it; ownerless frames go last. */
+function orderFrameNodes(nodes: AxNode[], rootFrame?: string): AxNode[] {
+  const out: AxNode[] = [];
+  const done = new Set<string>();
+  const emit = (frameId: string | undefined, depth: number): void => {
+    if (!frameId || done.has(frameId) || depth > 12) return;
+    done.add(frameId);
+    for (const node of nodes) {
+      if (node.frameId !== frameId) continue;
+      out.push(node);
+      if (node.frameOwner) emit(node.frameOwner, depth + 1);
+    }
+  };
+  emit(rootFrame, 0);
+  for (const node of nodes) if (!out.includes(node)) out.push(node);
+  return out;
+}
+
 export function createSemanticNodes(
   nodes: AxNode[],
   options: Options = {},
 ): { refs: Map<string, AxRef>; nodes: BrowserSemanticNode[]; truncated: boolean } {
+  const rootFrame = nodes[0]?.frameId;
   const depths = depthsOf(nodes);
   const regions = regionsOf(nodes);
   const regionOf = (node: AxNode) => regions.get(node) ?? 1;
@@ -214,22 +235,41 @@ export function createSemanticNodes(
       .sort((a, b) => selectionKey(a, regionOf(a)) - selectionKey(b, regionOf(b)))
       .slice(0, cap),
   );
+  const ordered = orderFrameNodes(
+    candidates.filter((node) => selected.has(node)),
+    rootFrame,
+  );
+  const labels = new Map<string, string>();
+  const counters = new Map<string, number>();
   const refs = new Map<string, AxRef>();
   const compact: BrowserSemanticNode[] = [];
-  for (const node of candidates) {
-    if (!selected.has(node)) continue;
+  for (const node of ordered) {
     const backendNodeId = node.backendDOMNodeId;
     if (backendNodeId === undefined) continue;
     const role = textValue(node.role?.value).slice(0, 80);
     const limit = options.compact ? 80 : 512;
     const name = textValue(node.name?.value).trim().slice(0, limit);
-    const ref = `e${compact.length}`;
-    refs.set(ref, { backendNodeId, role, name });
+    const label =
+      node.frameId && node.frameId !== rootFrame
+        ? (labels.get(node.frameId) ?? `f${labels.size + 1}`)
+        : undefined;
+    if (label && !labels.has(node.frameId as string)) labels.set(node.frameId as string, label);
+    const count = counters.get(label ?? "") ?? 0;
+    counters.set(label ?? "", count + 1);
+    const ref = `${label ? label + ":" : ""}e${count}`;
+    refs.set(ref, {
+      backendNodeId,
+      role,
+      name,
+      ...(node.sessionId ? { sessionId: node.sessionId } : {}),
+      ...(node.frameId ? { frameId: node.frameId } : {}),
+    });
     compact.push({
       ref,
       backendNodeId,
       role,
       name,
+      ...(label ? { frame: label } : {}),
       ...(node.ignored ? { hidden: true } : {}),
       ...(node.value ? { value: textValue(node.value.value).slice(0, limit) } : {}),
       ...(options.compact
@@ -333,6 +373,29 @@ export const browserObservationRefs = { refs, latestSnapshots };
 
 type RevalidateTarget = (request: BrowserExecutorRequest, tabId: number) => Promise<void>;
 
+/** The nodes under one observed ref, or an iframe ref's whole frame. */
+function rootScope(nodes: AxNode[], target: BrowserTargetKey, ref: string): AxNode[] {
+  const snapshotId = latestSnapshots.get(targetIdentity(target));
+  const prior = snapshotId ? refs.get(snapshotId)?.get(ref) : undefined;
+  if (!prior) throw new Error("STALE_REF");
+  const root = nodes.find((node) => node.backendDOMNodeId === prior.backendNodeId);
+  if (!root) throw new Error("STALE_REF");
+  if (root.frameOwner) return nodes.filter((node) => node.frameId === root.frameOwner);
+  const ids = new Set<string | undefined>([root.nodeId]);
+  const pending = [root.nodeId];
+  while (pending.length) {
+    const parent = pending.pop();
+    for (const node of nodes) {
+      if (node.frameId !== root.frameId || !node.parentId || node.parentId !== parent) continue;
+      if (node.nodeId) {
+        ids.add(node.nodeId);
+        pending.push(node.nodeId);
+      }
+    }
+  }
+  return nodes.filter((node) => node.frameId === root.frameId && ids.has(node.nodeId));
+}
+
 export async function observeSemantic(
   request: BrowserExecutorRequest,
   tab: chrome.tabs.Tab,
@@ -353,15 +416,16 @@ export async function observeSemantic(
   const options =
     request.step.op === "observe"
       ? request.step
-      : { query: undefined, interactive: undefined, selector: undefined };
+      : { query: undefined, interactive: undefined, selector: undefined, root: undefined };
+  const rooted = options.root ? rootScope(nodes, target, options.root) : nodes;
   const scopedIds = options.selector
     ? await withDebugger(target.tabId, (debuggee) =>
         scopedBackendIds(debuggee, options.selector ?? ""),
       )
     : undefined;
   const scoped = scopedIds
-    ? nodes.filter((node) => scopedIds.has(node.backendDOMNodeId ?? -1))
-    : nodes;
+    ? rooted.filter((node) => scopedIds.has(node.backendDOMNodeId ?? -1))
+    : rooted;
   await revalidateTarget(request, target.tabId);
   const semantic = createSemanticNodes(filterVisibleTextNodes(scoped, text), options);
   const key = targetIdentity(target);

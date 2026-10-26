@@ -3,9 +3,14 @@ export const browserCodeApi = `
 // Chrome accepts every alert/confirm/prompt by default; this lets the agent decline or answer them.
 function __dialogShim(policy) {
   var accept = policy.mode !== 'dismiss';
-  window.confirm = (message) => { console.info('[dialog confirm] ' + message + (accept ? ' (accepted)' : ' (dismissed)')); return accept; };
-  window.prompt = (message, value) => { console.info('[dialog prompt] ' + message); return accept ? (policy.promptText || value || '') : null; };
-  window.alert = (message) => { console.info('[dialog alert] ' + message); };
+  var keepNative = (wrapper, source) => {
+    Object.defineProperty(wrapper, 'toString', { value: source.toString.bind(source), configurable: true });
+    return wrapper;
+  };
+  var confirm = window.confirm, prompt = window.prompt, alert = window.alert;
+  window.confirm = keepNative((message) => { console.info('[dialog confirm] ' + message + (accept ? ' (accepted)' : ' (dismissed)')); return accept; }, confirm);
+  window.prompt = keepNative((message, value) => { console.info('[dialog prompt] ' + message); return accept ? (policy.promptText || value || '') : null; }, prompt);
+  window.alert = keepNative((message) => { console.info('[dialog alert] ' + message); }, alert);
 }
 var __devices = {
   iphone: {width: 390, height: 844, scale: 3, userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1'},
@@ -14,13 +19,16 @@ var __devices = {
 };
 function __geolocationShim(coords) {
   var geo = navigator.geolocation;
-  if (!geo || geo.__aeonShim) return;
+  if (!geo || !/native code/.test(Function.prototype.toString.call(geo.getCurrentPosition))) return;
   var real = { get: geo.getCurrentPosition.bind(geo), watch: geo.watchPosition.bind(geo) };
   var position = () => ({ coords: { ...coords, altitude: null, altitudeAccuracy: null, heading: null, speed: null }, timestamp: Date.now() });
   var fallback = (ok, fail) => (error) => (error && error.code === 1 ? ok(position()) : fail && fail(error));
-  geo.getCurrentPosition = (ok, fail, options) => real.get(ok, fallback(ok, fail), options);
-  geo.watchPosition = (ok, fail, options) => real.watch(ok, fallback(ok, fail), options);
-  Object.defineProperty(geo, "__aeonShim", { value: true });
+  var keepNative = (wrapper, source) => {
+    Object.defineProperty(wrapper, 'toString', { value: source.toString.bind(source), configurable: true });
+    return wrapper;
+  };
+  geo.getCurrentPosition = keepNative((ok, fail, options) => real.get(ok, fallback(ok, fail), options), real.get);
+  geo.watchPosition = keepNative((ok, fail, options) => real.watch(ok, fallback(ok, fail), options), real.watch);
 }
 // What the engine's strict step schema accepts of a locator; filters and regexes resolve in the page.
 function __wire(element) {
@@ -115,6 +123,12 @@ var browser = Object.freeze({
     {list: async (query) => browser.tabs(query)}),
   // The tabs this chat or session opened; browser.tabs({mine:true}) answers the same list.
   myTabs: () => browser.tabs({mine:true}),
+  // This session's space: its tabs, their stable labels, and finishing or handing it over.
+  session: Object.freeze({
+    spaces: async () => (await __step({op:'session', target: __hostTarget(), action:'list'})).data.spaces,
+    finish: async (options = {}) => (await __step({op:'session', target: __hostTarget(), action:'finish', keep: (options.keep || []).map(String)})).data,
+    claim: async () => (await __step({op:'session', target: __hostTarget(), action:'claim'})).data,
+  }),
   // Close one tab this chat/session opened. A user tab, another session's tab or a hand-off tab
   // throws instead of doing nothing; a tab in Split View is unsplit first.
   closeTab: async (tab) => {
@@ -177,6 +191,7 @@ var browser = Object.freeze({
       foreground: options.foreground === true,
       ...(options.referer ? {referer: String(options.referer)} : {}),
       ...(options.quiet === true ? {quiet:true} : {}),
+      ...(options.space === 'window' || options.space === 'tabs' ? {space: options.space} : {}),
       ...(options.present === false ? {present:false} : {}),
       ...(options.timeoutMs ? {timeoutMs: Math.max(500, Math.min(Number(options.timeoutMs) || 0, 120000))} : {}),
       ...(options.window ? {window: {width: Math.round(options.window.width ?? 1920), height: Math.round(options.window.height ?? 1080)}} : {})});
@@ -409,9 +424,22 @@ var browser = Object.freeze({
       try { host = new URL(hit.url).hostname; } catch (error) {}
       return {host, address: hit.remoteIPAddress, url: hit.url};
     },
-    console: async (options = {}) => {
-      var entries = (await __step({op:"diagnostics", target, clear: !!options.clear})).data.console || [];
-      return options.errors ? entries.filter((entry) => /error|exception/i.test(entry.level || '')) : entries;
+    // Console capture is off until asked for: the Runtime domain is detectable. Reading with
+    // console() turns it on for this tab; console.start()/stop()/state() control it directly.
+    console: (() => {
+      var read = async (options = {}) => {
+        var entries = (await __step({op:"diagnostics", target, clear: !!options.clear})).data.console || [];
+        return options.errors ? entries.filter((entry) => /error|exception/i.test(entry.level || '')) : entries;
+      };
+      read.start = async () => (await __step({op:"console", target, action:"start"})).data;
+      read.stop = async () => (await __step({op:"console", target, action:"stop"})).data;
+      read.state = async () => (await __step({op:"console", target, action:"status"})).data;
+      return read;
+    })(),
+    // Reports what this page can tell about being driven. Diagnostic only: nothing is hidden.
+    stealthCheck: async () => {
+      var probe = (await __step({op:"evaluate", target, expression:'(' + __stealthProbe.toString() + ')()'})).data.value;
+      return (await __step({op:"stealth", target, probe: probe || {}})).data;
     },
     dialogs: async (mode = 'accept', promptText = '') => {
       var shim = '(' + __dialogShim.toString() + ')(' + JSON.stringify({mode, promptText}) + ')';

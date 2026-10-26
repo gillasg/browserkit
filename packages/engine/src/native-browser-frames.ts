@@ -1,4 +1,5 @@
 import { BrowserActionError } from "./native-browser-common.js";
+import type { AxNode } from "./native-browser-common.js";
 import type { BrowserExecutorRequest } from "@browserkit/protocol";
 import { onNode } from "./native-browser-dom.js";
 import { onEngineInstall } from "./native-engine-install.js";
@@ -12,6 +13,7 @@ interface FrameInfo {
   url: string;
   frameKey: string;
   sessionId?: string;
+  parentFrameId?: string;
 }
 const sessions = new Map<number, Map<string, string>>();
 onEngineInstall(() => {
@@ -93,7 +95,7 @@ export async function frameContext(
 ): Promise<number> {
   const context = (await chrome.debugger.sendCommand(debuggee, "Page.createIsolatedWorld", {
     frameId,
-    worldName: "aeon-browser",
+    worldName: "browserkit-frames",
   })) as { executionContextId: number };
   return context.executionContextId;
 }
@@ -125,24 +127,29 @@ function appendFrameTree(
   result: FrameInfo[],
   root: FrameNode,
   source: chrome.debugger.Debuggee & { sessionId?: string },
+  parentFrameId?: string,
 ): void {
-  const pending = [root];
-  while (pending.length && result.length < 64) {
-    const node = pending.pop();
+  const pending = [{ node: root, parentFrameId }];
+  while (pending.length && result.length < 96) {
+    const item = pending.pop();
+    const node = item?.node;
     if (!node) continue;
     // Extension and browser-internal frames (password managers, devtools) can block the tab's
     // debugger and leave a phantom frame after they navigate away. They are not page content.
     if (/^(chrome|edge|devtools|chrome-extension|moz-extension):/i.test(node.frame.url)) continue;
+    const parent = item?.parentFrameId ?? node.frame.parentId;
     const info = {
       frameId: node.frame.id,
       url: node.frame.url,
       frameKey: node.frame.id + ":" + (node.frame.loaderId ?? ""),
       ...(source.sessionId ? { sessionId: source.sessionId } : {}),
+      ...(parent ? { parentFrameId: parent } : {}),
     };
-    const prior = result.findIndex((item) => item.frameId === info.frameId);
+    const prior = result.findIndex((entry) => entry.frameId === info.frameId);
     if (prior < 0) result.push(info);
     else if (source.sessionId) result[prior] = info;
-    pending.push(...(node.childFrames ?? []));
+    for (const child of node.childFrames ?? [])
+      pending.push({ node: child, parentFrameId: node.frame.id });
   }
 }
 
@@ -222,4 +229,75 @@ export async function uploadFiles(
     }));
   });
   return { files, selected: true };
+}
+
+/**
+ * The tab's accessibility nodes with each iframe's document spliced in. Same-process frames come
+ * through the root target with a frameId; cross-origin frames are read through their own debugger
+ * session. Nodes carry the frame they belong to, and the iframe element that owns each frame is
+ * marked, so a snapshot can put a frame's controls under its iframe.
+ */
+export async function collectFrameAx(
+  debuggee: chrome.debugger.Debuggee,
+  rootFrameId: string,
+  rootNodes: AxNode[],
+): Promise<AxNode[]> {
+  const nodes = rootNodes.map((node) => ({ ...node, frameId: rootFrameId }));
+  const seen = new Set<string>();
+  for (const node of nodes) seen.add("root:" + (node.nodeId ?? node.backendDOMNodeId));
+  const frames = await discoverFrames(debuggee).catch(() => []);
+  const sessions = [
+    debuggee,
+    ...frames.flatMap((frame) =>
+      frame.sessionId ? [{ ...debuggee, sessionId: frame.sessionId }] : [],
+    ),
+  ];
+  for (const frame of frames) {
+    if (frame.frameId === rootFrameId) continue;
+    const source = frame.sessionId ? { ...debuggee, sessionId: frame.sessionId } : debuggee;
+    const tree = await send<{ nodes?: AxNode[] }>(
+      source,
+      "Accessibility.getFullAXTree",
+      frame.sessionId ? {} : { frameId: frame.frameId },
+    ).catch(() => undefined);
+    for (const node of tree?.nodes ?? []) {
+      const key = (frame.sessionId ?? "root") + ":" + (node.nodeId ?? node.backendDOMNodeId);
+      if (seen.has(key) && !frame.sessionId) continue;
+      seen.add(key);
+      nodes.push({
+        ...node,
+        frameId: frame.frameId,
+        ...(frame.sessionId ? { sessionId: frame.sessionId } : {}),
+      });
+    }
+  }
+  for (const frame of frames) {
+    if (frame.frameId === rootFrameId) continue;
+    const owner = await frameOwnerId(sessions, frame.frameId);
+    if (owner === undefined) continue;
+    const node = nodes.find((entry) => entry.backendDOMNodeId === owner);
+    if (node) node.frameOwner = frame.frameId;
+  }
+  return nodes;
+}
+
+async function frameOwnerId(
+  sources: chrome.debugger.Debuggee[],
+  frameId: string,
+): Promise<number | undefined> {
+  for (const source of sources) {
+    const result = await send<{ backendNodeId?: number }>(source, "DOM.getFrameOwner", {
+      frameId,
+    }).catch(() => undefined);
+    if (result?.backendNodeId !== undefined) return result.backendNodeId;
+  }
+  return undefined;
+}
+
+function send<T>(
+  debuggee: chrome.debugger.Debuggee,
+  method: string,
+  params: Record<string, unknown>,
+): Promise<T> {
+  return chrome.debugger.sendCommand(debuggee, method, params) as Promise<T>;
 }

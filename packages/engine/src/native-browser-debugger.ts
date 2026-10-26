@@ -10,6 +10,7 @@ import {
 } from "./native-browser-common.js";
 import type { BrowserElementTarget, BrowserTargetKey } from "@browserkit/protocol";
 import { queryNodes, visibleNodes, scopedBackendIds } from "./native-browser-dom.js";
+import { collectFrameAx } from "./native-browser-frames.js";
 export { withBrowserDebugger as withDebugger } from "./native-browser-session.js";
 
 export async function resolveElement(
@@ -28,9 +29,21 @@ export async function resolveElement(
     if (latestSnapshots.get(key) !== element.snapshotId) throw new Error("STALE_REF");
     const prior = refs.get(element.snapshotId)?.get(element.ref);
     if (!prior) throw new Error("STALE_REF");
-    const live = nodes.find((node) => node.backendDOMNodeId === prior.backendNodeId);
     if (documentEpoch !== undefined && prior.documentEpoch !== documentEpoch)
       throw new Error("STALE_REF");
+    // A frame's node lives in that frame's session; its backend id means nothing on the tab's
+    // own target, so revalidate it where it was read.
+    if (prior.sessionId) {
+      const tree = (await chrome.debugger
+        .sendCommand({ ...debuggee, sessionId: prior.sessionId }, "Accessibility.getFullAXTree")
+        .catch(() => {
+          throw new Error("STALE_REF");
+        })) as { nodes?: AxNode[] };
+      const live = tree.nodes?.find((node) => node.backendDOMNodeId === prior.backendNodeId);
+      if (!sameSemanticNode(live, prior)) throw new Error("STALE_REF");
+      return prior;
+    }
+    const live = nodes.find((node) => node.backendDOMNodeId === prior.backendNodeId);
     if (!sameSemanticNode(live, prior)) throw new Error("STALE_REF");
     return prior;
   }
@@ -146,37 +159,12 @@ export async function getAxTree(debuggee: chrome.debugger.Debuggee): Promise<AxN
     nodes?: AxNode[];
   };
   if (!Array.isArray(result.nodes)) throw new Error("UNSUPPORTED");
-  const frames = (await chrome.debugger.sendCommand(debuggee, "Page.getFrameTree")) as {
-    frameTree?: { childFrames?: Frame[] };
-  };
-  interface Frame {
-    frame: { id: string };
-    childFrames?: Frame[];
-  }
-  const pending = [...(frames.frameTree?.childFrames ?? [])],
-    ids: string[] = [];
-  while (pending.length) {
-    const frame = pending.pop();
-    if (frame) {
-      ids.push(frame.frame.id);
-      pending.push(...(frame.childFrames ?? []));
-    }
-  }
-  const children = await Promise.all(
-    ids.slice(0, 32).map((frameId) =>
-      chrome.debugger.sendCommand(debuggee, "Accessibility.getFullAXTree", { frameId }).then(
-        (value) => (value as { nodes: AxNode[] }).nodes,
-        () => [],
-      ),
-    ),
-  );
-  const seen = new Set<number>();
-  return [result.nodes, ...children].flat().filter((node) => {
-    if (node.backendDOMNodeId === undefined) return true;
-    if (seen.has(node.backendDOMNodeId)) return false;
-    seen.add(node.backendDOMNodeId);
-    return true;
-  });
+  const frames = (await chrome.debugger
+    .sendCommand(debuggee, "Page.getFrameTree")
+    .catch(() => undefined)) as { frameTree?: { frame?: { id?: string } } } | undefined;
+  const rootFrameId = frames?.frameTree?.frame?.id;
+  if (!rootFrameId) return result.nodes;
+  return collectFrameAx(debuggee, rootFrameId, result.nodes);
 }
 
 export async function getViewportCenter(

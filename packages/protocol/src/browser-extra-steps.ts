@@ -88,6 +88,37 @@ export const browserExtraSteps = [
     })
     .strict(),
   z.object({ op: z.literal("diagnostics"), target, clear: z.boolean().default(false) }).strict(),
+  z
+    .object({
+      op: z.literal("console"),
+      target,
+      action: z.enum(["start", "stop", "status"]),
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("session"),
+      target,
+      action: z.enum(["list", "finish", "claim", "resolve"]),
+      keep: z.array(z.string().max(40)).max(20).default([]),
+      label: z.string().max(40).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("control"),
+      target,
+      action: z.enum(["status", "wait", "giveback"]),
+      timeoutMs: z.number().int().min(100).max(120_000).default(30_000),
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("stealth"),
+      target,
+      probe: z.record(z.string(), z.unknown()).optional(),
+    })
+    .strict(),
   z.object({ op: z.literal("popups"), target }).strict(),
   z.object({ op: z.literal("readiness"), target }).strict(),
   z

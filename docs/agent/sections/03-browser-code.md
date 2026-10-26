@@ -20,7 +20,14 @@ const rows = await page.list("tr"); // every row, scrolling lists that draw lazi
   in place, all at once with `Promise.all`.
 - `bu.state()` prints `[id] role "name" = value` and visible text (`*` marks changes; scope with
   `{selector}` or `{query}`). Act on apps that redraw themselves by visible text, role or bu id,
-  never `document.querySelector`.
+  never `document.querySelector`. Controls inside a cross-origin iframe appear under their iframe
+  with a frame prefix (`f2:e14`); acting on one goes through that frame, and
+  `bu.state({root: "f2:e14"})` / `page.snapshot({root})` scopes to that subtree (an iframe ref
+  means its whole document).
+- Console and page errors are captured only when asked for: `page.console()` reads and turns
+  capture on for this tab, `page.console.start()` / `.stop()` / `.state()` control it. The Runtime
+  domain it needs is detectable, so it stays off by default. `page.stealthCheck()` reports what a
+  page can see (Runtime on, injected globals or overlays, wrapped functions, `navigator.webdriver`).
 - `page` is Playwright-style: `page.goto(url)`, `page.title()`, `page.url()`, `page.locator(css)`,
   `getByRole(role, {name})`, `getByText`, `getByLabel` with `.click()`, `.fill(v)`, `.innerText()`,
   `.count()`, `.all()`, `.nth(i)`, `page.$$eval`, `page.keyboard.press("Enter")`,
@@ -33,3 +40,13 @@ const rows = await page.list("tr"); // every row, scrolling lists that draw lazi
   `browser.job(items, async (page, item) => …)`, which returns a job id and keeps running after
   the cell; check `browser.job.status(id)` or `browser.job.result(id)` later. `browser.reset()`
   closes every tab the chat opened except kept ones.
+- If you click or type in a tab an agent is driving, it stops at its next step with
+  `USER_TOOK_CONTROL` (later steps say `USER_HAS_CONTROL`). `browser.tabs()` marks that tab
+  `control: "user"`. Wait with `page.waitForControl()` (or `{timeoutMs}`) until the user presses
+  the banner's button or calls `page.giveBack()`; there is no retry around it.
+- A session's tabs can be one space: `browser.openTab(url, {space: "window"})` puts its tabs in one
+  background window of its own, while `{space: "tabs"}` keeps them in the user's window.
+  `browser.session.finish({keep: ["p2"]})` moves the kept tabs to the user and closes the rest;
+  `.claim()` leaves the whole space to the user; `.spaces()` lists sessions and their status. Tabs
+  carry stable labels (`p1`, `p2…`) in `browser.tabs()` and `bu.use("p2")`, re-bound by URL after
+  a browser restart.

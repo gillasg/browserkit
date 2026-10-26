@@ -1,5 +1,6 @@
 import type { BrowserExecutorRequest, BrowserTargetKey } from "@browserkit/protocol";
 import { onEngineInstall } from "./native-engine-install.js";
+import { forgetStealth } from "./stealth.js";
 
 interface EventItem {
   method: string;
@@ -239,6 +240,14 @@ export async function enableConsoleCapture(tabId: number): Promise<void> {
   runtimeEnabled.add(tabId);
   await chrome.debugger.sendCommand({ tabId }, "Runtime.enable").catch(() => undefined);
 }
+/** Turns console capture off again: a page can detect the Runtime domain, so it is opt-in. */
+export async function disableConsoleCapture(tabId: number): Promise<void> {
+  if (!runtimeEnabled.delete(tabId)) return;
+  await chrome.debugger.sendCommand({ tabId }, "Runtime.disable").catch(() => undefined);
+}
+export function consoleCaptureEnabled(tabId: number): boolean {
+  return runtimeEnabled.has(tabId);
+}
 export function readDiagnostics(tabId: number, clear = false): Diagnostics {
   const buffer = buffers.get(tabId) ?? { console: [], network: [] };
   const result = structuredClone(buffer);
@@ -252,6 +261,7 @@ export function forgetDiagnostics(tabId: number): void {
   buffers.delete(tabId);
   runtimeEnabled.delete(tabId);
   enabled.delete(tabId);
+  forgetStealth(tabId);
   for (const key of requests.keys()) if (key.startsWith(tabId + ":")) requests.delete(key);
 }
 onEngineInstall(() => {

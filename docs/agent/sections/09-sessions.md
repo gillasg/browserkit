@@ -17,6 +17,22 @@ a tab for reuses that tab; another session gets its own. If a tab is already cla
 session, `browser.attachTab` opens a copy for this one rather than borrowing it (a listed tab from
 another session is `TAB_OWNED_ELSEWHERE`; `browser.tabs({all:true})` shows them).
 
+## Spaces, labels and taking a tab back
+
+A session can keep its tabs in one window of its own (`browser.openTab(url, {space: "window"})`,
+the default for background work) or in the user's window (`{space: "tabs"}`, right for an
+interactive chat). The window is normal (never minimized, so Chrome keeps painting it), created
+behind the user's window, and reused for that session's tabs. `browser.session.finish({keep:
+["p2"]})` moves the named tabs to the user's window, closes the rest and ends the session;
+`browser.session.claim()` hands every tab and the window to the user; `browser.session.spaces()`
+lists sessions with `running`, `waiting`, `user` or `idle`.
+
+Tabs also get stable labels (`p1`, `p2…`): `browser.tabs()` shows each tab's `label`, and
+`bu.use("p2")` works wherever a tab id does. The label is re-bound by URL if Chrome restarts and
+ids change. If the user clicks or types in a tab the agent is driving, the agent pauses with
+`USER_TOOK_CONTROL`; `browser.tabs()` marks `control: "user"` and `page.waitForControl()` waits
+until the banner's button or `page.giveBack()` restores the agent.
+
 ## Bulk work: sweeps, outcomes and evidence
 
 For "is this list of sites alive / does it have X", do not write the open-wait-capture-close loop:

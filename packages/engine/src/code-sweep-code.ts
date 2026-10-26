@@ -154,7 +154,7 @@ export function sweepCode(spec: {
       const url = String(item && item.url || item);
       let tab;
       try {
-        tab = await browser.openTab(url, {newTab:true, quiet:options.quiet});
+        tab = await browser.openTab(url, {newTab:true, quiet:options.quiet, space:'window'});
         results[offset + index] = await one(tab, item, index);
       } catch (error) {
         results[offset + index] = {url, outcome:'error', reason:String(error && error.message || error).slice(0,300)};

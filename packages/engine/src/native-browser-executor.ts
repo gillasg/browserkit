@@ -25,6 +25,8 @@ import {
   uploadFiles,
 } from "./native-browser-frames.js";
 import {
+  consoleCaptureEnabled,
+  disableConsoleCapture,
   enableConsoleCapture,
   executeBrowserEvent,
   readDiagnostics,
@@ -42,6 +44,10 @@ import { ownerTitle } from "./native-browser-owner.js";
 import { enableQuietTab } from "./native-browser-quiet.js";
 import { showAgentCaption } from "./native-browser-cursor.js";
 import { openTab } from "./native-browser-open-tab.js";
+import { attachTab, listTabs } from "./native-browser-tabs.js";
+import { injectedScripts, judgeStealth, noteInjectedScript, type StealthProbe } from "./stealth.js";
+import { controlError, controlOf } from "./native-browser-control.js";
+import { controlOrSessionStep } from "./native-browser-extra-session.js";
 
 function hostOf(url: string): string {
   try {
@@ -193,6 +199,10 @@ type ExtraRequest = BrowserExecutorRequest & {
         | "wait"
         | "navigate"
         | "diagnostics"
+        | "console"
+        | "stealth"
+        | "control"
+        | "session"
         | "siteScript"
         | "popups"
         | "evaluate"
@@ -223,6 +233,9 @@ export async function performExtra(
   } else if (step.op === "scheduler") {
     await revalidate(request, tabId);
     data = schedulerStatus();
+  } else if (step.op === "control" || step.op === "session") {
+    await revalidate(request, tabId);
+    data = await controlOrSessionStep(step, request.chatId);
   } else if (step.op === "siteScript") {
     await revalidate(request, tabId);
     data = await executeSiteScript(step.action, tabId, step.definition, step.scriptId, () =>
@@ -244,8 +257,15 @@ export async function performExtra(
         return classifyReadiness(
           ((await evaluate(debuggee, readinessSnapshotExpression)) ?? {}) as ReadinessSnapshot,
         );
-      if (step.op === "evaluate" || step.op === "cdp" || step.op === "waitFor")
+      if (step.op === "evaluate" || step.op === "cdp" || step.op === "waitFor") {
+        if (
+          step.op === "cdp" &&
+          step.method === "Page.addScriptToEvaluateOnNewDocument" &&
+          !String((step.params as { worldName?: unknown }).worldName ?? "").startsWith("browserkit")
+        )
+          noteInjectedScript(tabId, "a page script runs on every document");
         return executePageCode(debuggee, { ...request, step }, () => revalidate(request, tabId));
+      }
       if (step.op === "press")
         return pressElement(debuggee, request, () => revalidate(request, tabId));
       if (step.op === "navigate") {
@@ -257,6 +277,16 @@ export async function performExtra(
         await enableConsoleCapture(tabId);
         return readDiagnostics(tabId, step.clear);
       }
+      if (step.op === "console") {
+        if (step.action === "start") await enableConsoleCapture(tabId);
+        else if (step.action === "stop") await disableConsoleCapture(tabId);
+        return { capturing: consoleCaptureEnabled(tabId) };
+      }
+      if (step.op === "stealth")
+        return judgeStealth((step.probe ?? {}) as StealthProbe, {
+          runtimeEnabled: consoleCaptureEnabled(tabId),
+          injectedScripts: injectedScripts(tabId),
+        });
       if (step.op === "popups") return { tabs: await browserPopups(tabId) };
       return readOrWait(debuggee, request, () => revalidate(request, tabId));
     });
@@ -496,6 +526,8 @@ async function executeStep(
   if (step.op === "listTabs") return listTabs(request);
   if (step.op === "openTab") return openTab(identity, request);
   if (step.op === "attachTab") return attachTab(step.target);
+  if (controlOf(step.target.tabId) === "user" && step.op !== "control" && step.op !== "session")
+    throw new Error(controlError(step.target.tabId));
   activateClaim(request);
   const tab = await assertTarget(request);
   bindBrowserSession(step.target.tabId, request.chatId);
@@ -528,45 +560,6 @@ async function dispatchStep(
 // Chrome only reports activation for a focused window, so a tab opened in a background or
 // headless window can sit in the inventory as inactive. Ask each window which tab is active at
 // list time, so browser.tabs() and browser.activeTab() both describe Chrome as it is now.
-async function refreshActiveTabs(): Promise<void> {
-  const windowIds = [...new Set(currentInventoryTabs().map((tab) => tab.windowId))];
-  await Promise.all(
-    windowIds.map(async (windowId) => {
-      const [live] = await chrome.tabs.query({ active: true, windowId }).catch(() => []);
-      if (live?.id !== undefined) await refreshInventoryTab(live.id);
-    }),
-  );
-}
-
-async function listTabs(request: BrowserExecutorRequest): Promise<BrowserExecutorResult> {
-  const step = request.step.op === "listTabs" ? request.step : undefined;
-  const query = step?.query;
-  await ensureAgentTabsRestored();
-  await refreshActiveTabs();
-  const mine = new Set(mineTabIds(request.chatId));
-  const tabs = currentInventoryTabs()
-    .filter((tab) => safePage(tab.url))
-    // {mine:true} lists only this session's tabs; a tab another session drives is still listed
-    // (mine:false), and attaching it opens this session its own copy.
-    .filter((tab) => !step?.mine || mine.has(tab.target.tabId));
-  const filtered = query
-    ? tabs.filter((tab) => `${tab.title} ${tab.url}`.toLowerCase().includes(query.toLowerCase()))
-    : tabs;
-  return BrowserExecutorResultSchema.parse({
-    kind: "tabs",
-    tabs: filtered.slice(0, 256).map((tab) => ({ ...tab, mine: mine.has(tab.target.tabId) })),
-    focusedWindowId: currentFocusedWindowId(),
-  });
-}
-
-// A tab the user already has open, picked from browser.tabs(): the runtime host checked the
-// target is listed; it is borrowed, not owned, so it is not grouped or bound to the session.
-function attachTab(target: BrowserTargetKey): BrowserExecutorResult {
-  const tab = currentInventoryTabs().find((known) => sameTarget(known.target, target));
-  if (!tab || !safePage(tab.url)) throw new Error("TARGET_LOST");
-  return BrowserExecutorResultSchema.parse({ kind: "tab", tab });
-}
-
 async function assertTarget(request: BrowserExecutorRequest): Promise<chrome.tabs.Tab> {
   if (!isTargetStep(request.step)) throw new Error("INVALID_TARGET");
   const target = request.step.target;
@@ -652,6 +645,10 @@ function isExtraStep(step: BrowserStep): step is Extract<
       | "wait"
       | "navigate"
       | "diagnostics"
+      | "console"
+      | "stealth"
+      | "control"
+      | "session"
       | "siteScript"
       | "popups"
       | "evaluate"

@@ -1,5 +1,6 @@
 import { onBrowserDebuggerAttached } from "./native-browser-session.js";
 import { onEngineInstall } from "./native-engine-install.js";
+import { noteInjectedScript } from "./stealth.js";
 
 // Quiet tabs are for unattended reading (explore, jobs, crawls): no popunders in front of the
 // user, no autoplaying audio, and the common ad/tracker hosts blocked before they load. The
@@ -69,17 +70,39 @@ const ALL_TYPES = [
 ] as chrome.declarativeNetRequest.ResourceType[];
 
 const QUIET_SCRIPT = `(() => {
+  const MARK = Symbol.for('browserkit.quiet');
+  if (window[MARK]) {
+    for (const media of document.querySelectorAll('video,audio')) {
+      try { media.autoplay = false; media.muted = true; media.pause(); } catch {}
+    }
+    return;
+  }
+  Object.defineProperty(window, MARK, {value: true});
+  const native = Function.prototype.toString;
+  const wrapped = new WeakMap();
+  const realOpen = window.open;
+  const open = function () { return null; };
+  wrapped.set(open, native.call(realOpen));
+  window.open = open;
+  const realPlay = HTMLMediaElement.prototype.play;
+  const play = function () {
+    try { this.autoplay = false; this.muted = true; this.pause(); } catch {}
+    return Promise.resolve();
+  };
+  wrapped.set(play, native.call(realPlay));
+  HTMLMediaElement.prototype.play = play;
+  const toString = new Proxy(native, {
+    apply(target, self, args) {
+      const fake = args.length ? wrapped.get(args[0]) : undefined;
+      return fake || Reflect.apply(target, self, args);
+    },
+  });
+  wrapped.set(toString, native.call(native));
+  Function.prototype.toString = toString;
   const quiet = () => {
     for (const media of document.querySelectorAll('video,audio')) {
       try { media.autoplay = false; media.muted = true; media.pause(); } catch {}
     }
-  };
-  const realOpen = window.open;
-  window.open = (...args) => { console.info('[quiet] blocked window.open'); return null; };
-  const play = HTMLMediaElement.prototype.play;
-  HTMLMediaElement.prototype.play = function () {
-    try { this.autoplay = false; this.muted = true; this.pause(); } catch {}
-    return Promise.resolve();
   };
   const watch = () => {
     quiet();
@@ -88,11 +111,11 @@ const QUIET_SCRIPT = `(() => {
   if (document.documentElement) watch();
   else document.addEventListener('DOMContentLoaded', watch, { once: true });
   quiet();
-  void realOpen;
 })();`;
 
 export async function enableQuietTab(tabId: number): Promise<void> {
   quiet.add(tabId);
+  noteInjectedScript(tabId, "quiet tab: popups blocked, media muted, ads filtered");
   await addRules(tabId);
   await injectQuiet(tabId);
 }

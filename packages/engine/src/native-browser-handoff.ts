@@ -2,6 +2,7 @@ import { engineConfig } from "./engine-config.js";
 import { guardAgentTab } from "./native-browser-tab-cleanup.js";
 import { withBrowserDebugger } from "./native-browser-session.js";
 import { onEngineInstall } from "./native-engine-install.js";
+import { handoffActive } from "./native-browser-control.js";
 
 // Hand-off: the agent pauses and asks the user to do something in the real tab (sign in, 2FA,
 // pick an option). A banner on the page carries the request plus Done and Cancel; the cell
@@ -65,6 +66,7 @@ export async function handOffToUser(
   const deadline = Date.now() + MAX_WAIT_MS;
   answers.delete(tabId);
   guardAgentTab(tabId, true);
+  handoffActive(tabId, true);
   try {
     while (active() && Date.now() < deadline) {
       if (!(await chrome.tabs.get(tabId).catch(() => undefined))) throw new Error("TARGET_LOST");
@@ -77,6 +79,7 @@ export async function handOffToUser(
     return "cancelled";
   } finally {
     guardAgentTab(tabId, false);
+    handoffActive(tabId, false);
     answers.delete(tabId);
     void chrome.notifications.clear(notification).catch(() => undefined);
     void evaluate(tabId, CLEAR).catch(() => undefined);

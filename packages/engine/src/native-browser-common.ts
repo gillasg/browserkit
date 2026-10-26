@@ -10,6 +10,12 @@ export interface AxNode {
   name?: { value?: unknown };
   value?: { value?: unknown };
   properties?: { name?: string; value?: { value?: unknown } }[];
+  /** The frame document this node belongs to (already set for same-process frames). */
+  frameId?: string;
+  /** The OOPIF debugger session this node was read through. */
+  sessionId?: string;
+  /** This node is the iframe element that owns the frame with this id. */
+  frameOwner?: string;
 }
 
 export interface AxRef {
@@ -17,6 +23,9 @@ export interface AxRef {
   documentEpoch?: number;
   role: string;
   name: string;
+  /** The iframe session a frame-scoped ref acts through (Input and DOM are local to it). */
+  sessionId?: string;
+  frameId?: string;
 }
 
 export interface ScreenshotRef {

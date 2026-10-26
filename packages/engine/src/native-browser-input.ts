@@ -371,7 +371,7 @@ export async function prepareElement(
   element: BrowserElementTarget,
   revalidate: () => Promise<void>,
   editable = false,
-): Promise<{ node: AxRef; point: Point }> {
+): Promise<{ node: AxRef; point: Point; frame: chrome.debugger.Debuggee }> {
   if (!("target" in request.step)) throw new Error("INVALID_TARGET");
   for (let attempt = 0; ; attempt++) {
     await revalidate();
@@ -384,10 +384,13 @@ export async function prepareElement(
         browserObservationRefs.latestSnapshots,
         request.expectedDocumentEpoch,
       );
-      const point = await actionablePoint(debuggee, node.backendNodeId, editable);
-      showAgentCursor(debuggee, point.x, point.y, false, elementCaption(request, node, editable));
+      // A frame's node acts through its own session: DOM ids and Input coordinates are local to it.
+      const frame = node.sessionId ? { ...debuggee, sessionId: node.sessionId } : debuggee;
+      const point = await actionablePoint(frame, node.backendNodeId, editable);
+      if (!node.sessionId)
+        showAgentCursor(debuggee, point.x, point.y, false, elementCaption(request, node, editable));
       await revalidate();
-      return { node, point };
+      return { node, point, frame };
     } catch (caught) {
       const error = normalizePreparationError(caught);
       if (attempt >= 2 || !(error instanceof Error) || !retryablePreparation(error, element))
@@ -598,7 +601,11 @@ async function dispatchAction(
   if (request.step.op === "scroll" && !request.step.element)
     return scrollViewport(debuggee, request);
   if (!request.step.element) throw new Error("INVALID_TARGET");
-  const { node, point: box } = await prepareElement(
+  const {
+    node,
+    point: box,
+    frame,
+  } = await prepareElement(
     debuggee,
     request,
     request.step.element,
@@ -606,17 +613,17 @@ async function dispatchAction(
     request.step.op === "fill",
   );
   noteActionTiming(debuggee.tabId, {
-    box: await measureBox(debuggee, node.backendNodeId),
+    box: await measureBox(frame, node.backendNodeId),
     point: { x: box.x, y: box.y },
     tAct: Date.now(),
   });
   if (request.step.op === "click")
     await (box.activate
-      ? onNode(debuggee, node.backendNodeId, activateNode)
-      : clickAt(debuggee, box.x, box.y));
+      ? onNode(frame, node.backendNodeId, activateNode)
+      : clickAt(frame, box.x, box.y));
   else if (request.step.op === "fill")
-    await fillNode(debuggee, node.backendNodeId, request.step.value);
-  else await scrollAt(debuggee, box.x, box.y, request.step.direction, request.step.amount);
+    await fillNode(frame, node.backendNodeId, request.step.value);
+  else await scrollAt(frame, box.x, box.y, request.step.direction, request.step.amount);
 }
 
 async function scrollViewport(

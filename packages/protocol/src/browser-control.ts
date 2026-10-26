@@ -31,6 +31,8 @@ export const BrowserStepSchema = z.discriminatedUnion("op", [
       foreground: z.boolean().default(false),
       /** Park popups, mute media and block ad hosts while the agent uses this tab. */
       quiet: z.boolean().optional(),
+      /** Its own background window (bulk work) or a tab in the user's window (a chat). */
+      space: z.enum(["window", "tabs"]).optional(),
       /** The Referer this page load sends (some providers allowlist it). */
       referer: z.string().url().max(8192).optional(),
       /** false for a background read pool: open without changing the Split View pair. */
@@ -58,6 +60,11 @@ export const BrowserStepSchema = z.discriminatedUnion("op", [
       query: z.string().max(256).optional(),
       interactive: z.boolean().optional(),
       selector: z.string().min(1).max(512).optional(),
+      /** A ref from the last observation: snapshot only that element's subtree (or that frame). */
+      root: z
+        .string()
+        .regex(/^(?:f[0-9]{1,2}:)?e[0-9]{1,4}$/)
+        .optional(),
       all: z.boolean().optional(),
       summary: z.boolean().optional(),
       includeHidden: z.boolean().optional(),
@@ -134,7 +141,7 @@ export type BrowserExecutorRequest = z.infer<typeof BrowserExecutorRequestSchema
 
 export const BrowserSemanticNodeSchema = z
   .object({
-    ref: z.string().regex(/^e[0-9]{1,4}$/),
+    ref: z.string().regex(/^(?:f[0-9]{1,2}:)?e[0-9]{1,4}$/),
     role: z.string().max(80),
     name: z.string().max(512),
     value: z.string().max(512).optional(),
@@ -142,6 +149,8 @@ export const BrowserSemanticNodeSchema = z
     checked: z.boolean().optional(),
     focused: z.boolean().optional(),
     backendNodeId: z.number().int().positive().optional(),
+    /** The frame label (f2) when the node lives inside an iframe's document. */
+    frame: z.string().max(8).optional(),
     expanded: z.boolean().optional(),
     selected: z.boolean().optional(),
     pressed: z.union([z.boolean(), z.literal("mixed")]).optional(),

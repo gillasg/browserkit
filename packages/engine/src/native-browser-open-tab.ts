@@ -20,14 +20,24 @@ import { safePage, sameIdentity } from "./native-browser-common.js";
 import { navigateReady } from "./native-browser-navigation.js";
 import { captureFromTabStart } from "./native-browser-network.js";
 import type { BrowserIdentity } from "./native-worker-identity.js";
+import {
+  ensureSpacesRestored,
+  noteLabel,
+  noteSpace,
+  spaceWindow,
+} from "./native-browser-spaces.js";
 
 export async function openTab(
   identity: BrowserIdentity,
   request: BrowserExecutorRequest,
 ): Promise<BrowserExecutorResult> {
   const step = validOpenTab(request, identity);
-  const created = await createTab(step);
+  const space = step.window ? "tabs" : (step.space ?? "tabs");
+  await ensureSpacesRestored();
+  const created = await createTab(step, request.chatId, space);
   if (created.id === undefined) throw new Error("TARGET_LOST");
+  if (!step.window)
+    noteSpace(request.chatId, space, space === "window" ? created.windowId : undefined);
   trackAgentTab(created.id, request.chatId, { url: step.url });
   bindBrowserSession(created.id, request.chatId);
   markAgentTabGrouped(created.id);
@@ -44,9 +54,10 @@ export async function openTab(
   const tab = await refreshInventoryTab(created.id);
   if (!tab || !sameIdentity(tab.target, identity)) throw new Error("TARGET_LOST");
   bindBrowserSession(created.id, request.chatId);
+  const label = noteLabel(request.chatId, created.id, tab.url);
   return BrowserExecutorResultSchema.parse({
     kind: "tab",
-    tab,
+    tab: { ...tab, ...(label ? { label, control: "agent" as const } : {}) },
     ...(navigation ? { navigation: "failed" as const, reason: navigation } : {}),
   });
 }
@@ -75,8 +86,16 @@ async function navigateOpenedTab(
 
 // A window of its own is focused and normal-sized, so Chrome keeps painting it (screencasts and
 // screenshots of a minimized or hidden window stall).
-async function createTab(step: Extract<BrowserStep, { op: "openTab" }>): Promise<chrome.tabs.Tab> {
+async function createTab(
+  step: Extract<BrowserStep, { op: "openTab" }>,
+  chatId: string,
+  space: "window" | "tabs",
+): Promise<chrome.tabs.Tab> {
   if (!step.window) {
+    if (space === "window") {
+      const windowId = await spaceWindow(chatId);
+      return chrome.tabs.create({ url: "about:blank", active: false, windowId });
+    }
     const front = step.foreground || (await engineConfig.agentInFront().catch(() => false));
     return chrome.tabs.create({ url: "about:blank", active: front });
   }
