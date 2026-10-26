@@ -74,13 +74,13 @@ export function noteUserInput(tabId: number, at: number): void {
   if (!browserSessionOwner(tabId) || handoffActive(tabId) || agentInput(tabId, at)) return;
   if (controlled.has(tabId)) return;
   controlled.set(tabId, { at, reported: false });
-  void inject(tabId, controlBanner);
+  void injectTop(tabId, controlBanner);
   notify(tabId, "user");
 }
 
 export function giveBack(tabId: number): boolean {
   if (!controlled.delete(tabId)) return false;
-  void inject(tabId, removeBanner);
+  void injectTop(tabId, removeBanner);
   notify(tabId, "agent");
   return true;
 }
@@ -108,9 +108,19 @@ function notify(tabId: number, control: "agent" | "user"): void {
     .catch(() => undefined);
 }
 
-async function inject(tabId: number, func: () => void): Promise<void> {
+async function injectTop(tabId: number, func: () => void): Promise<void> {
   await chrome.scripting
     .executeScript({ target: { tabId }, world: "ISOLATED", func })
+    .catch(() => undefined);
+}
+
+async function injectWatcher(tabId: number): Promise<void> {
+  await chrome.scripting
+    .executeScript({
+      target: { tabId, allFrames: true },
+      world: "ISOLATED",
+      func: watchUserInput,
+    })
     .catch(() => undefined);
 }
 
@@ -120,13 +130,17 @@ function watchUserInput(): void {
   const state = globalThis as unknown as { __browserkitUserWatch?: boolean };
   if (state.__browserkitUserWatch) return;
   state.__browserkitUserWatch = true;
+  const modifiers = new Set(["Shift", "Control", "Alt", "Meta", "CapsLock", "OS"]);
   const report = (event: Event): void => {
     if (!event.isTrusted) return;
+    if (event instanceof KeyboardEvent && (modifiers.has(event.key) || !document.hasFocus()))
+      return;
     void chrome.runtime
       .sendMessage({ kind: "browserkit.user-input", at: Date.now() })
       .catch(() => undefined);
   };
-  for (const type of ["pointerdown", "keydown", "wheel"]) {
+  // Wheel is deliberately absent: scrolling to watch the agent is not taking the tab over.
+  for (const type of ["pointerdown", "keydown"]) {
     window.addEventListener(type, report, { capture: true, passive: true });
   }
 }
@@ -161,10 +175,10 @@ onEngineInstall(() => {
       noteUserInput(tabId, Number(message.at) || Date.now());
     if (message.kind === "browserkit.control.giveback") giveBack(tabId);
   });
-  onBrowserDebuggerAttached((tabId) => inject(tabId, watchUserInput));
+  onBrowserDebuggerAttached((tabId) => injectWatcher(tabId));
   chrome.webNavigation?.onCommitted?.addListener((details) => {
     if (details.tabId < 0 || details.frameId !== 0 || !browserSessionOwner(details.tabId)) return;
-    void inject(details.tabId, watchUserInput);
+    void injectWatcher(details.tabId);
   });
   chrome.tabs.onRemoved.addListener((tabId) => forgetControl(tabId));
   // Every Input.dispatch* opens a window in which a trusted event belongs to the agent. The
