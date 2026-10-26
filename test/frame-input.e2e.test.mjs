@@ -69,6 +69,8 @@ test(
       await connectExtension(profile, env);
       const cell = (code) =>
         run(process.execPath, [cli, "repl", "--session", "frames", code], { env });
+      const trivial = await cell("1 + 1");
+      assert.match(trivial.stdout, /2/, trivial.stdout + trivial.stderr);
       const state = await cell(`
         page = await browser.openTab(${JSON.stringify(outerUrl)});
         const state = await bu.state();

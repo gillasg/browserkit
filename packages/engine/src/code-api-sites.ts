@@ -106,7 +106,7 @@ function __siteToolGroup(kind) {
     },
   });
 }
-var site = Object.Freeze({tools: __siteToolGroup('tool'), pageTools: __siteToolGroup('pageTool')});
+var site = Object.freeze({tools: __siteToolGroup('tool'), pageTools: __siteToolGroup('pageTool')});
 // Named secret profiles: run a Node script with the profile values in BK_* variables. The host
 // scrubs every value from the output before it reaches this result.
 var secrets = Object.freeze({run: (name, script) => __call({secrets: {action: 'run', name, script}})});
