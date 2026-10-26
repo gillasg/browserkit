@@ -1,6 +1,7 @@
 import { onEngineInstall } from "./native-engine-install.js";
 import { noteInjectedScript } from "./stealth.js";
 import { nativeSourcePreamble } from "./native-source.js";
+import { onBrowserDebuggerAttached } from "./native-browser-session.js";
 
 // Quiet tabs are for unattended reading (explore, jobs, crawls): no popunders in front of the
 // user, no autoplaying audio, and the common ad/tracker hosts blocked before they load. The
@@ -8,6 +9,7 @@ import { nativeSourcePreamble } from "./native-source.js";
 const RULE_BASE = 600_000;
 const RULE_SPAN = 90_000;
 const quiet = new Set<number>();
+const loaderIds = new Map<number, string>();
 const ruleIds = new Map<number, number[]>();
 let nextRule = 0;
 
@@ -96,16 +98,22 @@ const QUIET_SCRIPT = `(() => {
   quiet();
 })();`;
 
+const QUIET_SWEEP = `(() => {
+  for (const media of document.querySelectorAll('video,audio')) {
+    try { media.autoplay = false; media.muted = true; media.pause(); } catch {}
+  }
+})()`;
+
 export async function enableQuietTab(tabId: number): Promise<void> {
   if (quiet.has(tabId)) return;
   quiet.add(tabId);
   noteInjectedScript(tabId, "quiet tab: popups blocked, media muted, ads filtered");
   await addRules(tabId);
-  await injectQuiet(tabId);
 }
 
 export async function disableQuietTab(tabId: number): Promise<void> {
   quiet.delete(tabId);
+  loaderIds.delete(tabId);
   const ids = ruleIds.get(tabId) ?? [];
   ruleIds.delete(tabId);
   if (ids.length)
@@ -140,18 +148,34 @@ async function addRules(tabId: number): Promise<void> {
     .catch(() => undefined);
 }
 
-async function injectQuiet(tabId: number): Promise<void> {
+async function onQuietAttach(tabId: number): Promise<void> {
   await chrome.debugger
     .sendCommand({ tabId }, "Page.addScriptToEvaluateOnNewDocument", { source: QUIET_SCRIPT })
     .catch(() => undefined);
+  const tree = (await chrome.debugger
+    .sendCommand({ tabId }, "Page.getFrameTree", {})
+    .catch(() => undefined)) as { frameTree?: { frame?: { loaderId?: string } } } | undefined;
+  const loader = tree?.frameTree?.frame?.loaderId;
+  const expression = loader && loaderIds.get(tabId) === loader ? QUIET_SWEEP : QUIET_SCRIPT;
+  if (loader) loaderIds.set(tabId, loader);
   await chrome.debugger
-    .sendCommand({ tabId }, "Runtime.evaluate", { expression: QUIET_SCRIPT, awaitPromise: false })
+    .sendCommand({ tabId }, "Runtime.evaluate", { expression, awaitPromise: false })
     .catch(() => undefined);
 }
 
 onEngineInstall(() => {
+  onBrowserDebuggerAttached((tabId) => {
+    if (quiet.has(tabId)) return onQuietAttach(tabId);
+  });
+  chrome.debugger.onEvent.addListener((source, method, params) => {
+    if (source.tabId === undefined || !quiet.has(source.tabId)) return;
+    if (method !== "Page.frameNavigated") return;
+    const frame = (params as { frame?: { loaderId?: string; parentId?: string } }).frame;
+    if (frame?.loaderId && !frame.parentId) loaderIds.set(source.tabId, frame.loaderId);
+  });
   chrome.tabs.onRemoved.addListener((tabId) => {
     quiet.delete(tabId);
+    loaderIds.delete(tabId);
     const ids = ruleIds.get(tabId) ?? [];
     ruleIds.delete(tabId);
     if (ids.length)
