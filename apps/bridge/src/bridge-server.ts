@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { WebSocket, WebSocketServer, type RawData } from "ws";
 import { dataDirectory, statePath, type BridgeState } from "./paths.js";
 import { CdpServer } from "@browserkit/cdp";
+import { ViewServer } from "./view.js";
 import { isSiteSkillRequest, siteSkillCall } from "./site-skills.js";
 import {
   appendJournalEntry,
@@ -66,6 +67,7 @@ export class Bridge {
   private saveTimer: ReturnType<typeof setTimeout> | undefined;
   private cdp: CdpServer | undefined;
   private cdpInfo: { port: number; token: string } | undefined;
+  private view: ViewServer | undefined;
   private readonly cdpWaiters = new Map<
     string,
     { resolve: (value: Json) => void; reject: (error: Error) => void; timer: NodeJS.Timeout }
@@ -403,6 +405,13 @@ export class Bridge {
         void this.startCdp(Number(request.port ?? 9333)).then(respond);
       else if (request.kind === "cdp.status") void this.cdpStatus().then(respond);
       else if (request.kind === "cdp.stop") void this.stopCdp().then(respond);
+      else if (request.kind === "view.start")
+        void this.startView(
+          Number(request.tabId),
+          String(request.session ?? "cli"),
+          Number(request.port ?? 0),
+        ).then(respond);
+      else if (request.kind === "view.stop") void this.stopView().then(respond);
       else respond({ error: "Unknown request" });
     });
   }
@@ -489,6 +498,39 @@ export class Bridge {
     this.persistSessions();
   }
 
+  async startView(tabId: number, session: string, port: number): Promise<Json> {
+    if (!Number.isSafeInteger(tabId) || tabId <= 0)
+      return { running: false, error: "Give --tab <id>" };
+    await this.stopView().catch(() => undefined);
+    const view = new ViewServer(
+      tabId,
+      (message) => this.forwardViewInput(message),
+      () => this.viewSend({ kind: "browser.view.subscribe", tabId, chatId: session }),
+    );
+    const bound = await view.start(Math.max(0, Math.min(port, 65535)));
+    this.view = view;
+    return { running: true, port: bound, url: view.url };
+  }
+
+  async stopView(): Promise<Json> {
+    if (this.view) {
+      this.viewSend({ kind: "browser.view.unsubscribe", tabId: this.view.tabId });
+      await this.view.stop().catch(() => undefined);
+      this.view = undefined;
+    }
+    return { running: false };
+  }
+
+  private forwardViewInput(message: Record<string, unknown>): void {
+    this.viewSend({ kind: "browser.view.input", ...message });
+  }
+
+  private viewSend(body: Json): void {
+    const socket = [...this.executors.values()].find(
+      (item) => item.socket.readyState === WebSocket.OPEN,
+    )?.socket;
+    if (socket) socket.send(JSON.stringify(body));
+  }
   /** Starts (or reports) the local DevTools endpoint. Off until asked for. */
   async startCdp(port: number): Promise<Json> {
     if (this.cdp && this.cdpInfo) return { running: true, ...this.cdpInfo, url: this.cdp.url };

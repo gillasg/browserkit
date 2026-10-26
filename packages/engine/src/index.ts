@@ -7,6 +7,7 @@ export { authenticate } from "./native-authenticate.js";
 export { handleBrowserCodeMessage, resetRealm } from "./code-runtime-host.js";
 export { handleBrowserExecutorMessage, releaseBrowserExecutor } from "./native-browser-executor.js";
 export { installBrowserPopupGuard } from "./native-browser-popup.js";
+export { installBrowserView } from "./native-browser-view.js";
 export { isSharedBrowserTab, shareBrowserTab } from "./native-browser-session.js";
 export { installBoosts } from "./native-browser-boosts.js";
 export {

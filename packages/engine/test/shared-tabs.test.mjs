@@ -4,9 +4,7 @@ import test from "node:test";
 globalThis.chrome = {
   storage: { session: { set: async () => undefined } },
 };
-const { isSharedBrowserTab, shareBrowserTab } = await import(
-  "../dist/native-browser-session.js"
-);
+const { isSharedBrowserTab, shareBrowserTab } = await import("../dist/native-browser-session.js");
 
 test("a tab can be shared and unshared", () => {
   shareBrowserTab(41, true);

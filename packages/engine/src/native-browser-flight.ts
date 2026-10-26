@@ -13,6 +13,8 @@ interface Active {
 const active = new Map<number, Active>();
 const allowed = new Map<string, boolean>();
 const manual = new Set<number>();
+const viewers = new Map<number, Set<(data: string, at: number) => void>>();
+const latestFrame = new Map<number, { data: string; at: number }>();
 const FRAME_MS = 500;
 
 export function setFlightAllowed(chatId: string, allowedNow: boolean): void {
@@ -77,9 +79,26 @@ export async function withManualScreencast<T>(
   }
 }
 
+export function subscribeViewer(
+  tabId: number,
+  send: (data: string, at: number) => void,
+): () => void {
+  const set = viewers.get(tabId) ?? new Set<(data: string, at: number) => void>();
+  set.add(send);
+  viewers.set(tabId, set);
+  const latest = latestFrame.get(tabId);
+  if (latest) send(latest.data, latest.at);
+  return () => {
+    set.delete(send);
+    if (!set.size) viewers.delete(tabId);
+  };
+}
+
 export function forgetFlight(tabId: number): void {
   active.delete(tabId);
   manual.delete(tabId);
+  viewers.delete(tabId);
+  latestFrame.delete(tabId);
   void toOffscreen({ target: "aeon-code-offscreen", kind: "flightClear", tabId }).catch(
     () => undefined,
   );
@@ -137,6 +156,8 @@ onEngineInstall(() => {
     const now = Date.now();
     if (now - entry.lastFrameAt < FRAME_MS) return;
     entry.lastFrameAt = now;
+    latestFrame.set(source.tabId, { data: params.data, at: now });
+    for (const send of viewers.get(source.tabId) ?? []) send(params.data, now);
     void toOffscreen({
       target: "aeon-code-offscreen",
       kind: "flightFrame",

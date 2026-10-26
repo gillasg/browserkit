@@ -46,6 +46,7 @@ import { showAgentCaption } from "./native-browser-cursor.js";
 import { openTab } from "./native-browser-open-tab.js";
 import { attachTab, hostOf, isLivePage, listTabs } from "./native-browser-tabs.js";
 import { handleCdpMessage, noteCdpSocket } from "./native-browser-cdp.js";
+import { handleBrowserViewMessage, installBrowserView } from "./native-browser-view.js";
 import { withManualScreencast } from "./native-browser-flight.js";
 import { injectedScripts, judgeStealth, noteInjectedScript, type StealthProbe } from "./stealth.js";
 import { controlError, controlOf, stepInput } from "./native-browser-control.js";
@@ -453,6 +454,8 @@ export function handleBrowserExecutorMessage(
   candidate: unknown,
 ): boolean {
   noteCdpSocket(socket, identity);
+  installBrowserView(socket);
+  if (handleBrowserViewMessage(candidate as Record<string, unknown>)) return true;
   if (handleCdpMessage(candidate)) return true;
   if (handleScriptSync(candidate) || handleBrowserRelease(candidate)) return true;
   const request = BrowserExecutorRequestSchema.safeParse(candidate);
@@ -604,7 +607,6 @@ async function revalidateTarget(request: BrowserExecutorRequest, tabId: number):
   if (!inventoryMatchesRequest(current, request)) throw new Error("TARGET_LOST");
   if (!(await isLivePage(tabId))) throw new Error("TARGET_LOST");
 }
-
 function activateClaim(request: BrowserExecutorRequest): void {
   if (!isTargetStep(request.step) || !request.claimGeneration || !request.claimId)
     throw new Error("CLAIM_CONFLICT");
@@ -613,14 +615,12 @@ function activateClaim(request: BrowserExecutorRequest): void {
     throw new Error("CLAIM_CONFLICT");
   claimGenerations.set(key, request.claimGeneration);
 }
-
 function assertClaimActive(request: BrowserExecutorRequest): void {
   assertRequestActive(request);
   if (!isTargetStep(request.step) || !request.claimGeneration) throw new Error("CLAIM_CONFLICT");
   if (claimGenerations.get(targetIdentity(request.step.target)) !== request.claimGeneration)
     throw new Error("CLAIM_CONFLICT");
 }
-
 function enqueueTarget(
   target: BrowserTargetKey,
   action: () => Promise<BrowserExecutorResult>,
