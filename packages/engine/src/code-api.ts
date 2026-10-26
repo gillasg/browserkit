@@ -479,7 +479,7 @@ var browser = Object.freeze({
     popups: () => __step({op:"popups", target}),
     removePreview: (scriptId) => __step({op:"siteScript", target, action:"remove", scriptId}),
     snapshot: (options = {}) => { const {max,target:ignored,...filters}=options; return __step({op:'observe',target,kind:'semantic',...filters}); },
-    locator: (selector, options = {}) => __locator(target,__withOptions({kind:'query',by:'css',value:String(selector)}, options)),
+    locator: (selector, options = {}) => { var parsed = __parseSelector(String(selector)); return __locator(target,__withOptions(parsed.spec, options), parsed.index); },
     getByRole: (role, options = {}) => __locator(target,__withOptions({kind:'locator',role,name:options.name === undefined ? '' : String(options.name),exact:options.name !== undefined && options.exact !== false}, options)),
     getByText: (value, options = {}) => __locator(target,__withOptions({kind:'query',by:'text',value:String(value)}, options)),
     getByLabel: (value, options = {}) => __locator(target,__withOptions({kind:'query',by:'label',value:String(value)}, options)),

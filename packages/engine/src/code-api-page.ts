@@ -1,6 +1,8 @@
 // The page object and the browser surface around it: tabs, navigation, rules, network,
 // readiness, sessions and emulation. Evaluated in the same sandbox realm as code-api.ts.
+import { locatorShorthandSource } from "./locator-shorthand.js";
 export const browserFastApi = `
+${locatorShorthandSource}
 var __states = new Map(), __tabs = new Map(), __seen = new Map(), __dirty = new Map(), __opened = new Map(), __busy = new Set(), __keptTabs = new Set(), __closedTabs = new Map(), __focusedWindowId, __attachedTarget, __lastTarget;
 var __labels = new Map();
 var __key = target => JSON.stringify(target);
@@ -215,9 +217,9 @@ function __element(target, element) {
     throw Error('INVALID_ELEMENT: use page.getByText(text).click(), page.locator(css).click(), an observed id, or a target with kind');
   }
   if (typeof element !== 'number' && typeof element !== 'string') return element;
-  // A string that is not an observed id is a CSS selector, as in Playwright's page.click(selector).
+  // A string that is not an observed id is a locator shorthand or CSS selector.
   var looksLikeId = typeof element === 'number' || /^(\\d+|e\\d+|f\\d+:e\\d+|[a-z]\\d+)$/i.test(element);
-  if (!looksLikeId) return {kind:'query',by:'css',value:element};
+  if (!looksLikeId) return __parseSelector(element).spec;
   var state = __states.get(__key(target));
   if (!state) throw Error('Observe this page with bu.state() before using an id');
   var node = state.nodes.find(n => n.backendNodeId === element || n.ref === element || (typeof element === "string" && n.backendNodeId === Number(element)));

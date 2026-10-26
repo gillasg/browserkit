@@ -134,13 +134,18 @@ async function __diffScreenshot(target, baseline, options) {
 }
 // Resolves a locator spec to elements inside the page (runs page-side, so it must be self-contained).
 function __resolveInPage(spec, within) {
-  var roots = within ? [within] : spec.scope ? [...document.querySelectorAll(spec.scope)] : [document];
+  var roots = within ? [within] : spec.scopeSpec ? __resolveInPage(spec.scopeSpec) : spec.scope ? [...document.querySelectorAll(spec.scope)] : [document];
   var all = (selector) => roots.flatMap((root) => [...root.querySelectorAll(selector)]);
+  var xpath = (value) => roots.flatMap((root) => {
+    var result = document.evaluate(value, root, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null);
+    return Array.from({length: result.snapshotLength}, (_, i) => result.snapshotItem(i));
+  });
   var text = (el) => (el.innerText || el.textContent || '').replace(/\\s+/g, ' ').trim();
   var pattern = spec.regex ? new RegExp(spec.regex[0], spec.regex[1]) : null;
   var match = (value) => pattern ? pattern.test(value) : spec.exact ? value === spec.value : value.toLowerCase().includes(String(spec.value).toLowerCase());
   var found;
   if (spec.by === 'css') found = all(spec.value);
+  else if (spec.by === 'xpath') found = xpath(spec.value);
   else if (spec.by === 'text') found = all('body *').filter((el) => match(text(el)) && ![...el.children].some((child) => match(text(child))));
   else if (spec.by === 'label') found = all('input,textarea,select,[contenteditable]').filter((el) => [...(el.labels || [])].some((label) => match(text(label))) || match(el.getAttribute('aria-label') || ''));
   else if (spec.by === 'placeholder') found = all('[placeholder]').filter((el) => match(el.getAttribute('placeholder') || ''));
@@ -167,11 +172,12 @@ function __resolveInPage(spec, within) {
       found = [...new Set([...found, ...either])].sort((a, b) => a === b ? 0 : a.compareDocumentPosition(b) & 4 ? -1 : 1);
     }
   }
+  if (Number.isInteger(spec.index)) found = spec.index < 0 ? found.slice(spec.index).slice(0, 1) : found.slice(spec.index, spec.index + 1);
   return found;
 }
 function __spec(element) {
-  if (element.kind === 'locator') return {role: element.role, name: element.name, exact: element.exact, scope: element.scope, filters: element.filters, regex: element.regex};
-  return {by: element.by, value: element.value, exact: element.exact, scope: element.scope, filters: element.filters, regex: element.regex};
+  if (element.kind === 'locator') return {role: element.role, name: element.name, exact: element.exact, scope: element.scope, scopeSpec: element.scopeSpec, filters: element.filters, regex: element.regex, index: element.index};
+  return {by: element.by, value: element.value, exact: element.exact, scope: element.scope, scopeSpec: element.scopeSpec, filters: element.filters, regex: element.regex, index: element.index};
 }
 // Runs a read on the matched elements in the page: op receives (elements, arg). The expression is
 // assembled as source, not eval'd in the page, so strict Content-Security-Policy pages allow it.
@@ -224,7 +230,7 @@ function __extendLocator(target, element, base, index) {
     ...(indexed ? {
       click: (options) => __clickIndexed(target, element, at0, options),
       dblclick: () => __clickIndexed(target, element, at0, {clickCount: 2}),
-      fill: async (value) => { await __clickIndexed(target, element, at0); await browser.page(target).keyboard('ControlOrMeta+a'); return browser.page(target).cdp('Input.insertText', {text: String(value)}); },
+      fill: async (value) => { await __clickIndexed(target, element, at0); await browser.page(target).keyboard('ControlOrMeta+a'); return browser.page(target).keyboard(String(value)); },
     } : {
       dblclick: async () => __clickIndexed(target, element, 0, {clickCount: 2}),
     }),
@@ -294,8 +300,8 @@ function __extendPage(target, base) {
   var keys = base.keyboard;
   var keyboard = Object.assign((combo) => keys(combo), {
     press: (combo) => keys(combo),
-    type: (text) => base.cdp('Input.insertText', {text: String(text)}),
-    insertText: (text) => base.cdp('Input.insertText', {text: String(text)}),
+    type: (text) => keys(String(text)),
+    insertText: (text) => keys(String(text)),
   });
   var byRole = base.getByRole, byText = base.getByText, coordHover = base.hover;
   // Agents sometimes reach for page.playwright.X: it is the page itself.
@@ -329,7 +335,7 @@ function __extendPage(target, base) {
     inputValue: (selector) => css(selector).first().inputValue(),
     isVisible: (selector) => css(selector).isVisible(),
     hoverSelector: (selector) => css(selector).first().hover(),
-    waitForSelector: (selector, options = {}) => base.wait(selector, options).then(() => css(selector).first()),
+    waitForSelector: (selector, options = {}) => base.locator(selector).first().waitFor({timeout: options.timeout ?? options.timeoutMs ?? 5000}),
     bringToFront: async () => undefined,
     check: (selector) => css(selector).first().check(),
     uncheck: (selector) => css(selector).first().uncheck(),
