@@ -19,6 +19,8 @@ const TOPICS: Record<string, string> = {
     "Mapped sites and their saved tools: siteMapper.sites(), siteMapper.operations(site), siteMapper.call(site, operation, params), siteMapper.action(site, name, inputs). A site pack can carry site.tools.<name>(args) (Node; siteMapper.call and browser.fetch) and site.pageTools.<name>(args) (in this page); bu.state() lists the current host's enabled tools. Tools are disabled on import until a human enables them with browserkit site tools enable <site>.",
   readonly:
     "A session claimed with readOnly:true refuses ordinary write steps with READ_ONLY. It is a guard, not a sandbox: page.evaluate(...) can still mutate through the page's own APIs.",
+  state:
+    "Clearing browser state: cookies -> browser.cookies.clear({url} or {domain}); web storage (localStorage, sessionStorage, IndexedDB) -> page.cdp('Storage.clearDataForOrigin', {origin, storageTypes: 'local_storage,session_storage,indexeddb'}) with an explicit origin; service workers -> page.cdp('ServiceWorker.stopAllWorkers') or page.cdp('ServiceWorker.stopWorker', {versionId}); permissions -> page.permissions.allow(type), block(type) or reset(type); everything the origin stores (cookies excluded) -> page.cdp('Storage.clearDataForOrigin', {origin, storageTypes: 'all'}). The HTTP cache is not offered: Network.clearBrowserCache is refused browser-wide. Also refused: Network.clearBrowserCookies and Storage.clearCookies (use browser.cookies), and Storage.clearDataForOrigin without an origin.",
   secrets:
     "secrets.run(name, script) runs a Node script with a named secret profile's values in BK_* variables (BK_HEADERS, BK_COOKIES, BK_<HEADER>, BK_<COOKIE>) and returns {stdout, stderr, code}; the host redacts every secret value from both streams. Profiles are created from a live session by the user with browserkit secrets save; code never receives the values directly.",
   network:
@@ -47,7 +49,8 @@ const TOPICS: Record<string, string> = {
   jobs: "browser.job(urlsOrItems, async (page, item, index) => …, {concurrency = 1, maxTabs = 4, timeoutMs = 120000, quiet = true, label}) returns {jobId} at once and runs the pages in the extension past the cell deadline. Each item is a URL or {url}, opens in its own tab, and closes after the item unless page.keep() was called. One failure does not stop the rest; results include {ok, item, value|error, kind, ms}. browser.job.status(jobId) shows done/total (status lost means the browser or worker restarted, so start it again); browser.jobCancel(jobId) stops it; browser.job.result(jobId) returns results and saves them as jobs/<jobId>.json. page is already on the item's URL (openTab + navigation done) when your function runs. Jobs are quiet by default (no popunders or autoplay).",
 };
 
-// Playwright and Puppeteer habits that look right and fail here.
+export const HELP_TOPICS = TOPICS;
+
 const HABITS: Record<string, string> = {
   playwright:
     "there is no page.playwright: page itself is Playwright-style (page.locator, page.getByRole)",

@@ -72,3 +72,16 @@ bandwidth, codecs, url}]}], playlists: [{url, duration, segments}], headers}`. A
 `Referer` works with `page.goto(url, {referer})` or `browser.openTab(url, {referer})`.
 `browser.fetch` returns status, headers and a capped body even on 401/403, plus a hint when no
 referer/origin was sent.
+
+## Clearing state
+
+| State                        | How to clear                                                                                                                  |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| Cookies                      | `browser.cookies.clear({url})` or `{domain}`                                                                                  |
+| Web storage                  | `page.cdp('Storage.clearDataForOrigin', {origin, storageTypes: 'local_storage,session_storage,indexeddb'})` (origin required) |
+| Everything the origin stores | `page.cdp('Storage.clearDataForOrigin', {origin, storageTypes: 'all'})` (cookies excluded)                                    |
+| Service workers              | `page.cdp('ServiceWorker.stopAllWorkers')` or `page.cdp('ServiceWorker.stopWorker', {versionId})`                             |
+| Permissions                  | `page.permissions.allow(type)` / `block(type)` / `reset(type)`                                                                |
+| HTTP cache                   | Not offered: `Network.clearBrowserCache` is refused browser-wide                                                              |
+
+Also refused: `Network.clearBrowserCookies` and `Storage.clearCookies` (use `browser.cookies`), and `Storage.clearDataForOrigin` without an explicit origin. `help('state')` carries the same table.
