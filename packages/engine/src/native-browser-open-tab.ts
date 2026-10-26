@@ -1,5 +1,6 @@
 // Opening a tab: create it where the run wants it, record it, and wait for its first page.
 import { engineConfig } from "./engine-config.js";
+import { privateTarget } from "./native-browser-policy.js";
 import type {
   BrowserExecutorRequest,
   BrowserExecutorResult,
@@ -32,6 +33,10 @@ export async function openTab(
   request: BrowserExecutorRequest,
 ): Promise<BrowserExecutorResult> {
   const step = validOpenTab(request, identity);
+  if (await engineConfig.privateNetwork()) {
+    const blocked = privateTarget(step.url, await engineConfig.privateNetworkPorts());
+    if (blocked) throw new Error(`PRIVATE_NETWORK: ${blocked}`);
+  }
   const space = step.window ? "tabs" : (step.space ?? engineConfig.defaultSpace(request.chatId));
   await ensureSpacesRestored();
   const created = await createTab(step, request.chatId, space);

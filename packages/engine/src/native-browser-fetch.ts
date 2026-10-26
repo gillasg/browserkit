@@ -9,6 +9,8 @@ import {
   type Probe,
 } from "./native-browser-fetch-errors.js";
 import { HostBudget } from "./native-browser-rate.js";
+import { engineConfig } from "./engine-config.js";
+import { privateTarget } from "./native-browser-policy.js";
 
 const MAX_TEXT = 5_000_000;
 const MAX_BINARY = 16_000_000;

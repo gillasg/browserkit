@@ -27,6 +27,9 @@ export interface EngineConfig {
    * draw their own cursor and rely on this; keep it.
    */
   hideAgentCursor: () => Promise<boolean>;
+  /** Opt-in private/metadata network refusal for agent work. */
+  privateNetwork: () => Promise<boolean>;
+  privateNetworkPorts: () => Promise<number[]>;
 }
 
 export const engineConfig: EngineConfig = {
@@ -38,6 +41,8 @@ export const engineConfig: EngineConfig = {
   agentView: () => Promise.resolve("split"),
   agentInFront: () => Promise.resolve(false),
   hideAgentCursor: () => Promise.resolve(false),
+  privateNetwork: () => Promise.resolve(false),
+  privateNetworkPorts: () => Promise.resolve([3000, 5173, 8080]),
   defaultSpace: () => "tabs",
 };
 
