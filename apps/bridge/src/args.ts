@@ -23,6 +23,7 @@ const BOOLEAN = new Set([
   "json",
   "media",
   "no-build",
+  "no-flight",
   "no-boosts",
   "no-color",
   "no-gate",
