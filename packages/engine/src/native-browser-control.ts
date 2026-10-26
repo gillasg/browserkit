@@ -1,6 +1,7 @@
 import { onEngineInstall } from "./native-engine-install.js";
 import { onBrowserDebuggerAttached, browserSessionOwner } from "./native-browser-session.js";
 import { stopFlight } from "./native-browser-flight.js";
+import { isBrowserkitOverlayEvent } from "./native-browser-overlay.js";
 
 // Who is driving a tab. CDP's Input events are trusted, just like a real click, so the engine
 // records the moments it is dispatching input; a trusted event outside those moments came from
@@ -135,6 +136,7 @@ function watchUserInput(): void {
   const modifiers = new Set(["Shift", "Control", "Alt", "Meta", "CapsLock", "OS"]);
   const report = (event: Event): void => {
     if (!event.isTrusted) return;
+    if (isBrowserkitOverlayEvent(event.composedPath())) return;
     if (event instanceof KeyboardEvent && (modifiers.has(event.key) || !document.hasFocus()))
       return;
     void chrome.runtime
