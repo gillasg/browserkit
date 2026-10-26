@@ -4,7 +4,7 @@ const ref = z
   .object({
     kind: z.literal("ref"),
     snapshotId: z.string().uuid(),
-    ref: z.string().regex(/^e[0-9]{1,4}$/),
+    ref: z.string().regex(/^(?:f[0-9]{1,2}:)?e[0-9]{1,4}$/),
   })
   .strict();
 const locator = z

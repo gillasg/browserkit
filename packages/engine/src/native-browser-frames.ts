@@ -301,3 +301,86 @@ function send<T>(
 ): Promise<T> {
   return chrome.debugger.sendCommand(debuggee, method, params) as Promise<T>;
 }
+
+export interface RootPoint {
+  x: number;
+  y: number;
+  offsetX: number;
+  offsetY: number;
+}
+
+/**
+ * A point inside a frame, translated to the tab's main viewport: walk up owner frames, adding
+ * each iframe's box (in its parent frame) until the root. Input.dispatchMouseEvent is sent on the
+ * root session with this point; the frame's own session is only for DOM work.
+ */
+export async function rootFramePoint(
+  debuggee: chrome.debugger.Debuggee,
+  frameId: string,
+  point: { x: number; y: number },
+): Promise<RootPoint> {
+  const root = await rootFrameId(debuggee);
+  if (!root || root === frameId) return { ...point, offsetX: 0, offsetY: 0 };
+  const sources: chrome.debugger.Debuggee[] = [
+    debuggee,
+    ...[...(sessions.get(debuggee.tabId ?? -1)?.values() ?? [])].map((sessionId) => ({
+      ...debuggee,
+      sessionId,
+    })),
+  ];
+  let x = point.x,
+    y = point.y,
+    current = frameId;
+  for (let depth = 0; depth < 12; depth++) {
+    const owner = await frameOwner(sources, current);
+    if (!owner) break;
+    const quad = owner.model.content ?? owner.model.border;
+    if (!quad) break;
+    x += quad[0] ?? 0;
+    y += quad[1] ?? 0;
+    const described = await send<{ node?: { frameId?: string } }>(
+      owner.source,
+      "DOM.describeNode",
+      { backendNodeId: owner.backendNodeId },
+    ).catch(() => undefined);
+    const parent = described?.node?.frameId;
+    if (!parent || parent === current) break;
+    current = parent;
+    if (current === root) break;
+  }
+  return { x, y, offsetX: x - point.x, offsetY: y - point.y };
+}
+
+async function rootFrameId(debuggee: chrome.debugger.Debuggee): Promise<string | undefined> {
+  const tree = await send<{ frameTree?: { frame?: { id?: string } } }>(
+    debuggee,
+    "Page.getFrameTree",
+    {},
+  ).catch(() => undefined);
+  return tree?.frameTree?.frame?.id;
+}
+
+async function frameOwner(
+  sources: chrome.debugger.Debuggee[],
+  frameId: string,
+): Promise<
+  | {
+      source: chrome.debugger.Debuggee;
+      backendNodeId: number;
+      model: { content?: number[]; border?: number[] };
+    }
+  | undefined
+> {
+  for (const source of sources) {
+    await send(source, "DOM.enable", {}).catch(() => undefined);
+    const owner = await send<{ backendNodeId?: number }>(source, "DOM.getFrameOwner", {
+      frameId,
+    }).catch(() => undefined);
+    if (owner?.backendNodeId === undefined) continue;
+    const model = await send<{ content?: number[]; border?: number[] }>(source, "DOM.getBoxModel", {
+      backendNodeId: owner.backendNodeId,
+    }).catch(() => undefined);
+    if (model) return { source, backendNodeId: owner.backendNodeId, model };
+  }
+  return undefined;
+}

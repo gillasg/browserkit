@@ -28,7 +28,7 @@ import {
   settleBrowserPage,
   pageOutcome,
 } from "./native-browser-navigation.js";
-import { frameContext } from "./native-browser-frames.js";
+import { frameContext, rootFramePoint } from "./native-browser-frames.js";
 import { refreshInventoryTab } from "./native-inventory-client.js";
 import { scrollWithFeedback } from "./native-browser-scroll.js";
 import { hiddenTargetError } from "./native-browser-reveal.js";
@@ -110,21 +110,11 @@ function hitPoint(this: HTMLElement) {
     y = (top + bottom) / 2;
   const root = this.getRootNode() as Document | ShadowRoot;
   const hit = root.elementFromPoint(x, y);
-  let offsetX = 0,
-    offsetY = 0,
-    current: Window = window;
-  while (current !== current.parent) {
-    const frame = current.frameElement;
-    if (!frame) return { x, y, hit: false };
-    const rect = frame.getBoundingClientRect();
-    offsetX += rect.left + (frame as HTMLElement).clientLeft;
-    offsetY += rect.top + (frame as HTMLElement).clientTop;
-    current = current.parent;
-  }
   const covered = right > left && bottom > top && !!hit;
   const direct = covered && (hit === this || this.contains(hit));
-  if (!covered || direct || !ancestorOf(hit, this))
-    return { x: x + offsetX, y: y + offsetY, hit: direct };
+  // Coordinates stay in this frame; the engine adds each owner iframe's box when it sends Input
+  // on the root session (frameElement is null inside a cross-origin frame).
+  if (!covered || direct || !ancestorOf(hit, this)) return { x, y, hit: direct };
   // The target sits inside the element that is hit but cannot be hit itself (hidden or
   // pointer-events:none control): use its label if that is reachable, else activate it in the DOM.
   const label = labelOf(this);
@@ -133,9 +123,8 @@ function hitPoint(this: HTMLElement) {
     ly = lbox ? lbox.top + lbox.height / 2 : 0;
   const lhit =
     label && lbox && lbox.width > 0 && lbox.height > 0 ? root.elementFromPoint(lx, ly) : null;
-  if (label && lhit && (lhit === label || label.contains(lhit)))
-    return { x: lx + offsetX, y: ly + offsetY, hit: true };
-  return { x: x + offsetX, y: y + offsetY, hit: true, activate: true };
+  if (label && lhit && (lhit === label || label.contains(lhit))) return { x: lx, y: ly, hit: true };
+  return { x, y, hit: true, activate: true };
   function ancestorOf(other: Element | null, target: Element): boolean {
     let node: Node | null = target;
     while (node && other) {
@@ -371,7 +360,12 @@ export async function prepareElement(
   element: BrowserElementTarget,
   revalidate: () => Promise<void>,
   editable = false,
-): Promise<{ node: AxRef; point: Point; frame: chrome.debugger.Debuggee }> {
+): Promise<{
+  node: AxRef;
+  point: Point;
+  frame: chrome.debugger.Debuggee;
+  top: { x: number; y: number; offsetX: number; offsetY: number };
+}> {
   if (!("target" in request.step)) throw new Error("INVALID_TARGET");
   for (let attempt = 0; ; attempt++) {
     await revalidate();
@@ -387,10 +381,13 @@ export async function prepareElement(
       // A frame's node acts through its own session: DOM ids and Input coordinates are local to it.
       const frame = node.sessionId ? { ...debuggee, sessionId: node.sessionId } : debuggee;
       const point = await actionablePoint(frame, node.backendNodeId, editable);
-      if (!node.sessionId)
-        showAgentCursor(debuggee, point.x, point.y, false, elementCaption(request, node, editable));
+      // Input events go to the root session in main-viewport coordinates, however deep the frame.
+      const top = node.frameId
+        ? await rootFramePoint(debuggee, node.frameId, point)
+        : { ...point, offsetX: 0, offsetY: 0 };
+      showAgentCursor(debuggee, top.x, top.y, false, elementCaption(request, node, editable));
       await revalidate();
-      return { node, point, frame };
+      return { node, point, frame, top };
     } catch (caught) {
       const error = normalizePreparationError(caught);
       if (attempt >= 2 || !(error instanceof Error) || !retryablePreparation(error, element))
@@ -605,6 +602,7 @@ async function dispatchAction(
     node,
     point: box,
     frame,
+    top,
   } = await prepareElement(
     debuggee,
     request,
@@ -612,18 +610,21 @@ async function dispatchAction(
     () => revalidateTarget(request, request.step.target.tabId),
     request.step.op === "fill",
   );
+  const measured = await measureBox(frame, node.backendNodeId);
   noteActionTiming(debuggee.tabId, {
-    box: await measureBox(frame, node.backendNodeId),
-    point: { x: box.x, y: box.y },
+    box: measured
+      ? { ...measured, x: measured.x + top.offsetX, y: measured.y + top.offsetY }
+      : undefined,
+    point: { x: top.x, y: top.y },
     tAct: Date.now(),
   });
   if (request.step.op === "click")
     await (box.activate
       ? onNode(frame, node.backendNodeId, activateNode)
-      : clickAt(frame, box.x, box.y));
+      : clickAt(debuggee, top.x, top.y));
   else if (request.step.op === "fill")
     await fillNode(frame, node.backendNodeId, request.step.value);
-  else await scrollAt(frame, box.x, box.y, request.step.direction, request.step.amount);
+  else await scrollAt(debuggee, top.x, top.y, request.step.direction, request.step.amount);
 }
 
 async function scrollViewport(

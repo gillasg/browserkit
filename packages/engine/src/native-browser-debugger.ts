@@ -133,6 +133,8 @@ function uniqueNode(nodes: AxNode[], missing: string): AxRef {
     backendNodeId: node.backendDOMNodeId,
     role: textValue(node.role?.value),
     name: textValue(node.name?.value),
+    ...(node.sessionId ? { sessionId: node.sessionId } : {}),
+    ...(node.frameId ? { frameId: node.frameId } : {}),
   };
 }
 async function resolveQuery(
@@ -151,6 +153,8 @@ async function resolveQuery(
     backendNodeId: id,
     role: textValue(node?.role?.value),
     name: textValue(node?.name?.value),
+    ...(node?.sessionId ? { sessionId: node.sessionId } : {}),
+    ...(node?.frameId ? { frameId: node.frameId } : {}),
   };
 }
 
