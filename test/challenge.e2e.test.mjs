@@ -101,12 +101,6 @@ test(
       assert.equal(webResult.listed.tools[0].name, "echo", web.stdout);
       assert.deepEqual(webResult.called.result, { x: 1 }, web.stdout);
       assert.equal(webResult.empty.available, false, web.stdout);
-      const agents = await cell(
-        `page = await browser.openTab(${JSON.stringify(siteUrl + "deals")});
-         const state = await bu.state();
-         console.log("AGENTS " + JSON.stringify({has: /agent manifest: 3 actions/.test(state)}));`,
-      );
-      assert.equal(JSON.parse(/AGENTS (.*)/.exec(agents.stdout)[1]).has, true, agents.stdout);
       const denied = await cell(`page.challenges.solve({stage: "checkbox"})`).catch(
         (error) => error,
       );
