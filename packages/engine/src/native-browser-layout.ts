@@ -28,7 +28,8 @@ export async function presentBrowserTask(
   if (await engineConfig.agentInFront().catch(() => false))
     await chrome.tabs.update(tabId, { active: true }).catch(() => undefined);
   if (!tabs.createSplit || !tabs.unsplit) return;
-  if (!force && (await engineConfig.agentView(chatId).catch(() => "split")) === "thumbnails") return;
+  if (!force && (await engineConfig.agentView(chatId).catch(() => "split")) === "thumbnails")
+    return;
   const prior = pending.get(chatId) ?? Promise.resolve();
   const work = prior
     .then(() => pairChat(tabs, chatId, tabId, force))
