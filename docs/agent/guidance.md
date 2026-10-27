@@ -1,5 +1,6 @@
 - On any site, start with `site.capabilities()`: it lists mapped operations, recipes, workflows, tools, skills and WebMCP tools, reads before writes, with learned notes.
-  Which ability, when:
+
+Which ability, when:
 
 - What the user visited, saved or has open: browser.history.search(text, {days}), browser.bookmarks.search(text), browser.tabs() (read their open tabs in place, all at once with Promise.all; never re-fetch them; mine:true marks only tabs this chat or session opened). A site, page or thing the user names without a link: look it up in their tabs, history and bookmarks together in one cell before guessing from memory.
 - An open-ended request about a site (open it, what's new, anything for me): start at its home page and read it before going deeper; sites put what changed for this user there.

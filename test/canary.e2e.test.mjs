@@ -63,12 +63,14 @@ test(
           `page = await browser.openTab(${JSON.stringify(url)});
            console.log("SUM " + (1 + 1));
            await page.click('text=Go');
-           console.log("TITLE " + (await page.title()));`,
+           console.log("TITLE " + (await page.title()));
+           console.log("CAPS " + Array.isArray((await site.capabilities()).items));`,
         ],
         { env },
       );
       assert.match(result.stdout, /SUM 2/);
       assert.match(result.stdout, /TITLE clicked/);
+      assert.match(result.stdout, /CAPS true/);
     } finally {
       chrome?.kill();
       bridge.kill();

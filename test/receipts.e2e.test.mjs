@@ -1,6 +1,6 @@
 // One targeted real-Chrome check: a checkbox challenge is solved without touching a decoy box,
 // and a numbered grid clicks only the requested tiles.
-// Run alone: node --test test/challenge.e2e.test.mjs
+// Run alone: node --test test/receipts.e2e.test.mjs
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn, execFile } from "node:child_process";

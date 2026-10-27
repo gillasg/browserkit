@@ -106,10 +106,9 @@ function __siteToolGroup(kind) {
     },
   });
 }
-var site = Object.freeze({tools: __siteToolGroup('tool'), pageTools: __siteToolGroup('pageTool')});
 // One entry point for what already exists on a site: mapped operations, recipes, flows, site
 // tools, learned notes, site skills and WebMCP tools. Reads sort before writes.
-site.capabilities = async (host) => {
+var __siteCapabilities = async (host) => {
   var url = host ? (/^https?:/.test(host) ? host : 'https://' + host) : (__lastTarget ? String(await browser.page(__lastTarget).url()) : '');
   var siteName = host || (url ? new URL(url).hostname.replace(/^www\\./, '') : '');
   if (!siteName) throw Error('SITE_UNKNOWN: pass a site or open a tab first');
@@ -125,6 +124,7 @@ site.capabilities = async (host) => {
   items.sort((left, right) => Number(left.does === 'write') - Number(right.does === 'write') || String(left.kind).localeCompare(String(right.kind)) || String(left.name).localeCompare(String(right.name)));
   return {site: siteName, items, notes};
 };
+var site = Object.freeze({tools: __siteToolGroup('tool'), pageTools: __siteToolGroup('pageTool'), capabilities: __siteCapabilities});
 // Saved reads: a page whose content the agent read this cell (page.data, page.markdown,
 // page.table) has its visible text saved after the cell, so when the user comes back to it the
 // page can show what changed since. The same text the page itself compares against.
