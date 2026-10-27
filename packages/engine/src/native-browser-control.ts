@@ -183,8 +183,11 @@ function removeBanner(): void {
 
 onEngineInstall(() => {
   chrome.runtime.onMessage.addListener((message, sender) => {
-    const tabId = sender.tab?.id;
-    if (tabId === undefined || !message || typeof message !== "object") return;
+    if (!message || typeof message !== "object") return;
+    // The extension's own pages (a chat) name the tab they give back; pages give back themselves.
+    const own = sender.url?.startsWith(chrome.runtime.getURL("")) === true;
+    const tabId = own && typeof message.tabId === "number" ? message.tabId : sender.tab?.id;
+    if (tabId === undefined) return;
     if (message.kind === "browserkit.user-input")
       noteUserInput(tabId, Number(message.at) || Date.now());
     if (message.kind === "browserkit.control.giveback") giveBack(tabId);

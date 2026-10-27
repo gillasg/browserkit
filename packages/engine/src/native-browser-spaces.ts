@@ -308,5 +308,14 @@ onEngineInstall(() => {
     }
     if (changed) save();
   });
+  // The host's own pages (a home screen) ask for the current spaces; changes are broadcast.
+  chrome.runtime.onMessage.addListener((message, sender, respond) => {
+    if ((message as { kind?: unknown })?.kind !== "browserkit.spaces.get") return;
+    if (!sender.url?.startsWith(chrome.runtime.getURL(""))) return;
+    void listSpaces()
+      .then((list) => respond({ spaces: list }))
+      .catch(() => respond({ spaces: [] }));
+    return true;
+  });
   void ensureSpacesRestored();
 });
