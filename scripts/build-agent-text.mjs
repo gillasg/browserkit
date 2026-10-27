@@ -145,9 +145,13 @@ async function guidanceSource() {
   const paragraphs = [...shared];
   paragraphs[0] = `${paragraphs[0]}\n${extra[0] ?? ""}`.trim();
   const primer = extra[1] ?? "";
+  // The one-line browser_code description is browserkit's primer, so both tools open the same way.
+  const summary = (await read(join(repo, "docs", "agent", "primer-browserkit.md"))).trim();
   return [
     TS_HEADER,
     `export const browserRuntimePrimer = ${JSON.stringify(primer)};`,
+    "",
+    `export const browserCodeSummary = ${JSON.stringify(summary)};`,
     "",
     "export const browserCodeGuidelines = [",
     ...paragraphs.map((paragraph) => `  ${JSON.stringify(paragraph)},`),
