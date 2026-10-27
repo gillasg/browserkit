@@ -5,11 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { siteCapabilities } from "../dist/site-capabilities.js";
 
-test("capabilities merge operations, recipes, flows, tools and learned notes", async () => {
-  const root = await mkdtemp(join(tmpdir(), "bue-caps-"));
-  const old = process.env.SITE_TO_API_HOME;
-  process.env.SITE_TO_API_HOME = root;
-  const site = "shop.example";
+async function writeFixture(root, site) {
   const dir = join(root, "sites", site);
   await mkdir(join(dir, "flows"), { recursive: true });
   await writeFile(
@@ -92,6 +88,14 @@ test("capabilities merge operations, recipes, flows, tools and learned notes", a
       updatedAt: new Date().toISOString(),
     }),
   );
+}
+
+test("capabilities merge operations, recipes, flows, tools and learned notes", async () => {
+  const root = await mkdtemp(join(tmpdir(), "bue-caps-"));
+  const old = process.env.SITE_TO_API_HOME;
+  process.env.SITE_TO_API_HOME = root;
+  const site = "shop.example";
+  await writeFixture(root, site);
   try {
     const answer = await siteCapabilities(site);
     assert.equal(answer.site, site);

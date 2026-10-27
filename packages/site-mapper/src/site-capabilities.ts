@@ -29,9 +29,82 @@ export interface SiteCapabilities {
   notes: string[];
 }
 
+type Model = NonNullable<Awaited<ReturnType<typeof loadModel>>>;
+type Tools = Awaited<ReturnType<typeof listSiteTools>>;
+type Recipe = Awaited<ReturnType<typeof listRecipes>>[number];
+type Flow = Awaited<ReturnType<typeof listFlows>>[number];
+
 function writeNamed(value: string): boolean {
   return /\b(write|create|add|send|post|delete|remove|update|edit|checkout|purchase|buy|book|pay|save|submit)\b/i.test(
     value,
+  );
+}
+
+function does(name: string, description?: string): "read" | "write" {
+  return writeNamed(`${name} ${description ?? ""}`) ? "write" : "read";
+}
+
+function operationItems(operations: Model["operations"]): SiteCapabilityItem[] {
+  const roles = new Map<string, string[]>();
+  for (const [capability, ids] of Object.entries(capabilityIndex(operations)))
+    for (const id of ids ?? []) roles.set(id, [...(roles.get(id) ?? []), capability]);
+  return operations.map((operation) => {
+    const tags = roles.get(operation.id);
+    return {
+      kind: "operation",
+      name: operation.id,
+      title: operation.summary ?? operation.id,
+      does: operation.role === "read" ? "read" : "write",
+      inputs: inputParams(operation).map((param) => param.name),
+      how: "api",
+      source: "site-mapper",
+      ...(tags?.length ? { capabilities: tags } : {}),
+    };
+  });
+}
+
+const recipeItem = (recipe: Recipe): SiteCapabilityItem => ({
+  kind: "recipe",
+  name: recipe.name,
+  title: recipe.description ?? recipe.name,
+  does: does(recipe.name, recipe.description),
+  inputs: recipe.params,
+  how: recipe.strategies.includes("page") ? "page" : "api",
+  source: "recipe",
+});
+
+const flowItem = (flow: Flow): SiteCapabilityItem => ({
+  kind: "workflow",
+  name: flow.meta.name,
+  title: flow.meta.description ?? flow.meta.name,
+  does: "read",
+  inputs: [],
+  how: "script",
+  source: "flow",
+});
+
+function toolItems(tools: Tools): SiteCapabilityItem[] {
+  const one = (tool: Tools["tools"][number], kind: "tool" | "pageTool"): SiteCapabilityItem => ({
+    kind,
+    name: tool.name,
+    title: tool.description ?? tool.name,
+    does: does(tool.name, tool.description),
+    inputs: tool.params.map((param) => param.name),
+    how: kind === "tool" ? "script" : "page",
+    source: "site-tool",
+  });
+  return [
+    ...tools.tools.filter((tool) => tool.enabled).map((tool) => one(tool, "tool")),
+    ...tools.pageTools.filter((tool) => tool.enabled).map((tool) => one(tool, "pageTool")),
+  ];
+}
+
+function sortItems(items: SiteCapabilityItem[]): SiteCapabilityItem[] {
+  return items.sort(
+    (left, right) =>
+      Number(left.does === "write") - Number(right.does === "write") ||
+      left.kind.localeCompare(right.kind) ||
+      left.name.localeCompare(right.name),
   );
 }
 
@@ -45,78 +118,14 @@ export async function siteCapabilities(site: string): Promise<SiteCapabilities> 
     listSiteTools(host).catch(() => ({ tools: [], pageTools: [] })),
     readLearned(host).catch(() => undefined),
   ]);
-  const items: SiteCapabilityItem[] = [];
-  const operations = model?.operations ?? [];
-  const index = capabilityIndex(operations);
-  const roles = new Map<string, string[]>();
-  for (const [capability, ids] of Object.entries(index))
-    for (const id of ids ?? []) roles.set(id, [...(roles.get(id) ?? []), capability]);
-  for (const operation of operations) {
-    const does = operation.role === "read" ? "read" : "write";
-    items.push({
-      kind: "operation",
-      name: operation.id,
-      title: operation.summary ?? operation.id,
-      does,
-      inputs: inputParams(operation).map((param) => param.name),
-      how: "api",
-      source: "site-mapper",
-      ...(roles.get(operation.id)?.length ? { capabilities: roles.get(operation.id) } : {}),
-    });
-  }
-  for (const recipe of recipes)
-    items.push({
-      kind: "recipe",
-      name: recipe.name,
-      title: recipe.description ?? recipe.name,
-      does: writeNamed(`${recipe.name} ${recipe.description ?? ""}`) ? "write" : "read",
-      inputs: recipe.params,
-      how: recipe.strategies.includes("page") ? "page" : "api",
-      source: "recipe",
-    });
-  for (const flow of flows)
-    items.push({
-      kind: "workflow",
-      name: flow.meta.name,
-      title: flow.meta.description ?? flow.meta.name,
-      does: "read",
-      inputs: [],
-      how: "script",
-      source: "flow",
-    });
-  for (const tool of tools.tools)
-    if (tool.enabled)
-      items.push({
-        kind: "tool",
-        name: tool.name,
-        title: tool.description ?? tool.name,
-        does: writeNamed(`${tool.name} ${tool.description ?? ""}`) ? "write" : "read",
-        inputs: tool.params.map((param) => param.name),
-        how: "script",
-        source: "site-tool",
-      });
-  for (const tool of tools.pageTools)
-    if (tool.enabled)
-      items.push({
-        kind: "pageTool",
-        name: tool.name,
-        title: tool.description ?? tool.name,
-        does: writeNamed(`${tool.name} ${tool.description ?? ""}`) ? "write" : "read",
-        inputs: tool.params.map((param) => param.name),
-        how: "page",
-        source: "site-tool",
-      });
-  items.sort(
-    (left, right) =>
-      Number(left.does === "write") - Number(right.does === "write") ||
-      left.kind.localeCompare(right.kind) ||
-      left.name.localeCompare(right.name),
-  );
-  return {
-    site: host,
-    items,
-    notes: learnedHint(learned) ? [learnedHint(learned)] : [],
-  };
+  const items = [
+    ...operationItems(model?.operations ?? []),
+    ...recipes.map(recipeItem),
+    ...flows.map(flowItem),
+    ...toolItems(tools as Tools),
+  ];
+  const hint = learnedHint(learned);
+  return { site: host, items: sortItems(items), notes: hint ? [hint] : [] };
 }
 
 /** Merge Aeon's skills and the page's WebMCP tools into the same answer. */
@@ -124,15 +133,9 @@ export function mergeSiteCapabilities(
   base: SiteCapabilities,
   extra: { items?: SiteCapabilityItem[]; notes?: string[] } = {},
 ): SiteCapabilities {
-  const items = [...base.items, ...(extra.items ?? [])].sort(
-    (left, right) =>
-      Number(left.does === "write") - Number(right.does === "write") ||
-      left.kind.localeCompare(right.kind) ||
-      left.name.localeCompare(right.name),
-  );
   return {
     site: base.site,
-    items,
+    items: sortItems([...base.items, ...(extra.items ?? [])]),
     notes: [...new Set([...base.notes, ...(extra.notes ?? [])])],
   };
 }
