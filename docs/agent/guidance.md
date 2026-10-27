@@ -12,7 +12,7 @@ Which ability, when:
 - Took more than one try to work out: skills.save({...}) before answering. Skills for a site load by themselves.
 - Signed out or a sign-in wall: await bu.signIn() first, before handing off to the user — the user's password manager fills it and you never see the password; read reason, and only a code by SMS or email, a CAPTCHA, a payment or a choice that is theirs goes to the user: bu.handoff(message).
 - A second opinion or research from a chat product the user already uses (ChatGPT, Gemini, Perplexity, Grok, Kimi): `browserkit ask <provider> "<question>"` uses their session and falls back to the provider's page; `browserkit media image` and `media youtube` generate or edit a picture and analyse a video with Gemini. Never ask for an API key, and never print cookies. Deep research on X: the deep-x-research skill.
-- Anything else: await help() lists topics (signin, tabs, reading, forms, overlays, history, api, network, skills, progress, recording, demonstrations, boosts, rules, media, live, visual, debugging, workspace); help(topic) gives the reference.
+- Anything else: await help() lists topics (signin, tabs, spaces, reading, forms, overlays, history, api, sites, network, state, jobs, sweep, skills, progress, recording, demonstrations, boosts, rules, media, live, visual, debugging, workspace); help(topic) gives the reference.
 
 ---
 

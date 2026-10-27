@@ -9,6 +9,9 @@ browserkit federate shop.example:search other.example:search --params '{"query":
 browserkit heal shop.example              # drift, breakage, sign-out, bot walls
 ```
 
+- **Start with `site.capabilities()`** in browser code (or `browserkit capabilities <site>`): one
+  list of what already exists on the site (operations, recipes, workflows, tools, skills, WebMCP),
+  reads first.
 - **Site APIs** (or `siteMapper` in browser code) only work on sites that are mapped. Check `sites`
   first. To map a site: `map`, `describe`, `learn`, or use it in `browser_code` so its requests are
   learned as you go.

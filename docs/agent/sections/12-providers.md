@@ -10,16 +10,9 @@ browserkit ask gemini "Compare these two plans" --ui   # force the page
 browserkit ask grok "What is X saying about <topic>?" --json
 ```
 
-- The **direct transport** sends the request the provider's own page sends, with the user's
-  cookies, and reads the streamed answer. It is the first choice: fast and no tab.
-- The **page fallback** opens the provider, types the prompt and reads the answer element. It is
-  used automatically when the direct request fails (a changed API, a missing token, a rate limit),
-  so a rename on the provider side degrades instead of breaking.
-- `--direct` never falls back; `--ui` always uses the page. A signed-out provider says
-  `signed-out`, not a timeout.
-- A model not in the known list is accepted with a warning; providers rename models without
-  notice. `browserkit providers --json` lists the known ones.
-- Cookies and tokens stay in the process: the output carries the answer only.
+- It sends the provider's own request with the user's cookies and falls back to typing in the page
+  when that fails (`--direct` / `--ui` force one). Signed out says `signed-out`. The output carries
+  the answer only, never cookies or tokens.
 
 Inside a chat, the primitive path is one browser_code cell (`browser.openTab(provider)`,
 locators, `page.inspect`).
@@ -32,16 +25,13 @@ browserkit media image "make it dusk" --image fox.png --out dusk.png
 browserkit media youtube "https://youtu.be/<id>" --ask "What are the three main claims?"
 ```
 
-Images are generated or edited by Gemini and saved in the workspace; YouTube links are watched by
-Gemini and answered as text. The primitive path is `page.upload("input[type=file]", [file])`,
-`page.saveMedia("img", {name})` on `gemini.google.com/app`. AI Studio is not used.
+Images are made or edited by Gemini and saved in the workspace; YouTube links are answered as text.
 
 ### One action at a time
 
-MCP clients that prefer discrete calls have `browser_action`: `{action: "click", selector:
-"button[type=submit]"}`, with navigate, type, press, scroll, wait, extract, screenshot, evaluate,
-back, forward, reload and tabs. It builds the same browser_code cell, and `browser_code` stays the
-tool for anything with several steps or its own logic. It does not replace the other tools.
+MCP clients that prefer discrete calls have `browser_action` (`{action: "click", selector}`, plus
+navigate, type, press, scroll, wait, extract, screenshot…). Anything with several steps stays in
+`browser_code`.
 
 ### Deep research on X
 

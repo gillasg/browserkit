@@ -67,14 +67,9 @@ const rows = await page.list("tr"); // every row, scrolling lists that draw lazi
   with a frame prefix (`f2:e14`); acting on one goes through that frame, and
   `bu.state({root: "f2:e14"})` / `page.snapshot({root})` scopes to that subtree (an iframe ref
   means its whole document).
-- Console and page errors are captured only when asked for: `page.console()` reads and turns
-  capture on for this tab, `page.console.start()` / `.stop()` / `.state()` control it. The Runtime
-  domain it needs is detectable, so it stays off by default. `page.stealthCheck()` reports what a
-  page can see (Runtime on, injected globals or overlays, wrapped functions, `navigator.webdriver`).
-- `page` is Playwright-style: `page.goto(url)`, `page.title()`, `page.url()`, `page.locator(css)`,
-  `getByRole(role, {name})`, `getByText`, `getByLabel` with `.click()`, `.fill(v)`, `.innerText()`,
-  `.count()`, `.all()`, `.nth(i)`, `page.$$eval`, `page.keyboard.press("Enter")`,
-  `page.waitForSelector(css)`. There is no `page.playwright`, and `page.$` is not a promise chain.
+- `page.console()` reads console messages and errors (capture is off until asked for).
+- `page` is Playwright-style (`goto`, `locator`, `getByRole`, `getByText`, `getByLabel`, `$$eval`,
+  `keyboard.press`, `waitForSelector`). There is no `page.playwright`. `help('playwright')`.
 - After a cell with actions the new page state prints automatically; never add blind sleeps. A cell
   returns its last expression: end with one object holding what you found, and print only what you
   will use. Close tabs you are done with (`await page.close()`, or `browser.closeTab(id)`; both
@@ -83,16 +78,6 @@ const rows = await page.list("tr"); // every row, scrolling lists that draw lazi
   `browser.job(items, async (page, item) => …)`, which returns a job id and keeps running after
   the cell; check `browser.job.status(id)` or `browser.job.result(id)` later. `browser.reset()`
   closes every tab the chat opened except kept ones.
-- If you click or type in a tab an agent is driving, it stops at its next step with
-  `USER_TOOK_CONTROL` (later steps say `USER_HAS_CONTROL`). `browser.tabs()` marks that tab
-  `control: "user"`. Wait with `page.waitForControl()` (or `{timeoutMs}`) until the user presses
-  the banner's button or calls `page.giveBack()`; there is no retry around it.
-- A session's tabs can be one space: `browser.openTab(url, {space: "window"})` puts its tabs in one
-  background window of its own, while `{space: "tabs"}` keeps them in the user's window.
-  `browser.session.finish({keep: ["p2"]})` moves the kept tabs to the user and closes the rest;
-  `.claim()` leaves the whole space to the user; `.spaces()` lists sessions and their status. Tabs
-  carry stable labels (`p1`, `p2…`) in `browser.tabs()` and `bu.use("p2")`, re-bound by URL after
-  a browser restart.
 
 ## Reading pages
 
@@ -163,6 +148,9 @@ browserkit federate shop.example:search other.example:search --params '{"query":
 browserkit heal shop.example              # drift, breakage, sign-out, bot walls
 ```
 
+- **Start with `site.capabilities()`** in browser code (or `browserkit capabilities <site>`): one
+  list of what already exists on the site (operations, recipes, workflows, tools, skills, WebMCP),
+  reads first.
 - **Site APIs** (or `siteMapper` in browser code) only work on sites that are mapped. Check `sites`
   first. To map a site: `map`, `describe`, `learn`, or use it in `browser_code` so its requests are
   learned as you go.
@@ -173,93 +161,25 @@ browserkit heal shop.example              # drift, breakage, sign-out, bot walls
   changed since the last watch of the same call; nothing runs in between. For ongoing monitoring,
   schedule the command yourself.
 
-## Sessions and files
+## Sessions, spaces and bulk work
 
-`--session <name>` keeps variables, tabs and files together; the default is `cli` (and `mcp` for
-the MCP server). Files (`page.saveMedia`, `page.network.save`, artifacts, crawls) land in the
-session's workspace under browserkit's data folder (`%LOCALAPPDATA%\browserkit\workspaces\<session>` on Windows, `~/.local/share/browserkit/...` elsewhere). `browserkit journal <session>`
-shows what a session ran. `artifact(name, data)` writes a file; `checkpoint(name, value)` and
-`loadCheckpoint` persist JSON across resets.
+`--session <name>` keeps variables, tabs and files together (default `cli`, and `mcp` for the MCP
+server). Files land in the session's workspace (`%LOCALAPPDATA%\browserkit\workspaces\<session>` on Windows, `~/.local/share/browserkit/...` elsewhere); `browserkit journal <session>`
+shows what it ran. A tab belongs to the session that opened it, so two sessions never drive the
+same tab; reads on different tabs run in parallel, writes are serialized browser-wide.
 
-### Two sessions at once
-
-Sessions are isolated on purpose: a tab belongs to the session that opened it, so two sessions
-never drive the same tab. `browser.tabs({mine:true})` lists only this session's tabs. Steps for one
-tab run in order (a per-tab queue); reads on different tabs run in parallel, which is what
-`Promise.all` over pages is for. A write (`page.batch`, a checkout) is serialized browser-wide, so
-two sessions cannot interleave two writes on the same site. Opening a URL this session already has
-a tab for reuses that tab; another session gets its own. If a tab is already claimed by another
-session, `browser.attachTab` opens a copy for this one rather than borrowing it (a listed tab from
-another session is `TAB_OWNED_ELSEWHERE`; `browser.tabs({all:true})` shows them).
-
-## Spaces, labels and taking a tab back
-
-A session can keep its tabs in one window of its own (`browser.openTab(url, {space: "window"})`,
-which jobs, sweeps and outside sessions use) or in the user's window (`{space: "tabs"}`, the
-default for an interactive chat). The window is normal (never minimized, so Chrome keeps painting
-it), created behind the user's window, and reused for that session's tabs. `browser.session.finish({keep:
-["p2"]})` moves the named tabs to the user's window, closes the rest and ends the session;
-`browser.session.claim()` hands every tab and the window to the user; `browser.session.spaces()`
-lists sessions with `running`, `waiting`, `user` or `idle`.
-
-Tabs also get stable labels (`p1`, `p2…`): `browser.tabs()` shows each tab's `label`, and
-`bu.use("p2")` works wherever a tab id does. The label is re-bound by URL if Chrome restarts and
-ids change. If the user clicks or types in a tab the agent is driving, the agent pauses with
-`USER_TOOK_CONTROL`; `browser.tabs()` marks `control: "user"` and `page.waitForControl()` waits
-until the banner's button or `page.giveBack()` restores the agent.
-
-## A local DevTools endpoint
-
-`browserkit cdp` starts a 127.0.0.1-only DevTools endpoint over agent tabs and prints a tokenised
-URL. Playwright: `chromium.connectOverCDP(url)`; Puppeteer: `connect({browserURL: url})`.
-`browserkit cdp --status` reports it, `--stop` ends it. Tabs opened through the endpoint belong to
-that client and close when it disconnects; browser contexts, cookie/storage clearing and
-`Browser.close` are refused. The endpoint is off until started.
-
-## Bulk work: sweeps, outcomes and evidence
-
-For "is this list of sites alive / does it have X", do not write the open-wait-capture-close loop:
-`browser.sweep(urls, {gate: true, capture: "media", play: true})` is that loop as one durable job
-(it survives a bridge restart). Each URL gets one record with `outcome`, `reason`, `gate`,
-`captured`, `media`, `evidence` and `ms`. Outcomes are `ok`, `gated`, `shell`, `dead`, `parked`,
-`redirected`, `blocked` and `error`; a run with no `ok` items returns a `warning` that the method
-is probably incomplete, so read it before believing the result.
-
-- `pilot: 5` runs five, returns their evidence and stops: look before committing to hundreds.
-- `checkpoint: "name"` resumes that sweep, re-running only ambiguous items (`retry: ["gated"]`
-  adds outcomes). `concurrency` defaults to 4.
-- `evidence: true` keeps a screenshot, DOM text and network summary per item in the workspace.
-- Tabs the site opens are reaped; the sweep is `browser.job` underneath, so `browser.job.status`,
-  `.cancel`, `.resume` and `browserkit sweep` / `browserkit job` all work on it.
-
-A single site: `await page.enterSite()`, then `page.network.list({since})` and `page.media()`.
-`check` (CLI) is liveness + verdicts; `check --media` adds the same capture for alive sites.
-
-## Network and media
-
-`page.network.list()` records top-frame, iframe, worker and service-worker traffic; each entry has
-`state` (`pending`/`done`/`failed`), `source` (`worker`/`service-worker`) and `frameUrl` when it is
-not the top frame. `list({frames: "top"})` narrows to the top frame, and `list({since: cursor})`
-returns `{entries, cursor}` so polling a long flow is incremental. `page.network.body(id)` is the
-cheapest way to read what a call returned: reach for it before re-fetching. `page.media()` fetches
-and parses the manifests the tab requested: `{masters: [{url, variants: [{width, height,
-bandwidth, codecs, url}]}], playlists: [{url, duration, segments}], headers}`. A site that gates on
-`Referer` works with `page.goto(url, {referer})` or `browser.openTab(url, {referer})`.
-`browser.fetch` returns status, headers and a capped body even on 401/403, plus a hint when no
-referer/origin was sent.
-
-## Clearing state
-
-| State                        | How to clear                                                                                                                  |
-| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| Cookies                      | `browser.cookies.clear({url})` or `{domain}`                                                                                  |
-| Web storage                  | `page.cdp('Storage.clearDataForOrigin', {origin, storageTypes: 'local_storage,session_storage,indexeddb'})` (origin required) |
-| Everything the origin stores | `page.cdp('Storage.clearDataForOrigin', {origin, storageTypes: 'all'})` (cookies excluded)                                    |
-| Service workers              | `page.cdp('ServiceWorker.stopAllWorkers')` or `page.cdp('ServiceWorker.stopWorker', {versionId})`                             |
-| Permissions                  | `page.permissions.allow(type)` / `block(type)` / `reset(type)`                                                                |
-| HTTP cache                   | Not offered: `Network.clearBrowserCache` is refused browser-wide                                                              |
-
-Also refused: `Network.clearBrowserCookies` and `Storage.clearCookies` (use `browser.cookies`), and `Storage.clearDataForOrigin` without an explicit origin. `help('state')` carries the same table.
+- **Spaces:** `browser.openTab(url, {space: "window"})` keeps a session's tabs in one background
+  window; `browser.session.finish({keep: ["p2"]})` hands the kept tabs to the user. Tabs carry
+  stable labels (`p1`, `p2…`). `help('spaces')`.
+- **The user takes over:** clicking or typing in an agent's tab stops it with
+  `USER_TOOK_CONTROL`; `page.waitForControl()` waits until it is given back. Never retry around it.
+- **Many sites:** `browser.sweep(urls, {gate: true, pilot: 5})` returns one outcome per URL (`ok`,
+  `gated`, `dead`…) as a durable job; start with a pilot. `help('sweep')`, `help('jobs')`.
+- **Network:** `page.network.list()` works without `start()`, `page.network.body(id)` reads what a
+  call returned, `page.media()` parses video manifests. `help('network')`.
+- **Clearing state:** cookies, storage, service workers, permissions. `help('state')`.
+- **Other tools:** `browserkit cdp` starts a local DevTools endpoint for Playwright or Puppeteer
+  (`connectOverCDP(url)`); its tabs close when the client disconnects.
 
 ## Habits that save turns
 
@@ -292,16 +212,9 @@ browserkit pack import shop.zip
 browserkit pack enable shop.example
 ```
 
-A pack holds the mapped site (model, OpenAPI, typed client and recorded flows), the browser
-skills and boosts written for it, and any saved site tools. Export strips sessions, cookies and
-credential-bearing request headers and bodies. Import writes the site but saves skills, boosts
-and tools **disabled** and prints their code; review it, then enable them. Without the browser
-running, boosts are left out (export) or not saved (import); the site and skills still move.
-
-Saved tools are callable helpers beside the model: `browserkit site tools list <site>` shows
-them, `run <site> <name> --params '<json>'` runs a Node tool, and `enable|disable` manages their
-code. Use `site.tools.<name>(args)` and `site.pageTools.<name>(args)` in browser code for the
-current host.
+A pack holds the mapped site, its skills, boosts and site tools. Export strips sessions, cookies and
+credentials; import saves skills, boosts and tools **disabled** until reviewed and enabled.
+`site.tools.<name>(args)` and `site.pageTools.<name>(args)` call enabled tools in browser code.
 
 ## Chat providers and media
 
@@ -315,16 +228,9 @@ browserkit ask gemini "Compare these two plans" --ui   # force the page
 browserkit ask grok "What is X saying about <topic>?" --json
 ```
 
-- The **direct transport** sends the request the provider's own page sends, with the user's
-  cookies, and reads the streamed answer. It is the first choice: fast and no tab.
-- The **page fallback** opens the provider, types the prompt and reads the answer element. It is
-  used automatically when the direct request fails (a changed API, a missing token, a rate limit),
-  so a rename on the provider side degrades instead of breaking.
-- `--direct` never falls back; `--ui` always uses the page. A signed-out provider says
-  `signed-out`, not a timeout.
-- A model not in the known list is accepted with a warning; providers rename models without
-  notice. `browserkit providers --json` lists the known ones.
-- Cookies and tokens stay in the process: the output carries the answer only.
+- It sends the provider's own request with the user's cookies and falls back to typing in the page
+  when that fails (`--direct` / `--ui` force one). Signed out says `signed-out`. The output carries
+  the answer only, never cookies or tokens.
 
 Inside a chat, the primitive path is one browser_code cell (`browser.openTab(provider)`,
 locators, `page.inspect`).
@@ -337,16 +243,13 @@ browserkit media image "make it dusk" --image fox.png --out dusk.png
 browserkit media youtube "https://youtu.be/<id>" --ask "What are the three main claims?"
 ```
 
-Images are generated or edited by Gemini and saved in the workspace; YouTube links are watched by
-Gemini and answered as text. The primitive path is `page.upload("input[type=file]", [file])`,
-`page.saveMedia("img", {name})` on `gemini.google.com/app`. AI Studio is not used.
+Images are made or edited by Gemini and saved in the workspace; YouTube links are answered as text.
 
 ### One action at a time
 
-MCP clients that prefer discrete calls have `browser_action`: `{action: "click", selector:
-"button[type=submit]"}`, with navigate, type, press, scroll, wait, extract, screenshot, evaluate,
-back, forward, reload and tabs. It builds the same browser_code cell, and `browser_code` stays the
-tool for anything with several steps or its own logic. It does not replace the other tools.
+MCP clients that prefer discrete calls have `browser_action` (`{action: "click", selector}`, plus
+navigate, type, press, scroll, wait, extract, screenshot…). Anything with several steps stays in
+`browser_code`.
 
 ### Deep research on X
 
