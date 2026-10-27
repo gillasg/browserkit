@@ -1,0 +1,1 @@
+Run JavaScript in a persistent REPL inside the user's real Chrome (their tabs and logins). Globals: browser, page, bu, siteMapper, google, skills, artifact, checkpoint, help. Top-level bindings and await survive between calls in the same session. Each model call is slow, so chain everything you already know into one call; the last expression is returned.
