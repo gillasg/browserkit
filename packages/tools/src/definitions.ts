@@ -13,12 +13,28 @@ import {
   runSiteToolAction,
   siteMapper,
   siteName,
+  SITE_TOOL_ACTIONS,
   watch,
 } from "@browserkit/site-mapper";
 
 // The crawl and site_mapper tools as data. Every host (browserkit's bridge/MCP/CLI and Aeon)
 // builds its own exposure from this file: same actions, same parameters, same handlers. A host
 // chooses an allow-list of actions and may wrap the result (workspace files, bounded text).
+
+// What every agent host exposes, so browserkit's MCP and Aeon's tools offer the same actions.
+// Add or drop an action here, never in a host.
+export const AGENT_CRAWL_ACTIONS = ["scrape", "crawl", "map", "search", "find", "check"] as const;
+export const AGENT_SITE_MAPPER_ACTIONS = [
+  "sites",
+  "code",
+  "operations",
+  "call",
+  "watch",
+  "learn",
+  "import",
+  "explore",
+  ...SITE_TOOL_ACTIONS,
+] as const;
 
 export interface JsonObjectSchema {
   type: "object";

@@ -1,5 +1,7 @@
 import { join } from "node:path";
 import {
+  AGENT_CRAWL_ACTIONS,
+  AGENT_SITE_MAPPER_ACTIONS,
   crawlTool,
   HOW_TO_CALL,
   siteMapperTool,
@@ -9,7 +11,7 @@ import {
   type CrawlToolInput,
   type SiteMapperToolInput,
 } from "@browserkit/tools/definitions";
-import { SITE_TOOL_ACTIONS, SITE_TOOL_HELP } from "@browserkit/tools/site-to-api";
+import { SITE_TOOL_HELP } from "@browserkit/tools/site-to-api";
 import { dataDirectory } from "./paths.js";
 
 // browserkit's MCP tools are built from the same definitions Aeon uses. The host only chooses
@@ -17,18 +19,6 @@ import { dataDirectory } from "./paths.js";
 
 type Json = Record<string, unknown>;
 const MAX_TEXT = 60_000;
-
-const CRAWL_ACTIONS = ["scrape", "crawl", "map", "search", "find", "check"] as const;
-const SITE_ACTIONS = [
-  "sites",
-  "code",
-  "operations",
-  "call",
-  "watch",
-  "learn",
-  "explore",
-  ...SITE_TOOL_ACTIONS,
-] as const;
 
 function mcpTool(
   definition: AgentToolDefinition<Record<string, unknown>>,
@@ -43,10 +33,10 @@ function mcpTool(
 }
 
 export const webTools = [
-  mcpTool(crawlTool, CRAWL_ACTIONS),
+  mcpTool(crawlTool, AGENT_CRAWL_ACTIONS),
   mcpTool(
     siteMapperTool,
-    SITE_ACTIONS,
+    AGENT_SITE_MAPPER_ACTIONS,
     `${siteMapperTool.description} ${SITE_TOOL_HELP.join(" ")} ${HOW_TO_CALL}`,
   ),
 ];
