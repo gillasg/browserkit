@@ -77,6 +77,8 @@ export const BrowserCodeResultSchema = z
     error: z.string().max(20000).optional(),
     reset: z.boolean().optional(),
     steps: z.array(z.record(z.string(), z.unknown())).max(256),
+    /** How long the cell ran, in ms. */
+    ms: z.number().nonnegative().optional(),
     opened: z.array(BrowserTargetKeySchema).max(64),
     openedUnused: z.array(BrowserTargetKeySchema).max(64).optional(),
     popupsUnused: z
