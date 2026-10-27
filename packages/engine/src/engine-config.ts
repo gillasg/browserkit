@@ -11,7 +11,8 @@ export interface EngineConfig {
   /** Label of a session's tab group; the host may pass the chat, routine or session name. */
   tabGroupTitle: (owner: string, ownerTitle?: string) => string;
   /** How a chat page shows its agent's tabs: Split View beside the chat, or live thumbnails. */
-  agentView: () => Promise<"split" | "thumbnails">;
+  /** How a chat shows the tabs its agent works in; the host may answer per chat. */
+  agentView: (chatId: string) => Promise<"split" | "thumbnails">;
   /**
    * Whether the agent works in the foreground: its tabs open active and switching activates them.
    * Off by default. Screen recorders (Aperture) rely on it to film the agent's work; keep it.

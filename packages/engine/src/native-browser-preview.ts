@@ -20,7 +20,7 @@ const previews = new Map<string, Map<number, Preview>>();
 const latest = new Map<string, number>();
 
 export async function notePreviewActivity(chatId: string, tabId: number): Promise<void> {
-  const view = await engineConfig.agentView().catch((): View => "split");
+  const view = await engineConfig.agentView(chatId).catch((): View => "split");
   const tabs = previews.get(chatId) ?? new Map<number, Preview>();
   previews.set(chatId, tabs);
   latest.set(chatId, tabId);
