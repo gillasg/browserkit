@@ -1,5 +1,5 @@
-// The offscreen document hosts browser_code realms and the flight recorder. It outlives the
-// service worker, so both keep state while no cell is running.
+// The offscreen document hosts browser_code realms. It outlives the service worker, so they keep
+// state while no cell is running.
 
 export const OFFSCREEN = "code-offscreen.html";
 let creating: Promise<void> | undefined;
