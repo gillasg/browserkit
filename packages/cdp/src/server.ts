@@ -2,12 +2,13 @@ import { randomUUID } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { WebSocket, WebSocketServer } from "ws";
 
-// A local DevTools Protocol endpoint over agent tabs. Clients see only tabs they opened. Only
-// browser-level Target.* bookkeeping is answered here; every page command is passed unchanged to
-// the debugger session the engine already has for that tab, and every debugger event comes back
-// on the matching session, so clients see Chrome's own frame tree, lifecycle and contexts. Targets
-// carry Chrome's real target ids: Playwright keys a page's main frame by its target id.
-// Browser-level commands that cannot be honoured are refused with a clear CDP error.
+// A local DevTools Protocol endpoint over every tab. A client can read, drive and close any tab,
+// including the user's and another session's. Only browser-level Target.* bookkeeping is answered
+// here; every page command is passed unchanged to the debugger session the engine already has for
+// that tab, and every debugger event comes back on the matching session, so clients see Chrome's
+// own frame tree, lifecycle and contexts. Targets carry Chrome's real target ids: Playwright keys
+// a page's main frame by its target id. Browser-level commands that cannot be honoured are refused
+// with a clear CDP error.
 
 export interface CdpTab {
   tabId: number;
@@ -305,8 +306,6 @@ export class CdpServer {
     if (method === "Target.closeTarget") {
       const found = this.clientTarget(client, String(params.targetId ?? ""));
       if (!found) throw new Error(`Target not found: ${String(params.targetId ?? "")}`);
-      if (!client.owned.has(found.tabId))
-        throw new Error("TAB_NOT_YOURS: this client did not open that tab");
       await this.adapter.closeTab(client.session, found.tabId);
       this.forget(client, found.tabId);
       return { success: true };

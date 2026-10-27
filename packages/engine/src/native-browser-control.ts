@@ -1,5 +1,6 @@
 import { onEngineInstall } from "./native-engine-install.js";
 import { onBrowserDebuggerAttached, browserSessionOwner } from "./native-browser-session.js";
+import { dimAgentGlow, showAgentGlow } from "./native-browser-cursor.js";
 
 // Who is driving a tab. CDP's Input events are trusted, just like a real click, so the engine
 // records the moments it is dispatching input; a trusted event outside those moments came from
@@ -75,12 +76,14 @@ export function noteUserInput(tabId: number, at: number): void {
   if (controlled.has(tabId)) return;
   controlled.set(tabId, { at, reported: false });
   void injectTop(tabId, controlBanner);
+  dimAgentGlow(tabId, true);
   notify(tabId, "user");
 }
 
 export function giveBack(tabId: number): boolean {
   if (!controlled.delete(tabId)) return false;
   void injectTop(tabId, removeBanner);
+  dimAgentGlow(tabId, false);
   notify(tabId, "agent");
   return true;
 }
@@ -192,10 +195,14 @@ onEngineInstall(() => {
       noteUserInput(tabId, Number(message.at) || Date.now());
     if (message.kind === "browserkit.control.giveback") giveBack(tabId);
   });
-  onBrowserDebuggerAttached((tabId) => injectWatcher(tabId));
+  onBrowserDebuggerAttached((tabId) => {
+    void injectWatcher(tabId);
+    void showAgentGlow(tabId, controlOf(tabId) === "user");
+  });
   chrome.webNavigation?.onCommitted?.addListener((details) => {
     if (details.tabId < 0 || details.frameId !== 0 || !browserSessionOwner(details.tabId)) return;
     void injectWatcher(details.tabId);
+    void showAgentGlow(details.tabId, controlOf(details.tabId) === "user");
   });
   chrome.tabs.onRemoved.addListener((tabId) => forgetControl(tabId));
   // Every Input.dispatch* opens a window in which a trusted event belongs to the agent. The

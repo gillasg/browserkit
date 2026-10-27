@@ -119,6 +119,26 @@ export const BrowserOperationCallSchema = z
   .strict();
 export type BrowserOperationCall = z.infer<typeof BrowserOperationCallSchema>;
 
+const WRITE_STEPS = new Set([
+  "click",
+  "fill",
+  "press",
+  "pointer",
+  "keys",
+  "upload",
+  "navigate",
+  "scroll",
+  "downloads",
+  "cdp",
+]);
+
+/** Whether a step changes the page: those queue and take the one-use claim; reads stay parallel. */
+export function browserStepWrites(step: BrowserStep): boolean {
+  if (step.op === "frames") return ["click", "fill", "cdp"].includes(step.action);
+  if (step.op === "downloads") return step.action === "start" || step.action === "cancel";
+  return WRITE_STEPS.has(step.op);
+}
+
 export const BrowserExecutorRequestSchema = z
   .object({
     kind: z.literal("browser.operation"),
@@ -133,16 +153,13 @@ export const BrowserExecutorRequestSchema = z
   })
   .strict()
   .superRefine((request, context) => {
-    const targetAction = !["listTabs", "openTab", "attachTab"].includes(request.step.op);
+    const targetAction = browserStepWrites(request.step);
     const hasClaim =
       request.claimId !== undefined &&
       request.claimGeneration !== undefined &&
       request.expectedDocumentEpoch !== undefined;
-    const hasAnyClaim =
-      request.claimId !== undefined ||
-      request.claimGeneration !== undefined ||
-      request.expectedDocumentEpoch !== undefined;
-    if (targetAction !== hasClaim || (hasAnyClaim && !hasClaim))
+    const hasAnyClaim = request.claimId !== undefined || request.claimGeneration !== undefined;
+    if ((targetAction && !hasClaim) || (!targetAction && hasAnyClaim && !hasClaim))
       context.addIssue({
         code: "custom",
         message: "Target actions require a complete one-use claim.",

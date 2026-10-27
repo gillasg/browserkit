@@ -90,8 +90,7 @@ export const signinCommand: Command = {
   status            say which password manager answers, and whether it is unlocked
 
 bu.signIn() in browser code then fills a site's sign-in form from that password manager. The
-agent never sees the password or the one-time code; the first sign-in on a site is approved on
-the page itself.
+agent never sees the password or the one-time code, and there is no approval step.
 
 Saving a new login hands the item to the configured password manager CLI. Bitwarden receives a
 base64 item and Proton Pass receives \`--password\` as an argument; that argument is visible to

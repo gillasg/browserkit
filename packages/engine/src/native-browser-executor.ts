@@ -53,14 +53,9 @@ import { touchSpace } from "./native-browser-spaces.js";
 import { withManualScreencast } from "./native-browser-screencast.js";
 import { injectedScripts, judgeStealth, noteInjectedScript, type StealthProbe } from "./stealth.js";
 import { controlError, controlOf, stepInput } from "./native-browser-control.js";
+import { isWriteStep } from "./native-browser-scheduler.js";
 import { controlOrSessionStep } from "./native-browser-extra-session.js";
-import {
-  clearReadOnly,
-  isReadOnly,
-  refusedCdp,
-  setReadOnly,
-  stepChangesPage,
-} from "./native-browser-guards.js";
+import { refusedCdp } from "./native-browser-guards.js";
 import {
   executeInteraction,
   interactFrame,
@@ -502,7 +497,7 @@ async function drainEvents(request: BrowserExecutorRequest): Promise<BrowserExec
   };
 }
 function needsClaim(step: BrowserStep): boolean {
-  return step.op !== "listTabs" && step.op !== "openTab";
+  return isWriteStep(step);
 }
 function claimIsFresh(request: BrowserExecutorRequest): boolean {
   if (
@@ -529,15 +524,9 @@ async function executeStep(
   if (step.op === "listTabs") return listTabs(request);
   if (step.op === "openTab") return openTab(identity, request);
   if (step.op === "attachTab") return attachTab(step.target);
-  if (step.op === "session") {
-    if (step.action === "claim") setReadOnly(step.target.tabId, step.readOnly);
-    if (step.action === "finish") clearReadOnly(step.target.tabId);
-  }
   if (controlOf(step.target.tabId) === "user" && step.op !== "control" && step.op !== "session")
     throw new Error(controlError(step.target.tabId));
-  activateClaim(request);
-  if (isReadOnly(step.target.tabId) && stepChangesPage(step))
-    throw new Error("READ_ONLY: this tab was claimed for reading only");
+  if (isWriteStep(step)) activateClaim(request);
   const tab = await assertTarget(request);
   bindBrowserSession(step.target.tabId, request.chatId);
   touchSpace(request.chatId);
@@ -600,7 +589,7 @@ function inventoryMatchesRequest(
   );
 }
 async function revalidateTarget(request: BrowserExecutorRequest, tabId: number): Promise<void> {
-  assertClaimActive(request);
+  if (isWriteStep(request.step)) assertClaimActive(request);
   if (!isTargetStep(request.step) || request.step.target.tabId !== tabId)
     throw new Error("INVALID_TARGET");
   const current = await refreshInventoryTab(tabId);
@@ -763,9 +752,9 @@ export async function executeLocalBrowserStep(
   const known = target && currentInventoryTabs().find((tab) => sameTarget(tab.target, target));
   if (target && !known) throw new Error("TARGET_LOST");
   const key = target && targetIdentity(target);
-  const claimGeneration = key
-    ? Math.max((claimGenerations.get(key) ?? 0) + 1, Date.now() * 1000)
-    : undefined;
+  const write = isWriteStep(step);
+  const claimGeneration =
+    key && write ? Math.max((claimGenerations.get(key) ?? 0) + 1, Date.now() * 1000) : undefined;
   const request = BrowserExecutorRequestSchema.parse({
     kind: "browser.operation",
     requestId: crypto.randomUUID(),
@@ -775,8 +764,7 @@ export async function executeLocalBrowserStep(
     step,
     ...(known
       ? {
-          claimId: crypto.randomUUID(),
-          claimGeneration,
+          ...(write ? { claimId: crypto.randomUUID(), claimGeneration } : {}),
           expectedDocumentEpoch: known.documentEpoch,
         }
       : {}),
@@ -784,7 +772,8 @@ export async function executeLocalBrowserStep(
   registerBrowserRequest(request);
   try {
     if (isEventDrain(step)) return await drainEvents(request);
-    return target
+    if (!target) return await executeStep(identity, request);
+    return write
       ? await enqueueTarget(target, () => executeStep(identity, request))
       : await executeStep(identity, request);
   } finally {

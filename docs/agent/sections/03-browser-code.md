@@ -29,8 +29,8 @@ const rows = await page.list("tr"); // every row, scrolling lists that draw lazi
   `keyboard.press`, `waitForSelector`). There is no `page.playwright`. `help('playwright')`.
 - After a cell with actions the new page state prints automatically; never add blind sleeps. A cell
   returns its last expression: end with one object holding what you found, and print only what you
-  will use. Close tabs you are done with (`await page.close()`, or `browser.closeTab(id)`; both
-  refuse the user's tabs and unsplit first); `page.keep()` hands one to the user when they need it
+  will use. Close tabs you are done with (`await page.close()`, or `browser.closeTab(id)`; any tab,
+  then unsplit first); `page.keep()` hands one to the user when they need it
   (a result, cart or form). For more than a few pages or sites use
   `browser.job(items, async (page, item) => …)`, which returns a job id and keeps running after
   the cell; check `browser.job.status(id)` or `browser.job.result(id)` later. `browser.reset()`

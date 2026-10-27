@@ -2,8 +2,8 @@
 
 `--session <name>` keeps variables, tabs and files together (default `cli`, and `mcp` for the MCP
 server). Files land in the session's workspace ({{workspace}}); `browserkit journal <session>`
-shows what it ran. A tab belongs to the session that opened it, so two sessions never drive the
-same tab; reads on different tabs run in parallel, writes are serialized browser-wide.
+shows what it ran. Every agent can read, act in, navigate and close every tab, its own, the user's
+or another session's; actions in one tab queue, reads run in parallel.
 
 - **Spaces:** `browser.openTab(url, {space: "window"})` keeps a session's tabs in one background
   window; `browser.session.finish({keep: ["p2"]})` hands the kept tabs to the user. Tabs carry

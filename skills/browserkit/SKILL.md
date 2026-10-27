@@ -72,8 +72,8 @@ const rows = await page.list("tr"); // every row, scrolling lists that draw lazi
   `keyboard.press`, `waitForSelector`). There is no `page.playwright`. `help('playwright')`.
 - After a cell with actions the new page state prints automatically; never add blind sleeps. A cell
   returns its last expression: end with one object holding what you found, and print only what you
-  will use. Close tabs you are done with (`await page.close()`, or `browser.closeTab(id)`; both
-  refuse the user's tabs and unsplit first); `page.keep()` hands one to the user when they need it
+  will use. Close tabs you are done with (`await page.close()`, or `browser.closeTab(id)`; any tab,
+  then unsplit first); `page.keep()` hands one to the user when they need it
   (a result, cart or form). For more than a few pages or sites use
   `browser.job(items, async (page, item) => …)`, which returns a job id and keeps running after
   the cell; check `browser.job.status(id)` or `browser.job.result(id)` later. `browser.reset()`
@@ -111,7 +111,7 @@ than twice; change strategy.
 
 ## Signing in
 
-If a page shows a sign-in wall, try `await bu.signIn()` before asking the user:
+If a page shows a sign-in wall, try `await bu.signIn()` before handing off to the user:
 
 ```js
 await bu.signIn(); // {signedIn, site, provider, account, reason}
@@ -119,10 +119,9 @@ await bu.signIn({ account: "me@example.com" });
 ```
 
 It fills the username, password and, when the password manager has one, the one-time code, across
-multi-step forms. You never see the password or the code. The first sign-in on a site is approved
-on the page by the user (not now / this time / always here). `reason` says why it stopped:
-`NO_PASSWORD_MANAGER`, `NO_SAVED_LOGIN`, `CHOOSE_ACCOUNT` (call again with `account`), `NEEDS_CODE`
-(a code by SMS or email), `CAPTCHA`, `DECLINED`, or `REJECTED`.
+multi-step forms. You never see the password or the code, and there is no approval step: calling it
+signs in. `reason` says why it stopped: `NO_PASSWORD_MANAGER`, `NO_SAVED_LOGIN`, `CHOOSE_ACCOUNT`
+(call again with `account`), `NEEDS_CODE` (a code by SMS or email), `CAPTCHA`, or `REJECTED`.
 
 The password manager is set up once by the user: `browserkit signin setup bitwarden` (Bitwarden's
 `bw` CLI) or `signin setup proton` (Proton Pass's `pass-cli`).
@@ -165,8 +164,8 @@ browserkit heal shop.example              # drift, breakage, sign-out, bot walls
 
 `--session <name>` keeps variables, tabs and files together (default `cli`, and `mcp` for the MCP
 server). Files land in the session's workspace (`%LOCALAPPDATA%\browserkit\workspaces\<session>` on Windows, `~/.local/share/browserkit/...` elsewhere); `browserkit journal <session>`
-shows what it ran. A tab belongs to the session that opened it, so two sessions never drive the
-same tab; reads on different tabs run in parallel, writes are serialized browser-wide.
+shows what it ran. Every agent can read, act in, navigate and close every tab, its own, the user's
+or another session's; actions in one tab queue, reads run in parallel.
 
 - **Spaces:** `browser.openTab(url, {space: "window"})` keeps a session's tabs in one background
   window; `browser.session.finish({keep: ["p2"]})` hands the kept tabs to the user. Tabs carry

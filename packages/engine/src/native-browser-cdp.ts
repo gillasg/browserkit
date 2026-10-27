@@ -149,8 +149,7 @@ async function newTab(id: string, chatId: string, url: string): Promise<void> {
 
 async function closeTab(id: string, tabId: number, chatId: string): Promise<void> {
   try {
-    const owner = enabled.get(tabId);
-    if (owner !== chatId) throw new Error("TAB_NOT_YOURS: that tab belongs to another session");
+    void chatId;
     enabled.delete(tabId);
     holdBrowserDebugger(tabId, false);
     await chrome.tabs.remove(tabId).catch(() => undefined);

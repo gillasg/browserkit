@@ -34,6 +34,16 @@ export interface CursorUpdate {
   };
   /** Show keys being pressed for a moment. */
   keys?: string[];
+  /** Caption is an obvious action (click/type): hide it after ~2 s instead of keeping it. */
+  transient?: boolean;
+  /** Edge glow around a tab an agent drives. */
+  glow?: boolean;
+  /** The user has control: dim the glow and stop its pulse. */
+  glowDim?: boolean;
+  /** Create the overlay for the glow without showing the cursor yet. */
+  glowOnly?: boolean;
+  /** CSS colour for the glow (hex or rgb()). */
+  glowColor?: string;
   /** Initial viewport position when the overlay is recreated after a navigation. */
   start?: { x: number; y: number };
 }
@@ -49,7 +59,9 @@ const OVERLAY = `(update) => {
     host.style.cssText = "position:fixed;inset:0;z-index:2147483647;pointer-events:none;contain:strict";
     const root = host.attachShadow({ mode: "closed" });
     root.innerHTML = '<style>' +
-      '.c{position:absolute;left:0;top:0;will-change:transform}' +
+      '.g{position:fixed;inset:0;border-radius:18px;pointer-events:none;opacity:0;transform:none;box-shadow:inset 0 0 0 2px rgba(139,147,167,.55),inset 0 0 28px rgba(139,147,167,.35);transition:opacity .3s ease;animation:edge 2.4s ease-in-out infinite}' +
+      '.g.on{opacity:1}.g.user{animation:none;opacity:.35}@keyframes edge{50%{opacity:.55}}' +
+      '.c{position:absolute;left:0;top:0;will-change:transform;transition:opacity .18s ease}' +
       '.a,.t{position:absolute;left:-3px;top:-2px;filter:drop-shadow(0 2px 4px rgba(15,23,42,.35));transition:transform 120ms ease,opacity 120ms ease}' +
       '.t{left:-6px;top:-11px;opacity:0}.c.text .a{opacity:0}.c.text .t{opacity:1}' +
       '.c.down .a,.c.down .t{transform:scale(.82)}' +
@@ -59,7 +71,7 @@ const OVERLAY = `(update) => {
       '.p{position:absolute;left:18px;top:20px;max-width:320px;padding:5px 10px;border-radius:999px;background:rgba(17,24,39,.88);color:#fff;font:500 12px/16px system-ui,-apple-system,Segoe UI,sans-serif;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;box-shadow:0 4px 14px rgba(0,0,0,.25);opacity:0;transform:translateY(-3px);transition:opacity 160ms ease,transform 160ms ease}' +
       '.p.on{opacity:1;transform:none}' +
       'svg.trail{position:absolute;inset:0;width:100%;height:100%;overflow:visible}' +
-      '</style><svg class="trail"></svg><div class="c"><i></i>' +
+      '</style><div class="g"></div><svg class="trail"></svg><div class="c"><i></i>' +
       '<svg class="a" width="22" height="24" viewBox="0 0 22 24"><path d="M2 2l7.5 19 2.6-7.6L20 10.8z" fill="#4f46e5" stroke="#fff" stroke-width="1.6" stroke-linejoin="round"/></svg>' +
       '<svg class="t" width="12" height="22" viewBox="0 0 12 22"><path d="M2 1.5h8M2 20.5h8M6 1.5v19" stroke="#4f46e5" stroke-width="2.2" stroke-linecap="round" fill="none"/></svg>' +
       '<div class="p"></div></div>';
@@ -75,11 +87,12 @@ const OVERLAY = `(update) => {
     root.append(...extras.childNodes);
     const state = host.__s = {
       root, cursor: root.querySelector(".c"), ripple: root.querySelector("i"),
+      glow: root.querySelector(".g"), glowColor: "",
       pill: root.querySelector(".p"), trail: root.querySelector("svg.trail"),
       spotlight: root.querySelector(".s"), callout: root.querySelector(".co"), keys: root.querySelector(".k"),
       pageX: update.start ? update.start.x + scrollX : innerWidth / 2 + scrollX,
       pageY: update.start ? update.start.y + scrollY : innerHeight / 2 + scrollY,
-      frame: 0, idle: 0, hide: 0, type: 0,
+      frame: 0, idle: 0, hide: 0, type: 0, cursorShown: false,
     };
     // Pinned to the page, not the viewport: when the page scrolls, the cursor scrolls with it.
     const place = () => { state.cursor.style.transform = "translate(" + (state.pageX - scrollX) + "px," + (state.pageY - scrollY) + "px)"; };
@@ -89,6 +102,18 @@ const OVERLAY = `(update) => {
     place();
   }
   const s = host.__s;
+  if (update.glowColor && update.glowColor !== s.glowColor) {
+    s.glowColor = update.glowColor;
+    const rgb = toRgb(update.glowColor);
+    if (rgb) s.glow.style.boxShadow = "inset 0 0 0 2px rgba(" + rgb + ",.55),inset 0 0 28px rgba(" + rgb + ",.35)";
+  }
+  if (update.glowOnly && !s.cursorShown) s.cursor.style.opacity = "0";
+  if (update.x !== undefined || update.y !== undefined) {
+    s.cursorShown = true;
+    s.cursor.style.opacity = "1";
+  }
+  if (update.glow !== undefined) s.glow.classList.toggle("on", update.glow);
+  if (update.glowDim !== undefined) s.glow.classList.toggle("user", update.glowDim);
   s.cursor.classList.remove("idle");
   clearTimeout(s.idle);
   s.idle = setTimeout(() => s.cursor.classList.add("idle"), 2200);
@@ -165,7 +190,18 @@ const OVERLAY = `(update) => {
         if (prefix + shown >= text.length) clearInterval(s.type);
       }, 22);
     } else s.pill.textContent = text;
-    s.hide = setTimeout(() => s.pill.classList.remove("on"), 3200);
+    s.hide = setTimeout(() => s.pill.classList.remove("on"), update.transient ? 2000 : 6000);
+  }
+  function toRgb(color) {
+    var text = String(color || "").trim();
+    var hex = /^#([0-9a-f]{6})$/i.exec(text);
+    if (hex) {
+      var n = parseInt(hex[1], 16);
+      return ((n >> 16) & 255) + "," + ((n >> 8) & 255) + "," + (n & 255);
+    }
+    if (text.indexOf("rgb") !== 0) return "";
+    var parts = text.slice(text.indexOf("(") + 1, text.lastIndexOf(")")).split(",");
+    return parts.length >= 3 ? parts.slice(0, 3).map(function (part) { return String(Number(part)).trim(); }).join(",") : "";
   }
 }`;
 
@@ -196,6 +232,21 @@ onEngineInstall(() => {
 /** A caption without moving the cursor, e.g. while reading or navigating. */
 export function showAgentCaption(debuggee: chrome.debugger.Debuggee, caption: string): void {
   updateAgentCursor(debuggee, { caption, soft: true });
+}
+
+/** The edge glow around a tab an agent drives; dimmed while the user has control. */
+export async function showAgentGlow(tabId: number, dim = false): Promise<void> {
+  if (!(await engineConfig.agentGlow().catch(() => true))) return;
+  const glowColor = await engineConfig.agentGlowColor().catch(() => "#8b93a7");
+  updateAgentCursor({ tabId }, { glow: true, glowDim: dim, glowOnly: true, glowColor });
+}
+
+export function dimAgentGlow(tabId: number, dim: boolean): void {
+  updateAgentCursor({ tabId }, { glowDim: dim });
+}
+
+export function hideAgentGlow(tabId: number): void {
+  updateAgentCursor({ tabId }, { glow: false });
 }
 
 /** Dim the page around a target, e.g. for a write confirmation or a hand-off. */

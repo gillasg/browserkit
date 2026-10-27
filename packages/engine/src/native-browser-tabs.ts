@@ -14,8 +14,8 @@ import { safePage, sameTarget } from "./native-browser-common.js";
 import { controlOf } from "./native-browser-control.js";
 import { ensureSpacesRestored, labelOf } from "./native-browser-spaces.js";
 
-// Listing tabs as Chrome has them now. `mine` marks this session's tabs; another session's tab is
-// still listed (mine:false) so attaching it can open this session its own copy.
+// Listing tabs as Chrome has them now. `mine` marks this session's tabs; every tab is listed and
+// every agent may attach it, whoever opened it.
 export async function listTabs(request: BrowserExecutorRequest): Promise<BrowserExecutorResult> {
   const step = request.step.op === "listTabs" ? request.step : undefined;
   const query = step?.query;

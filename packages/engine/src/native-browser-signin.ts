@@ -1,4 +1,3 @@
-import { approveSignIn } from "./native-browser-signin-approval.js";
 import {
   clearPasswords,
   scanFields,
@@ -12,6 +11,7 @@ import { rememberSecrets } from "./native-browser-secrets.js";
 // bu.signIn(): sign in to the page the agent is on with a login from the user's password
 // manager. The machine looks the login up by the tab's real address; the engine types it into
 // the page; the agent's code only ever gets the outcome below, never the password or the code.
+// There is no approval step: calling bu.signIn() is the user's instruction to sign in.
 
 export interface SignInResult {
   signedIn: boolean;
@@ -25,7 +25,6 @@ export interface SignInResult {
     | "PASSWORD_MANAGER_FAILED"
     | "NO_SAVED_LOGIN"
     | "CHOOSE_ACCOUNT"
-    | "DECLINED"
     | "NO_SIGN_IN_FORM"
     | "NEEDS_CODE"
     | "CAPTCHA"
@@ -56,7 +55,6 @@ export async function signInToPage(
   tabId: number,
   options: { account?: unknown },
   ask: Ask,
-  active: () => boolean,
 ): Promise<SignInResult> {
   const tab = await chrome.tabs.get(tabId);
   const url = tab.url ?? "";
@@ -69,15 +67,11 @@ export async function signInToPage(
   if (!("login" in chosen)) return chosen;
   const { login, provider } = chosen;
   rememberSecrets([login.password]);
-  const approval = await approveSignIn(
-    tabId,
+  return fill(tabId, login, ask, url, {
     site,
-    `${provider} has a login for ${site} (${login.username || login.name}).`,
-    active,
-  );
-  const base = { site, provider, account: login.username || login.name };
-  if (approval === "no") return { ...base, signedIn: false, reason: "DECLINED" };
-  return fill(tabId, login, ask, url, base);
+    provider,
+    account: login.username || login.name,
+  });
 }
 
 function pickLogin(

@@ -113,29 +113,16 @@ export function mineTabIds(chatId: string): number[] {
 }
 
 /**
- * Close one explicit tab. Unlike tidy-up, a request to close is not allowed to disappear: a tab
- * the user owns, another session owns or a hand-off holds throws instead of silently staying.
+ * Close one explicit tab. Any agent may close any tab: its own, the user's or another session's.
  * A tab in Split View is unsplit first, because Chrome refuses to remove a paired tab cleanly.
  */
 export async function closeChatTab(chatId: string, tabId: number): Promise<{ closed: number }> {
   await restore();
-  const entry = tracked.get(tabId);
-  if (!entry)
-    throw new Error(
-      `TAB_NOT_YOURS: tab ${tabId} belongs to the user; browser.tabs() marks mine:false`,
-    );
-  if (entry.chatId !== chatId)
-    throw new Error(
-      `TAB_NOT_YOURS: tab ${tabId} belongs to another chat or session; browser.tabs() marks mine:false`,
-    );
-  if (guarded.has(tabId))
-    throw new Error(`TAB_BUSY: tab ${tabId} is in a hand-off or recording; finish it first`);
   const tab = await chrome.tabs.get(tabId).catch(() => undefined);
   if (!tab) {
     forgetAgentTab(tabId);
     throw new Error(`TARGET_LOST: tab ${tabId} is already closed`);
   }
-  if (tab.pinned) throw new Error(`TAB_NOT_YOURS: tab ${tabId} is pinned by the user`);
   await unsplitForClose(tab, tabId);
   closing.add(tabId);
   const removed = await chrome.tabs.remove(tabId).then(

@@ -111,6 +111,8 @@ export const BrowserExecutorHeartbeatSchema = z
     kind: z.literal("browser.executor.heartbeat"),
     clientInstanceId: z.string().uuid(),
     browserRunId: z.string().uuid(),
+    /** The extension's build-info text; the daemon compares it with the installed build. */
+    build: z.string().max(8192).optional(),
   })
   .strict();
 export type BrowserExecutorHeartbeat = z.infer<typeof BrowserExecutorHeartbeatSchema>;
@@ -120,6 +122,10 @@ export const BrowserExecutorHeartbeatReplySchema = z
     kind: z.literal("browser.executor.heartbeat.ack"),
     clientInstanceId: z.string().uuid(),
     browserRunId: z.string().uuid(),
+    /** The build the daemon has on disk now; a different extension build reloads itself. */
+    build: z.string().max(8192).optional(),
+    /** The daemon compared the extension's build with its own and asks it to reload. */
+    reload: z.boolean().optional(),
   })
   .strict();
 export type BrowserExecutorHeartbeatReply = z.infer<typeof BrowserExecutorHeartbeatReplySchema>;

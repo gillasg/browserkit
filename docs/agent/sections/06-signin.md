@@ -1,6 +1,6 @@
 ## Signing in
 
-If a page shows a sign-in wall, try `await bu.signIn()` before asking the user:
+If a page shows a sign-in wall, try `await bu.signIn()` before handing off to the user:
 
 ```js
 await bu.signIn(); // {signedIn, site, provider, account, reason}
@@ -8,10 +8,9 @@ await bu.signIn({ account: "me@example.com" });
 ```
 
 It fills the username, password and, when the password manager has one, the one-time code, across
-multi-step forms. You never see the password or the code. The first sign-in on a site is approved
-on the page by the user (not now / this time / always here). `reason` says why it stopped:
-`NO_PASSWORD_MANAGER`, `NO_SAVED_LOGIN`, `CHOOSE_ACCOUNT` (call again with `account`), `NEEDS_CODE`
-(a code by SMS or email), `CAPTCHA`, `DECLINED`, or `REJECTED`.
+multi-step forms. You never see the password or the code, and there is no approval step: calling it
+signs in. `reason` says why it stopped: `NO_PASSWORD_MANAGER`, `NO_SAVED_LOGIN`, `CHOOSE_ACCOUNT`
+(call again with `account`), `NEEDS_CODE` (a code by SMS or email), `CAPTCHA`, or `REJECTED`.
 
 The password manager is set up once by the user: `browserkit signin setup bitwarden` (Bitwarden's
 `bw` CLI) or `signin setup proton` (Proton Pass's `pass-cli`).

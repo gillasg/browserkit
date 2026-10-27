@@ -4,7 +4,11 @@
 export { installEngineListeners } from "./native-engine-install.js";
 export { configureEngine, type EngineConfig } from "./engine-config.js";
 export { authenticate } from "./native-authenticate.js";
-export { handleBrowserCodeMessage, resetRealm } from "./code-runtime-host.js";
+export {
+  handleBrowserCodeMessage,
+  rebindBrowserCodeSocket,
+  resetRealm,
+} from "./code-runtime-host.js";
 export { handleBrowserExecutorMessage, releaseBrowserExecutor } from "./native-browser-executor.js";
 export { installBrowserPopupGuard } from "./native-browser-popup.js";
 export { installBoosts } from "./native-browser-boosts.js";

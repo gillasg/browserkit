@@ -244,10 +244,12 @@ export async function executeInteraction(
   if (step.action === "drag" && step.toX !== undefined && step.toY !== undefined)
     showAgentCursor(debuggee, step.toX, step.toY, false, {
       from: { x: step.x, y: step.y },
+      transient: true,
       caption: "Dragging",
     });
   else
     showAgentCursor(debuggee, step.x, step.y, step.action !== "hover", {
+      transient: true,
       caption: step.action === "hover" ? "Hovering" : "Clicking",
     });
   await send("mouseMoved", step.x, step.y);
@@ -425,7 +427,7 @@ function elementCaption(
 ): Omit<CursorUpdate, "x" | "y" | "press"> {
   const value = (request.step as { value?: unknown }).value;
   if (editable && typeof value === "string")
-    return { text: true, typing: true, caption: `Typing "${value.slice(0, 60)}"` };
+    return { text: true, typing: true, transient: true, caption: `Typing "${value.slice(0, 60)}"` };
   const label = node.name ? `"${node.name.slice(0, 50)}"` : node.role || "element";
   const verb =
     request.step.op === "click"
@@ -433,7 +435,7 @@ function elementCaption(
       : request.step.op === "press"
         ? "Pressing on "
         : "Using ";
-  return { text: editable, caption: verb + label };
+  return { text: editable, transient: request.step.op === "click", caption: verb + label };
 }
 
 // Retry only preparation. A delivered click, key or insertion is never replayed.

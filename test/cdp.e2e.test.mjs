@@ -84,9 +84,11 @@ test(
         const targets = await session.send("Target.getTargets");
         const userTarget = targets.targetInfos.find((item) => item.url.includes("?user"));
         assert.ok(userTarget, "the other session's tab is visible to the CDP client");
-        await assert.rejects(
-          session.send("Target.closeTarget", { targetId: userTarget.targetId }),
-          /TAB_NOT_YOURS/,
+        await session.send("Target.closeTarget", { targetId: userTarget.targetId });
+        const afterClose = await session.send("Target.getTargets");
+        assert.ok(
+          !afterClose.targetInfos.some((item) => item.targetId === userTarget.targetId),
+          "any agent may close any tab",
         );
         const page = await context.newPage();
         await page.goto(url);

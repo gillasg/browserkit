@@ -1,13 +1,12 @@
 import { onEngineInstall } from "./native-engine-install.js";
 import { onNode } from "./native-browser-dom.js";
 import { withBrowserDebugger } from "./native-browser-session.js";
-import { promptVaultSave } from "./native-browser-vault-prompt.js";
 
 // Vault login capture: after a password form is filled and submitted, remember the values only
 // long enough to ask the password manager to save them. Success comes from the page itself (the
 // password field is gone after a navigation or an in-page submit), never from a toast. The value
 // never enters a step, progress, result or journal; only the save request carries it, from the
-// engine to the host.
+// engine to the host. Saving has no prompt: the never-save list is the user's rule.
 
 export interface VaultForm {
   url: string;
@@ -151,12 +150,8 @@ export function vaultSubmissionSucceeded(after: VaultForm | undefined): boolean 
   return Boolean(after && !after.hasPassword);
 }
 
-/** After a submit-like action: save an agent-made signup, prompt for a person-made login. */
-export async function finishVaultCapture(
-  tabId: number,
-  ask: VaultAsk,
-  active: () => boolean,
-): Promise<void> {
+/** After a submit-like action: save the login unless the user's never-save list names the site. */
+export async function finishVaultCapture(tabId: number, ask: VaultAsk): Promise<void> {
   const candidate = vaultCandidate(tabId);
   if (!candidate) return;
   const after = await probeVaultForm(tabId).catch(() => undefined);
@@ -167,8 +162,7 @@ export async function finishVaultCapture(
   }
   candidates.delete(tabId);
   if (await neverSave(candidate.site || new URL(candidate.url).hostname)) return;
-  if (candidate.signup) await saveVaultCandidate(candidate, ask);
-  else void promptVaultSave(tabId, candidate, ask, active);
+  await saveVaultCandidate(candidate, ask);
 }
 
 async function saveVaultCandidate(candidate: VaultCandidate, ask: VaultAsk): Promise<boolean> {

@@ -119,6 +119,12 @@ export function handleBrowserCodeMessage(
   return false;
 }
 
+/** A dropped link reconnected: running cells and jobs answer on the new socket. */
+export function rebindBrowserCodeSocket(socket: WebSocket): void {
+  for (const cell of cells.values()) cell.socket = socket;
+  for (const job of jobs.values()) if (job.status === "running") job.socket = socket;
+}
+
 /** Drops a chat's REPL realm (session closed or runtime reset). */
 export async function resetRealm(chatId: string): Promise<void> {
   cancelJobs(chatId);
@@ -329,15 +335,9 @@ function serveSignIn(
   const request = value.signIn as { target?: unknown; account?: unknown };
   const target = authorizedTarget(cell, request.target);
   void notePreviewActivity(cell.run.chatId, target.tabId);
-  return guardCellTab(cell, target.tabId).then(() => {
-    setWaiting(cell, true);
-    return signInToPage(
-      target.tabId,
-      { account: request.account },
-      (ask) => callCore(cell, ask),
-      () => !cell.done,
-    ).finally(() => setWaiting(cell, false));
-  });
+  return guardCellTab(cell, target.tabId).then(() =>
+    signInToPage(target.tabId, { account: request.account }, (ask) => callCore(cell, ask)),
+  );
 }
 
 function siteRulesFor(cell: Cell): Promise<SiteRules> {
@@ -437,11 +437,7 @@ async function serve(cell: Cell, request: unknown): Promise<unknown> {
           : undefined);
     if (tabId !== undefined) {
       if (step.op === "click" || step.op === "press")
-        void finishVaultCapture(
-          tabId,
-          (request) => callCore(cell, request),
-          () => browserSessionOwner(tabId) !== undefined,
-        ).catch(() => undefined);
+        void finishVaultCapture(tabId, (request) => callCore(cell, request)).catch(() => undefined);
       void notePreviewActivity(cell.run.chatId, tabId);
       // Only work in a tab (not reads) brings its chat and the tab together in Split View.
       if (presentsBrowserTask(step.op) && !("present" in step && step.present === false))
@@ -560,13 +556,6 @@ function authorize(cell: Cell, step: BrowserStep): void {
     // Attaching a listed tab is an explicit agent choice; Core records it after the cell.
     if (!currentInventoryTabs().some((tab) => targetIdentity(tab.target) === key))
       throw new Error("TARGET_LOST");
-    const owner = browserSessionOwner(target.tabId);
-    if (owner !== undefined && owner !== cell.run.chatId)
-      throw new Error(
-        "TAB_OWNED_ELSEWHERE: tab " +
-          target.tabId +
-          " is driven by another session; browser.tabs({all:true}) shows it, open your own copy with browser.openTab(url, {newTab:true})",
-      );
     cell.allowed.set(key, target);
     cell.opened.set(key, target);
     return;

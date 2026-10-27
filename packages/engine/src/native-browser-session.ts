@@ -1,4 +1,4 @@
-import { removeAgentCursor } from "./native-browser-cursor.js";
+import { removeAgentCursor, showAgentGlow } from "./native-browser-cursor.js";
 import {
   enableDiagnostics,
   forgetDiagnostics,
@@ -68,7 +68,6 @@ export function browserSessionOwner(tabId: number): string | undefined {
 }
 
 export function bindBrowserSession(tabId: number, chatId: string): void {
-  if (owners.get(tabId) !== chatId && attachments.has(tabId)) throw new Error("CLAIM_CONFLICT");
   owners.set(tabId, chatId);
   persistBrowserOwners(owners);
 }
@@ -185,6 +184,7 @@ async function attach(tabId: number): Promise<void> {
   }
   trackBrowserActivity(tabId);
   await chrome.debugger.sendCommand({ tabId }, "Page.enable");
+  void showAgentGlow(tabId);
   await Promise.all([
     chrome.debugger.sendCommand({ tabId }, "DOM.enable"),
     chrome.debugger.sendCommand({ tabId }, "Accessibility.enable"),
@@ -207,6 +207,7 @@ function detach(tabId: number): Promise<void> {
     .then(
       async () => {
         await restoreBrowserViewport(tabId);
+        void removeAgentCursor(tabId);
         await chrome.debugger
           .sendCommand({ tabId }, "Emulation.setFocusEmulationEnabled", { enabled: false })
           .catch(() => undefined);

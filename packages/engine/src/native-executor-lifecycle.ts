@@ -15,6 +15,12 @@ export function installNativeStartup(connect: () => Promise<unknown>, retry: () 
   chrome.windows.onFocusChanged.addListener((windowId) => {
     if (windowId !== chrome.windows.WINDOW_ID_NONE) warm();
   });
+  // A service worker can sleep while the daemon restarts; an alarm wakes it to retry the link.
+  const alarm = "aeon-executor-reconnect";
+  void chrome.alarms?.create(alarm, { periodInMinutes: 1 });
+  chrome.alarms?.onAlarm.addListener((fired) => {
+    if (fired.name === alarm) warm();
+  });
   warm();
 }
 
@@ -35,7 +41,11 @@ export function scheduleExecutorReconnect(connect: () => Promise<unknown>): void
   }, delay);
 }
 
-export function startExecutorHeartbeat(socket: WebSocket, identity: BrowserIdentity): number {
+export function startExecutorHeartbeat(
+  socket: WebSocket,
+  identity: BrowserIdentity,
+  build?: () => string | undefined,
+): number {
   let acknowledged = Date.now();
   const onMessage = (event: MessageEvent) => {
     try {
@@ -58,9 +68,14 @@ export function startExecutorHeartbeat(socket: WebSocket, identity: BrowserIdent
       return;
     }
     try {
+      const stamp = build?.();
       socket.send(
         JSON.stringify(
-          BrowserExecutorHeartbeatSchema.parse({ kind: "browser.executor.heartbeat", ...identity }),
+          BrowserExecutorHeartbeatSchema.parse({
+            kind: "browser.executor.heartbeat",
+            ...identity,
+            ...(stamp ? { build: stamp } : {}),
+          }),
         ),
       );
     } catch {

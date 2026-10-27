@@ -101,8 +101,8 @@ function __netFilter(value) {
 }
 var browser = Object.freeze({
   waitFor: (event, options = {}) => __event(options.target || __lastTarget,event,options),
-  // Listed tabs work as pages too (agents call tab.locator(...) or use tab.id); acting on one
-  // the session did not open still needs browser.attachTab(tab) first.
+  // Listed tabs work as pages too (agents call tab.locator(...) or use tab.id); attach a tab
+  // before acting on it, whoever opened it.
   tabs: Object.assign(async (query) => {
       var options = query && typeof query === 'object' ? query : (query ? {query: query} : {});
       var result = await __step({op:'listTabs',
@@ -112,7 +112,7 @@ var browser = Object.freeze({
       __focusedWindowId = result.focusedWindowId;
       var listed = result.tabs.map(tab => __listedTab(__compactTab(tab)));
       if (listed.length > 64) console.log('[warn] ' + listed.length + ' tabs are open; pass a query or {mine:true} to narrow the list. Every tool still works on one tab.');
-      // mine: only the tabs this chat or session opened (the same set browser.closeTab accepts).
+      // mine: only the tabs this chat or session opened (informational; every tab is available).
       return options.mine === true ? listed.filter(tab => tab.mine) : listed;
     },
     {list: async (query) => browser.tabs(query)}),
@@ -124,8 +124,8 @@ var browser = Object.freeze({
     finish: async (options = {}) => (await __step({op:'session', target: __hostTarget(), action:'finish', keep: (options.keep || []).map(String)})).data,
     claim: async () => (await __step({op:'session', target: __hostTarget(), action:'claim'})).data,
   }),
-  // Close one tab this chat/session opened. A user tab, another session's tab or a hand-off tab
-  // throws instead of doing nothing; a tab in Split View is unsplit first.
+  // Close any tab: this session's, the user's or another session's. A tab in Split View is
+  // unsplit first.
   closeTab: async (tab) => {
     var id = typeof tab === 'number' ? tab : tab?.tabId ?? tab?.target?.tabId;
     if (!Number.isSafeInteger(id)) throw Error('INVALID_TARGET: browser.closeTab needs a tab id or a tab from browser.tabs()');
@@ -326,21 +326,13 @@ var browser = Object.freeze({
   // Agents sometimes ask for a tab object by id: browser.tab(tabId or a listed tab).
   tab: async (tab) => bu.use(typeof tab === 'object' && tab ? (tab.target || tab) : tab),
   getTab: async (tab) => browser.tab(tab),
-  // A tab another chat is driving can't be shared; the agent gets its own copy of the page
-  // instead (the conflict only shows on first use, hence the tiny read).
+  // Attach any tab, whoever opened it or is driving it. Actions in one tab queue.
   attachTab: async (target) => {
     target = await __tabTarget(target);
-    try {
-      await __step({op:'attachTab', target});
-      var attached = await bu.use(target);
-      await attached.inspect(() => 1);
-      return attached;
-    } catch (error) {
-      var url = [...__tabs.values()].find(tab => __key(tab.target) === __key(target))?.url;
-      if (!/CLAIM_CONFLICT|TAB_OWNED_ELSEWHERE/.test(String(error && error.message || error)) || !url) throw error;
-      console.log('That tab is in use by another chat, so this chat opened its own copy: ' + url);
-      return browser.openTab(url, {newTab: true});
-    }
+    await __step({op:'attachTab', target});
+    var attached = await bu.use(target);
+    await attached.inspect(() => 1);
+    return attached;
   },
   page: (target) => (__lastTarget = target, Object.freeze(__extendPage(target, {
     target,

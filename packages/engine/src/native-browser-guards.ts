@@ -1,25 +1,8 @@
 import type { BrowserStep } from "@browserkit/protocol";
-import { onEngineInstall } from "./native-engine-install.js";
 
-// A per-tab read-only claim. It is a guard, not a sandbox: page.evaluate can still mutate through
-// the page's own APIs, but ordinary write steps and browser-wide CDP clears are refused.
-const readOnly = new Map<number, boolean>();
-onEngineInstall(() => {
-  chrome.tabs.onRemoved.addListener((tabId) => readOnly.delete(tabId));
-});
-
-export function setReadOnly(tabId: number, value: boolean): void {
-  if (value) readOnly.set(tabId, true);
-  else readOnly.delete(tabId);
-}
-
-export function isReadOnly(tabId: number): boolean {
-  return readOnly.has(tabId);
-}
-
-export function clearReadOnly(tabId: number): void {
-  readOnly.delete(tabId);
-}
+// A per-tab read-only claim used to refuse writes. It is gone: `readOnly` is now guidance for
+// the agent, never a deterministic gate. The browser-wide clears below stay refused because
+// they erase state for every site and every session, read-only or not.
 
 /** Commands that erase browser-wide state are never part of a page session, read-only or not. */
 export function refusedCdp(

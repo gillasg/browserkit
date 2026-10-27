@@ -4,6 +4,7 @@
 // tabs. Every wait is bounded; a stuck holder turns into BUSY_TIMEOUT instead of a hung agent.
 
 import type { BrowserStep } from "@browserkit/protocol";
+import { browserStepWrites } from "@browserkit/protocol";
 
 interface TabQueue {
   tail: Promise<unknown>;
@@ -17,22 +18,8 @@ let writeTail: Promise<unknown> = Promise.resolve();
 let writing = false;
 let waitingWrites = 0;
 
-const WRITE_OPS = new Set([
-  "click",
-  "fill",
-  "press",
-  "pointer",
-  "keys",
-  "upload",
-  "navigate",
-  "scroll",
-  "downloads",
-]);
-
 export function isWriteStep(step: BrowserStep): boolean {
-  if (!WRITE_OPS.has(step.op)) return false;
-  if (step.op === "downloads") return step.action === "start" || step.action === "cancel";
-  return true;
+  return browserStepWrites(step);
 }
 
 export async function inTabQueue<T>(tabId: number, work: () => Promise<T>): Promise<T> {
@@ -90,14 +77,17 @@ export function schedulerStatus(): SchedulerStatus {
   };
 }
 
-/** Runs one dispatch under the per-tab FIFO and, for writes, the browser-wide lock. */
+/**
+ * One dispatch under the per-tab FIFO for writes and the browser-wide write lock. Reads skip
+ * both: they never change a page, so several can run in parallel even in the same tab.
+ */
 export async function scheduleStep<T>(
   step: BrowserStep,
   tabId: number,
   dispatch: () => Promise<T>,
 ): Promise<T> {
   if (isWriteStep(step)) return withWriteLock(() => inTabQueue(tabId, dispatch));
-  return inTabQueue(tabId, dispatch);
+  return dispatch();
 }
 
 async function withDeadline<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {

@@ -27,6 +27,10 @@ export interface EngineConfig {
    * draw their own cursor and rely on this; keep it.
    */
   hideAgentCursor: () => Promise<boolean>;
+  /** Whether a tab an agent drives shows the edge glow. Off lets tests and recorders hide it. */
+  agentGlow: () => Promise<boolean>;
+  /** CSS colour of the edge glow: neutral here, a product colour in hosts such as Aeon. */
+  agentGlowColor: () => Promise<string>;
   /** Opt-in private/metadata network refusal for agent work. */
   privateNetwork: () => Promise<boolean>;
   privateNetworkPorts: () => Promise<number[]>;
@@ -41,6 +45,8 @@ export const engineConfig: EngineConfig = {
   agentView: () => Promise.resolve("split"),
   agentInFront: () => Promise.resolve(false),
   hideAgentCursor: () => Promise.resolve(false),
+  agentGlow: () => Promise.resolve(true),
+  agentGlowColor: () => Promise.resolve("#8b93a7"),
   privateNetwork: async () =>
     Boolean(
       (

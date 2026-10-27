@@ -64,12 +64,14 @@ test(
            console.log("SUM " + (1 + 1));
            await page.click('text=Go');
            console.log("TITLE " + (await page.title()));
+           console.log("CURSOR " + (await page.evaluate(() => !!document.getElementById('aeon-agent-cursor'))));
            console.log("CAPS " + Array.isArray((await site.capabilities()).items));`,
         ],
         { env },
       );
       assert.match(result.stdout, /SUM 2/);
       assert.match(result.stdout, /TITLE clicked/);
+      assert.match(result.stdout, /CURSOR true/);
       assert.match(result.stdout, /CAPS true/);
     } finally {
       chrome?.kill();

@@ -654,7 +654,7 @@ test(
         },
       );
 
-      await t.test("closeTab closes this chat's tabs and refuses the user's", async () => {
+      await t.test("closeTab closes any tab, including the user's", async () => {
         const created = await worker("Runtime.evaluate", {
           expression: `chrome.tabs.create({ url: ${JSON.stringify(siteUrl + "?user-tab")}, active: false }).then((tab) => tab.id)`,
           awaitPromise: true,
@@ -686,8 +686,8 @@ test(
         assert.equal(value.userMine, false, closed.stdout);
         assert.deepEqual(value.result, { closed: value.mineId }, closed.stdout);
         assert.equal(value.gone, true, closed.stdout);
-        assert.match(String(value.userError), /TAB_NOT_YOURS/, closed.stdout);
-        assert.equal(value.userStill, true, closed.stdout);
+        assert.equal(value.userError, null, closed.stdout);
+        assert.equal(value.userStill, false, closed.stdout);
 
         const splitSupport = await worker("Runtime.evaluate", {
           expression: "typeof chrome.tabs.createSplit",
@@ -2052,8 +2052,6 @@ test(
               "signin",
               `page = await browser.openTab(${JSON.stringify(siteUrl + "login")});
             await page.waitForSelector("input[type=email]");
-            // Stands in for the user clicking "Always here" on the approval banner.
-            await page.evaluate(() => setTimeout(() => { globalThis[Symbol.for("signin.approval")] = "always"; }, 1500));
             const result = await bu.signIn();
             let leaked = "no";
             try { await __call({ credential: "login", url: page.url() }); leaked = "yes"; } catch (error) { leaked = String(error.message).slice(0, 40); }
