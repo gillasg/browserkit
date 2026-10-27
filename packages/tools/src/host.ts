@@ -14,6 +14,10 @@ import {
   handleSiteMapperRequest,
   isSiteMapperRequest,
   siteCapabilities,
+  listAbilities,
+  readSiteNotes,
+  runAbility,
+  type AbilityVia,
 } from "@browserkit/site-mapper";
 
 // One answer for what a browser cell asks the machine: a login from the password manager, the
@@ -132,6 +136,16 @@ export function createHostHandler(
     if (isSiteToolRequest(request)) return handleSiteTool(request);
     if (isSiteCapabilitiesRequest(request))
       return siteCapabilities(String(request.siteCapabilities.host ?? ""));
+    if (isAbilityRunRequest(request))
+      return runAbility(
+        String(request.abilityRun.site ?? ""),
+        String(request.abilityRun.name ?? ""),
+        (request.abilityRun.inputs ?? {}) as Record<string, unknown>,
+        request.abilityRun.via ? { via: request.abilityRun.via as AbilityVia } : {},
+      );
+    if (isAbilityListRequest(request)) return listAbilities(String(request.abilityList.site ?? ""));
+    if (isSiteNotesRequest(request))
+      return readSiteNotes(siteNameFrom({ site: request.siteNotes }));
     if (isLearnRequest(request)) return answerLearn(request);
     if (isLearnedRequest(request)) return answerLearned(request);
     if (isSiteMapperRequest(request))
@@ -148,6 +162,35 @@ function isSiteCapabilitiesRequest(value: unknown): value is SiteCapabilitiesReq
   return Boolean(
     value && typeof (value as { siteCapabilities?: unknown }).siteCapabilities === "object",
   );
+}
+
+interface AbilityRunRequest {
+  abilityRun: {
+    site?: unknown;
+    name?: unknown;
+    inputs?: unknown;
+    via?: unknown;
+  };
+}
+
+function isAbilityRunRequest(value: unknown): value is AbilityRunRequest {
+  return Boolean(value && typeof (value as { abilityRun?: unknown }).abilityRun === "object");
+}
+
+interface AbilityListRequest {
+  abilityList: { site?: unknown };
+}
+
+function isAbilityListRequest(value: unknown): value is AbilityListRequest {
+  return Boolean(value && typeof (value as { abilityList?: unknown }).abilityList === "object");
+}
+
+interface SiteNotesRequest {
+  siteNotes: unknown;
+}
+
+function isSiteNotesRequest(value: unknown): value is SiteNotesRequest {
+  return Boolean(value && (value as { siteNotes?: unknown }).siteNotes !== undefined);
 }
 
 interface SiteToolRequest {
@@ -174,7 +217,7 @@ function handleSiteTool(value: unknown): Promise<unknown> {
   );
 }
 
-function siteNameFrom(request: SiteToolRequest["siteTool"]): string {
+function siteNameFrom(request: { site?: unknown; url?: unknown }): string {
   const value = String(request.site ?? request.url ?? "");
   try {
     return new URL(value.includes("://") ? value : `https://${value}`).hostname.replace(

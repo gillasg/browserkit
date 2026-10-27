@@ -104,7 +104,7 @@ test("a bad file is ignored instead of breaking the site", async () => {
   assert.deepEqual(await readSiteTools(site), { version: 1, tools: [], pageTools: [] });
 });
 
-test("imported tools are written disabled", async () => {
+test("imported tools are enabled", async () => {
   const pack = {
     manifest: {
       format: "browserkit-site-pack",
@@ -122,8 +122,8 @@ test("imported tools are written disabled", async () => {
   const imported = await installSitePack(pack, site);
   assert.ok(imported.written.includes("tools.json"));
   const file = await readSiteTools(site);
-  assert.equal(file.tools[0].enabled, false);
-  assert.equal(file.pageTools[0].enabled, false);
+  assert.equal(file.tools[0].enabled, true);
+  assert.equal(file.pageTools[0].enabled, true);
 });
 
 test("the registry stays under the configured home", () => {

@@ -20,6 +20,7 @@ import { packCommand } from "./pack.js";
 import { useGroup } from "./site-use.js";
 import { siteToolsCommand } from "./site-tools.js";
 import { capabilitiesCommand } from "./capabilities.js";
+import { abilitiesCommand } from "./abilities.js";
 import { workflowCommand } from "./workflow.js";
 import { recipeCommand } from "./recipe.js";
 import { cookiesCommand } from "./cookies.js";
@@ -50,6 +51,7 @@ export const COMMANDS: Command[] = [
   ...useGroup,
   siteToolsCommand,
   capabilitiesCommand,
+  abilitiesCommand,
   recipeCommand,
   ...keepGroup,
   ...blockGroup,

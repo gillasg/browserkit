@@ -4,6 +4,7 @@ import { dirname, join, resolve } from "node:path";
 import { strFromU8, strToU8, unzipSync, zipSync } from "fflate";
 import { createRedactor, SECRET_HEADERS, SECRET_KEYS } from "./redact.js";
 import { siteDir, siteName } from "./registry.js";
+import { importPackAbilities } from "./abilities-migrate.js";
 
 // A site pack is a zip of everything needed to use a mapped site on another machine: the model,
 // spec and client, the recorded flows, and the browser skills and boosts written for it. Export
@@ -188,8 +189,7 @@ function jsonEntries<T>(
   return paths
     .filter((name) => pattern.test(name))
     .map((path) => JSON.parse(text(entries[path]) ?? "{}") as T)
-    .filter(valid)
-    .map((item) => ({ ...item, enabled: false }));
+    .filter(valid);
 }
 
 /** Writes the site files; the caller saves skills and boosts disabled. */
@@ -202,9 +202,7 @@ export async function installSitePack(
   const written: string[] = [];
   for (const [path, content] of pack.files) {
     const relative = safePath(path);
-    // Windows file names are case-insensitive: "Tools.json" lands on the same file readSiteTools
-    // opens, so compare without case or an imported pack could arrive with its tools enabled.
-    const installed = relative.toLowerCase() === "tools.json" ? disabledTools(content) : content;
+    const installed = relative.toLowerCase() === "tools.json" ? enabledTools(content) : content;
     const full = resolve(target, relative);
     if (!full.startsWith(resolve(target) + (process.platform === "win32" ? "\\" : "/")))
       throw new Error(`The pack contains an unsafe path: ${path}`);
@@ -212,16 +210,17 @@ export async function installSitePack(
     await writeFile(full, installed);
     written.push(relative);
   }
+  await importPackAbilities(name, pack.skills ?? []);
   return { site: name, written };
 }
 
-/** Imported tools are code: write every entry disabled and let the user review and enable it. */
-function disabledTools(content: string): string {
+/** Everything a pack brings is enabled, including code written for another machine. */
+function enabledTools(content: string): string {
   try {
     const file = JSON.parse(content) as { tools?: unknown; pageTools?: unknown };
     for (const list of [file.tools, file.pageTools])
       if (Array.isArray(list))
-        for (const tool of list) if (tool && typeof tool === "object") tool.enabled = false;
+        for (const tool of list) if (tool && typeof tool === "object") tool.enabled = true;
     return JSON.stringify(file, null, 2) + "\n";
   } catch {
     return content;
@@ -339,7 +338,7 @@ function sanitizeSkill(skill: PackSkill): PackSkill {
     description: redactor.text(String(skill.description ?? "")),
     examples: redactLiterals(redactor.text(String(skill.examples ?? ""))),
     code: redactLiterals(redactor.text(String(skill.code ?? ""))),
-    enabled: false,
+    enabled: true,
     updatedAt: Number(skill.updatedAt ?? Date.now()),
   };
 }

@@ -7,6 +7,7 @@ import { WebSocket, WebSocketServer, type RawData } from "ws";
 import { dataDirectory, statePath, type BridgeState } from "./paths.js";
 import { CdpServer } from "@browserkit/cdp";
 import { isSiteSkillRequest, siteSkillCall } from "./site-skills.js";
+import { migrateAllAbilities } from "@browserkit/site-mapper";
 import {
   appendJournalEntry,
   loadSessionTargets,
@@ -752,5 +753,8 @@ export async function startBridge(
   const temporary = statePath() + "." + process.pid + ".tmp";
   await writeFile(temporary, JSON.stringify(state), { mode: 0o600 });
   await rename(temporary, statePath());
+  void migrateAllAbilities({ skillsDirectory: join(dataDirectory(), "site-skills") }).catch(
+    () => undefined,
+  );
   return { bridge, state, close: () => server.close() };
 }

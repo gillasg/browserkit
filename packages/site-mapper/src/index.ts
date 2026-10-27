@@ -27,6 +27,47 @@ export {
   type SiteCapabilityItem,
   type CapabilityKind,
 } from "./site-capabilities.js";
+export {
+  abilityDirectory,
+  abilitySlug,
+  createAbility,
+  listAbilities,
+  maintainAbilities,
+  readAbility,
+  readSiteNotes,
+  runAbility,
+  saveAbility,
+  trashAbility,
+  writeSiteNotes,
+  type Ability,
+  type AbilityCreatedBy,
+  type AbilityHost,
+  type AbilityKind,
+  type AbilityOptions,
+  type AbilityRunResult,
+  type AbilityStats,
+  type AbilityVia,
+  type AbilityWay,
+  type AbilityWayApi,
+  type AbilityWayPage,
+  type AbilityWayScript,
+  type AbilityWaySteps,
+} from "./abilities.js";
+export {
+  abilityFromAction,
+  abilityFromRecipe,
+  abilityFromSkill,
+  abilityFromTool,
+  abilityFromWorkflow,
+  importPackAbilities,
+  migrateAllAbilities,
+  migrateSiteAbilities,
+  type MigrationOptions,
+  type MigrationReport,
+  type MigrationSkill,
+  type SiteMigrationReport,
+  type Unmigrated,
+} from "./abilities-migrate.js";
 export { volatileFields, type VolatileField, type VolatileReason } from "./infer/volatile.js";
 export { extractEmbedded } from "./infer/html.js";
 export { toOpenApi, toAsyncApi } from "./emit/openapi.js";

@@ -105,13 +105,13 @@ test("export leaves sessions, cookies and credential-bearing values out of the p
   assert.equal(har.log.entries[0].response.headers[0].value, "<redacted>");
   assert.doesNotMatch(har.log.entries[0].response.content.text, /live-token/);
   const skill = JSON.parse(entries["skills/search.json"]);
-  assert.equal(skill.enabled, false);
+  assert.equal(skill.enabled, true);
   const boost = JSON.parse(entries["boosts/hide-ads.json"]);
   assert.equal(boost.enabled, false);
   assert.equal(boost.values, undefined);
 });
 
-test("import writes site files and returns skills and boosts disabled", async (t) => {
+test("import writes site files, enables skills, and returns boosts disabled", async (t) => {
   const home = await temp(t);
   process.env.SITE_TO_API_HOME = home;
   const source = join(home, "sites", "shop.example");
@@ -133,7 +133,7 @@ test("import writes site files and returns skills and boosts disabled", async (t
   assert.ok(installed.written.includes("model.json"));
   assert.ok(!installed.written.some((path) => /session|cookie/i.test(path)));
   assert.equal(pack.skills.length, 1);
-  assert.equal(pack.skills[0].enabled, false);
+  assert.equal(pack.skills[0].enabled, true);
   assert.equal(pack.boosts.length, 1);
   assert.equal(pack.boosts[0].enabled, false);
   const model = JSON.parse(

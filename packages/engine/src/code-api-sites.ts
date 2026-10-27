@@ -26,7 +26,12 @@ async function __autoLoadSkills(url) {
       lines.push(item.name + ' failed to load: ' + String(error && error.message || error).slice(0, 120));
     }
   }
-  return lines.length ? 'Site skills loaded: ' + lines.join('; ') : '';
+  var notes = '';
+  try { notes = String(await __call({siteNotes: url}) || '').trim(); } catch {}
+  var parts = [];
+  if (lines.length) parts.push('Site skills loaded: ' + lines.join('; '));
+  if (notes) parts.push('Site notes for ' + url + ':\\n' + notes.slice(0, 6000));
+  return parts.join('\\n\\n');
 }
 var skills = Object.freeze({
   list: (url) => __call({siteSkill:'list', url: url ?? (__lastTarget ? browser.page(__lastTarget).url : undefined)}),
@@ -124,7 +129,28 @@ var __siteCapabilities = async (host) => {
   items.sort((left, right) => Number(left.does === 'write') - Number(right.does === 'write') || String(left.kind).localeCompare(String(right.kind)) || String(left.name).localeCompare(String(right.name)));
   return {site: siteName, items, notes};
 };
-var site = Object.freeze({tools: __siteToolGroup('tool'), pageTools: __siteToolGroup('pageTool'), capabilities: __siteCapabilities});
+var __siteHostName = async (site) => {
+  if (site) {
+    var text = String(site);
+    if (/^https?:/.test(text)) return new URL(text).hostname.replace(/^www\\./, '');
+    return text.replace(/^www\\./, '').split('/')[0];
+  }
+  if (!__lastTarget) throw Error('SITE_UNKNOWN: pass a site or open a tab first');
+  return new URL(String(await browser.page(__lastTarget).url())).hostname.replace(/^www\\./, '');
+};
+var __siteAbilities = {
+  run: async (name, inputs = {}, options = {}) => __call({abilityRun: {site: await __siteHostName(options.site), name, inputs, ...(options.via ? {via: options.via} : {})}}),
+  list: async (site) => __call({abilityList: {site: await __siteHostName(site)}}),
+  notes: async (site) => __call({siteNotes: await __siteHostName(site)}),
+};
+var __siteBase = {tools: __siteToolGroup('tool'), pageTools: __siteToolGroup('pageTool'), capabilities: __siteCapabilities, run: __siteAbilities.run, list: __siteAbilities.list, notes: __siteAbilities.notes};
+var site = Object.freeze(new Proxy(__siteBase, {
+  get: (target, name) => {
+    if (typeof name !== 'string' || name in target) return target[name];
+    if (name === 'then' || name === 'toJSON' || name === 'inspect') return undefined;
+    return async (inputs = {}, options = {}) => target.run(name, inputs, options);
+  },
+}));
 // Saved reads: a page whose content the agent read this cell (page.data, page.markdown,
 // page.table) has its visible text saved after the cell, so when the user comes back to it the
 // page can show what changed since. The same text the page itself compares against.
