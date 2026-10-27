@@ -147,9 +147,9 @@ browserkit federate shop.example:search other.example:search --params '{"query":
 browserkit heal shop.example              # drift, breakage, sign-out, bot walls
 ```
 
-- **Start with `site.capabilities()`** in browser code (or `browserkit capabilities <site>`): one
-  list of what already exists on the site (operations, recipes, workflows, tools, skills, WebMCP),
-  reads first.
+- **Start with `site.capabilities()`** in browser code (or `browserkit capabilities <site>`): the
+  site's abilities, mapped operations, notes and WebMCP tools in one answer. Run one with
+  `site.run(name, inputs, {via})` or `site.<name>(inputs)`.
 - **Site APIs** (or `siteMapper` in browser code) only work on sites that are mapped. Check `sites`
   first. To map a site: `map`, `describe`, `learn`, or use it in `browser_code` so its requests are
   learned as you go.
@@ -211,9 +211,10 @@ browserkit pack import shop.zip
 browserkit pack enable shop.example
 ```
 
-A pack holds the mapped site, its skills, boosts and site tools. Export strips sessions, cookies and
-credentials; import saves skills, boosts and tools **disabled** until reviewed and enabled.
-`site.tools.<name>(args)` and `site.pageTools.<name>(args)` call enabled tools in browser code.
+A pack holds the mapped site, its abilities, notes, skills and boosts. Export strips sessions,
+cookies and credentials; import enables abilities, skills, tools and boosts.
+`site.<name>(args)` runs an ability; `site.tools.<name>(args)` and `site.pageTools.<name>(args)`
+remain for old pack tools in browser code.
 
 ## Chat providers and media
 

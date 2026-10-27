@@ -333,6 +333,7 @@ async function recipe(args: Args): Promise<number> {
 export const recipeCommand: Command = {
   name: "recipe",
   group: "Use sites",
+  hidden: true,
   summary: "list, draft and run a site's named recipes",
   help: `Usage: browserkit recipe list [site] [--json]
        browserkit recipe show <site> <name> [--json]

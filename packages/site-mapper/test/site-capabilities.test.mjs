@@ -7,7 +7,7 @@ import { siteCapabilities } from "../dist/site-capabilities.js";
 
 async function writeFixture(root, site) {
   const dir = join(root, "sites", site);
-  await mkdir(join(dir, "flows"), { recursive: true });
+  await mkdir(join(dir, "abilities"), { recursive: true });
   await writeFile(
     join(dir, "model.json"),
     JSON.stringify({
@@ -37,60 +37,25 @@ async function writeFixture(root, site) {
     }),
   );
   await writeFile(
-    join(dir, "recipes.json"),
+    join(dir, "abilities", "products.json"),
     JSON.stringify({
-      version: 1,
-      recipes: [
-        {
-          version: 1,
-          name: "products",
-          site,
-          description: "List products",
-          strategies: [{ kind: "api" }],
-          params: { page: { type: "number" } },
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        },
-      ],
-    }),
-  );
-  await writeFile(
-    join(dir, "flows", "checkout.json"),
-    JSON.stringify({
-      name: "checkout",
-      file: "checkout.har",
-      recordedAt: new Date().toISOString(),
-    }),
-  );
-  await writeFile(join(dir, "flows", "checkout.har"), "{}");
-  await writeFile(
-    join(dir, "tools.json"),
-    JSON.stringify({
-      version: 1,
-      tools: [
-        {
-          name: "track",
-          description: "Track an order",
-          code: "return 1",
-          params: [],
-          enabled: true,
-        },
-      ],
-      pageTools: [],
-    }),
-  );
-  await writeFile(
-    join(dir, "learned.json"),
-    JSON.stringify({
+      name: "products",
       site,
-      note: "gate needs Accept",
-      runs: 1,
+      description: "List products",
+      kind: "read",
+      inputs: { type: "object", properties: { page: { type: "number" } } },
+      ways: [{ kind: "api", operation: "searchProducts" }],
+      options: {},
+      stats: { runs: 3, failures: 0, lastOkAt: new Date().toISOString() },
+      createdBy: "user",
+      createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     }),
   );
+  await writeFile(join(dir, "notes.md"), "# Site\n\ngate needs Accept\n");
 }
 
-test("capabilities merge operations, recipes, flows, tools and learned notes", async () => {
+test("capabilities merge abilities, operations and notes", async () => {
   const root = await mkdtemp(join(tmpdir(), "bue-caps-"));
   const old = process.env.SITE_TO_API_HOME;
   process.env.SITE_TO_API_HOME = root;
@@ -100,13 +65,17 @@ test("capabilities merge operations, recipes, flows, tools and learned notes", a
     const answer = await siteCapabilities(site);
     assert.equal(answer.site, site);
     assert.deepEqual(
-      answer.items.map((item) => item.kind),
-      ["operation", "recipe", "tool", "workflow", "operation"],
+      answer.abilities.map((ability) => ability.name),
+      ["products"],
     );
-    assert.equal(answer.items[0].does, "read");
-    assert.equal(answer.items.at(-1).does, "write");
-    assert.deepEqual(answer.items[0].capabilities, ["search"]);
-    assert.match(answer.notes[0], /gate needs Accept/);
+    assert.deepEqual(answer.abilities[0].ways, ["api"]);
+    assert.equal(answer.abilities[0].stats.runs, 3);
+    assert.deepEqual(
+      answer.operations.map((operation) => operation.name),
+      ["searchProducts", "createOrder"],
+    );
+    assert.deepEqual(answer.operations[0].capabilities, ["search"]);
+    assert.match(answer.notes, /gate needs Accept/);
   } finally {
     if (old === undefined) delete process.env.SITE_TO_API_HOME;
     else process.env.SITE_TO_API_HOME = old;

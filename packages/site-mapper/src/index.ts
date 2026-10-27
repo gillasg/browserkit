@@ -22,10 +22,10 @@ export { templatePaths } from "./infer/templates.js";
 export { detectCapabilities, capabilityIndex } from "./infer/capabilities.js";
 export {
   siteCapabilities,
-  mergeSiteCapabilities,
+  withWebMcp,
   type SiteCapabilities,
-  type SiteCapabilityItem,
-  type CapabilityKind,
+  type SiteAbilitySummary,
+  type SiteOperationSummary,
 } from "./site-capabilities.js";
 export {
   abilityDirectory,

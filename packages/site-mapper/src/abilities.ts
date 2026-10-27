@@ -359,7 +359,10 @@ async function attemptScript(
 ): Promise<unknown> {
   if (way.runtime === "page") {
     if (!host.script) throw new Error("No browser is attached for a page script");
-    return host.script(way.code, {
+    const code = /^\s*(async\s*)?\(/.test(way.code)
+      ? way.code
+      : `async (page, bu, inputs) => { ${way.code}\n return inputs; }`;
+    return host.script(code, {
       inputs,
       ...((way.input && typeof way.input === "object" ? way.input : {}) as Record<string, unknown>),
     });

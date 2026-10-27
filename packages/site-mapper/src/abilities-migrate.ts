@@ -390,11 +390,14 @@ export function abilityFromTool(
   page = false,
   sourceKind = page ? "pageTool" : "tool",
 ): AbilityDraft {
+  const code = page
+    ? `async (page, bu, inputs) => { const args = inputs; ${tool.code}\n }`
+    : tool.code;
   return {
     description: tool.description,
     kind: writeName(`${tool.name} ${tool.description ?? ""}`) ? "write" : "read",
     inputs: inputsFromToolParams(tool.params),
-    ways: [{ kind: "script", code: tool.code, runtime: page ? "page" : "node" }],
+    ways: [{ kind: "script", code, runtime: page ? "page" : "node" }],
     options: {},
     sourceKind,
   };
@@ -409,7 +412,13 @@ export function abilityFromSkill(
     description: skill.description,
     kind: "read",
     inputs: {},
-    ways: [{ kind: "script", code: skill.code ?? "", runtime: "page" }],
+    ways: [
+      {
+        kind: "script",
+        code: `async (page, bu, inputs) => { ${skill.code ?? ""}\n return inputs; }`,
+        runtime: "page",
+      },
+    ],
     options: { examples: skill.examples },
     sourceKind,
   };

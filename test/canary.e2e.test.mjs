@@ -65,7 +65,7 @@ test(
            await page.click('text=Go');
            console.log("TITLE " + (await page.title()));
            console.log("CURSOR " + (await page.evaluate(() => !!document.getElementById('aeon-agent-cursor'))));
-           console.log("CAPS " + Array.isArray((await site.capabilities()).items));`,
+           console.log("CAPS " + Array.isArray((await site.capabilities()).abilities));`,
         ],
         { env },
       );

@@ -9,10 +9,9 @@ import { markdownReport, redactedSamples } from "./emit/report.js";
 import { toYaml } from "./emit/yaml.js";
 import { checkHealth, repair } from "./health.js";
 import { loadCapture } from "./load/index.js";
-import { loadModel, readOverrides, siteName, writeOverrides } from "./registry.js";
-import { listRecipes as listSiteRecipes, type RecipeSummary } from "./recipes.js";
+import { loadModel, readOverrides, siteName } from "./registry.js";
+import { listAbilities, runAbility } from "./abilities.js";
 import type { ChannelOptions } from "./runtime/channels.js";
-import type { Params } from "./runtime/request.js";
 import { exportSession } from "./runtime/session-export.js";
 import { siteMapper } from "./runtime/site-mapper.js";
 import type { ModelLike } from "./agent.js";
@@ -23,9 +22,7 @@ import { loadFlows, rebuild } from "./workflow.js";
 
 export const SITE_TOOL_ACTIONS = [
   "docs",
-  "actions",
-  "action",
-  "recipe",
+  "ability",
   "channel",
   "session",
   "export",
@@ -43,8 +40,10 @@ export interface SiteToolInput {
   /** action: the saved action's name; channel: the channel id; signing: the operation. */
   name?: string;
   operation?: string;
-  /** action: inputs; channel: { send, seconds, match }. */
+  /** ability/action: inputs; channel: { send, seconds, match }. */
   params?: Record<string, unknown>;
+  /** ability: only try this way (api, steps, script, page). */
+  via?: "api" | "steps" | "script" | "page";
   /** actions: save a new action from these operation ids, in order. */
   steps?: string[];
   description?: string;
@@ -139,31 +138,6 @@ export async function signingInfo(site: string, operationId: string): Promise<un
   };
 }
 
-/** Site recipes: named reads/writes that live in the site pack. */
-export async function listRecipes(site: string): Promise<RecipeSummary[]> {
-  return listSiteRecipes(site);
-}
-
-async function savedActions(input: SiteToolInput): Promise<unknown> {
-  const overrides = await readOverrides(input.site);
-  if (input.name && input.steps?.length) {
-    overrides.actions = {
-      ...(overrides.actions ?? {}),
-      [input.name]: {
-        ...(input.description ? { description: input.description } : {}),
-        steps: input.steps.map((operation) => ({ operation })),
-      },
-    };
-    await writeOverrides(input.site, overrides);
-    return { saved: input.name, steps: input.steps };
-  }
-  return Object.entries(overrides.actions ?? {}).map(([name, action]) => ({
-    name,
-    description: action.description,
-    steps: action.steps.map((step) => step.operation),
-  }));
-}
-
 async function channel(input: SiteToolInput): Promise<unknown> {
   const api = await siteMapper(input.site);
   if (!input.name) return api.model.channels.map((c) => ({ id: c.id, kind: c.kind, url: c.url }));
@@ -189,16 +163,14 @@ const modelFor = async (input: SiteToolInput): Promise<ModelLike | undefined> =>
 
 const HANDLERS: Record<SiteToolAction, (input: SiteToolInput) => Promise<unknown>> = {
   docs: (input) => readDocs(input.site),
-  actions: savedActions,
-  action: async (input) =>
-    (await siteMapper(input.site)).action(
-      require(input.name, "name: the action to run"),
-      (input.params ?? {}) as Params,
-    ),
-  recipe: async (input) => {
-    if (!input.name) return listRecipes(input.site);
-    const { runSiteRecipe } = await import("./runtime/recipe-host.js");
-    return runSiteRecipe(input.site, input.name, input.params ?? {});
+  ability: async (input) => {
+    if (!input.name) return listAbilities(input.site);
+    return runAbility(
+      input.site,
+      input.name,
+      input.params ?? {},
+      input.via ? { via: input.via } : {},
+    );
   },
   channel,
   session: async (input) => {

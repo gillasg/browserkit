@@ -257,6 +257,7 @@ async function workflow(args: Args): Promise<number> {
 export const workflowCommand: Command = {
   name: "workflow",
   group: "Automate",
+  hidden: true,
   summary: "save, inspect and run a declarative browser workflow",
   help: `Usage: browserkit workflow list [--json]
        browserkit workflow show <name> [--json]

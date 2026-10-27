@@ -18,11 +18,13 @@ async function search(args: Args): Promise<number> {
       out(`${command.name.padEnd(14)} ${command.group.padEnd(12)} ${command.summary}`);
     return 0;
   }
-  const matches = COMMANDS.filter((command) =>
-    `${command.name} ${command.group} ${command.summary} ${command.help}`
-      .toLowerCase()
-      .includes(query),
-  ).map((command) => ({ name: command.name, group: command.group, summary: command.summary }));
+  const matches = COMMANDS.filter((item) => !item.hidden)
+    .filter((command) =>
+      `${command.name} ${command.group} ${command.summary} ${command.help}`
+        .toLowerCase()
+        .includes(query),
+    )
+    .map((command) => ({ name: command.name, group: command.group, summary: command.summary }));
   if (has(args, "json")) out(JSON.stringify(matches, null, 2));
   else if (!matches.length)
     out(`No command mentions ${JSON.stringify(query)}; browserkit commands lists them all.`);

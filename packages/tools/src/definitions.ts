@@ -290,6 +290,8 @@ export type SiteMapperToolInput = {
   operation?: string;
   params?: Record<string, unknown>;
   transport?: "auto" | "page" | "direct";
+  /** ability: only try this way (api, steps, script, page). */
+  via?: "api" | "steps" | "script" | "page";
   files?: string[];
   key?: string;
   grep?: string | string[];
@@ -336,6 +338,7 @@ const siteMapperParameters: JsonObjectSchema = {
     operation: { type: "string", maxLength: 200 },
     params: { type: "object" },
     transport: { type: "string", enum: ["auto", "page", "direct"] },
+    via: { type: "string", enum: ["api", "steps", "script", "page"] },
     files: {
       type: "array",
       items: { type: "string", maxLength: 500 },
@@ -357,7 +360,7 @@ const siteMapperParameters: JsonObjectSchema = {
 export const siteMapperTool: AgentToolDefinition<SiteMapperToolInput> = {
   name: "site_mapper",
   description:
-    "Call the API a site learned while you used it (actions: code, sites, operations, call, watch, action, recipe, channel), see its published docs, keep it working (heal, coverage, edit, name, describe, signing, session, export), or map sites you haven't used: by name (explore) or from capture files (import). recipe lists or runs the site's named recipes (API first, then the page). code reads routes, chunks, source maps, robots and sitemap before guessing URLs. Calls use the user's logins.",
+    "Call a site's abilities (actions: sites, operations, call, ability, watch, channel), see its published docs, keep it working (heal, coverage, edit, name, describe, signing, session, export), or map sites you haven't used: by name (explore) or from capture files (import). ability lists or runs one site ability (its API first, then replay steps, page code or node code). code reads routes, chunks, source maps, robots and sitemap before guessing URLs. Calls use the user's logins.",
   actions: [
     { name: "sites", params: [] },
     { name: "code", params: ["url", "grep", "maxFiles", "maxBytes"] },
@@ -368,9 +371,7 @@ export const siteMapperTool: AgentToolDefinition<SiteMapperToolInput> = {
     { name: "import", params: ["site", "files"] },
     { name: "explore", params: ["site", "sites", "goal", "actions"] },
     { name: "docs", params: ["site"] },
-    { name: "actions", params: ["site", "name", "steps", "description"] },
-    { name: "action", params: ["site", "name", "params"] },
-    { name: "recipe", params: ["site", "name", "params"] },
+    { name: "ability", params: ["site", "name", "params", "via"] },
     { name: "channel", params: ["site", "name", "params"] },
     { name: "session", params: ["site"] },
     { name: "export", params: ["site", "folder"] },

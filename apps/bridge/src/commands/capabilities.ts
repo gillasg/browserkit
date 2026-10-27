@@ -24,9 +24,12 @@ async function capabilities(args: Args): Promise<number> {
   const answer = await siteCapabilities(site);
   if (has(args, "json")) out(JSON.stringify(answer, null, 2));
   else {
-    out(`${answer.site}: ${answer.items.length} things`);
-    for (const item of answer.items) out(`${item.does}\t${item.kind}\t${item.name}\t${item.title}`);
-    for (const note of answer.notes) out(`note: ${note}`);
+    out(
+      `${answer.site}: ${answer.abilities.length} abilities, ${answer.operations.length} operations`,
+    );
+    for (const ability of answer.abilities)
+      out(`${ability.does}\t${ability.ways.join("+")}\t${ability.name}\t${ability.title}`);
+    if (answer.notes.trim()) out(`\n${answer.notes.trim()}`);
   }
   return 0;
 }
@@ -34,11 +37,11 @@ async function capabilities(args: Args): Promise<number> {
 export const capabilitiesCommand: Command = {
   name: "capabilities",
   group: "Sites",
-  summary: "what already exists on a site: operations, recipes, workflows, tools, skills",
+  summary: "what already exists on a site: abilities, operations and notes",
   help: `Usage: browserkit capabilities [site] [--json]
 
-Merges mapped operations (with search/list/detail/price/availability roles), recipes, recorded
-workflows, enabled site and page tools, learned notes and WebMCP tools. Reads sort before writes.
-Without a site, uses the active tab.`,
+Returns the site's abilities (name, read/write, ways, inputs, stats), mapped operations with
+their roles, the site's Markdown notes, and WebMCP tools in browser code. Without a site, uses the
+active tab.`,
   run: capabilities,
 };

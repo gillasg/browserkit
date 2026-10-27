@@ -118,16 +118,14 @@ var __siteCapabilities = async (host) => {
   var siteName = host || (url ? new URL(url).hostname.replace(/^www\\./, '') : '');
   if (!siteName) throw Error('SITE_UNKNOWN: pass a site or open a tab first');
   var base = await __call({siteCapabilities: {host: siteName}});
-  var items = Array.isArray(base && base.items) ? base.items.slice() : [];
-  var notes = Array.isArray(base && base.notes) ? base.notes.slice() : [];
-  var skills = await __siteSkills(url || ('https://' + siteName)).catch(() => []);
-  for (var skill of Array.isArray(skills) ? skills : [])
-    items.push({kind: 'skill', name: String(skill.name), title: String(skill.description || skill.name), does: 'read', inputs: [], how: 'script', source: 'site-skill'});
   var webmcp = __lastTarget ? await browser.page(__lastTarget).webmcp.list().catch(() => ({tools: []})) : {tools: []};
-  for (var tool of (webmcp && webmcp.tools) || [])
-    items.push({kind: 'webmcp', name: String(tool.name), title: String(tool.description || tool.name), does: 'read', inputs: [], how: 'page', source: 'webmcp'});
-  items.sort((left, right) => Number(left.does === 'write') - Number(right.does === 'write') || String(left.kind).localeCompare(String(right.kind)) || String(left.name).localeCompare(String(right.name)));
-  return {site: siteName, items, notes};
+  return {
+    site: siteName,
+    abilities: Array.isArray(base && base.abilities) ? base.abilities : [],
+    operations: Array.isArray(base && base.operations) ? base.operations : [],
+    notes: String((base && base.notes) || ''),
+    webmcp: (webmcp && webmcp.tools) || [],
+  };
 };
 var __siteHostName = async (site) => {
   if (site) {

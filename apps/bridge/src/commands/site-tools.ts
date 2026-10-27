@@ -57,6 +57,7 @@ function paramsOf(args: Args): Record<string, unknown> {
 export const siteToolsCommand: Command = {
   name: "site",
   group: "Use a site",
+  hidden: true,
   summary: "saved site tools, page tools and their code",
   help: `Usage: browserkit site tools <action> <site> [name] [--params '<json>'] [--json]
 

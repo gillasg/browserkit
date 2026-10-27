@@ -1,141 +1,87 @@
-// One answer for "what can be done on this site", merging the stores that already exist. Reads
-// come first so a model reaching for a site sees search/list/detail before writes.
+// One answer for what can be done on a site: its abilities, the mapped operations they can use,
+// and the site's notes. WebMCP tools are added by the browser runtime, which can see the page.
+
+import { listAbilities, readSiteNotes } from "./abilities.js";
 import { capabilityIndex } from "./infer/capabilities.js";
 import { inputParams } from "./params.js";
-import { listRecipes } from "./recipes.js";
-import { listFlows, loadModel } from "./registry.js";
-import { listSiteTools } from "./site-tools.js";
-import { learnedHint, readLearned } from "./learned.js";
-import { siteName } from "./registry.js";
+import { loadModel, siteName } from "./registry.js";
 
-export type CapabilityKind =
-  "operation" | "recipe" | "workflow" | "tool" | "pageTool" | "skill" | "webmcp";
-
-export interface SiteCapabilityItem {
-  kind: CapabilityKind;
+export interface SiteAbilitySummary {
   name: string;
   title: string;
   does: "read" | "write";
   inputs: string[];
-  how: "api" | "page" | "script";
-  source: string;
-  /** Operation roles such as search/list/detail/price/availability. */
+  ways: string[];
+  stats?: { runs: number; failures: number; lastOkAt?: string; lastUsedAt?: string };
+}
+
+export interface SiteOperationSummary {
+  name: string;
+  title: string;
+  does: "read" | "write";
+  inputs: string[];
   capabilities?: string[];
 }
 
 export interface SiteCapabilities {
   site: string;
-  items: SiteCapabilityItem[];
-  notes: string[];
-}
-
-type Model = NonNullable<Awaited<ReturnType<typeof loadModel>>>;
-type Tools = Awaited<ReturnType<typeof listSiteTools>>;
-type Recipe = Awaited<ReturnType<typeof listRecipes>>[number];
-type Flow = Awaited<ReturnType<typeof listFlows>>[number];
-
-function writeNamed(value: string): boolean {
-  return /\b(write|create|add|send|post|delete|remove|update|edit|checkout|purchase|buy|book|pay|save|submit)\b/i.test(
-    value,
-  );
-}
-
-function does(name: string, description?: string): "read" | "write" {
-  return writeNamed(`${name} ${description ?? ""}`) ? "write" : "read";
-}
-
-function operationItems(operations: Model["operations"]): SiteCapabilityItem[] {
-  const roles = new Map<string, string[]>();
-  for (const [capability, ids] of Object.entries(capabilityIndex(operations)))
-    for (const id of ids ?? []) roles.set(id, [...(roles.get(id) ?? []), capability]);
-  return operations.map((operation) => {
-    const tags = roles.get(operation.id);
-    return {
-      kind: "operation",
-      name: operation.id,
-      title: operation.summary ?? operation.id,
-      does: operation.role === "read" ? "read" : "write",
-      inputs: inputParams(operation).map((param) => param.name),
-      how: "api",
-      source: "site-mapper",
-      ...(tags?.length ? { capabilities: tags } : {}),
-    };
-  });
-}
-
-const recipeItem = (recipe: Recipe): SiteCapabilityItem => ({
-  kind: "recipe",
-  name: recipe.name,
-  title: recipe.description ?? recipe.name,
-  does: does(recipe.name, recipe.description),
-  inputs: recipe.params,
-  how: recipe.strategies.includes("page") ? "page" : "api",
-  source: "recipe",
-});
-
-const flowItem = (flow: Flow): SiteCapabilityItem => ({
-  kind: "workflow",
-  name: flow.meta.name,
-  title: flow.meta.description ?? flow.meta.name,
-  does: "read",
-  inputs: [],
-  how: "script",
-  source: "flow",
-});
-
-function toolItems(tools: Tools): SiteCapabilityItem[] {
-  const one = (tool: Tools["tools"][number], kind: "tool" | "pageTool"): SiteCapabilityItem => ({
-    kind,
-    name: tool.name,
-    title: tool.description ?? tool.name,
-    does: does(tool.name, tool.description),
-    inputs: tool.params.map((param) => param.name),
-    how: kind === "tool" ? "script" : "page",
-    source: "site-tool",
-  });
-  return [
-    ...tools.tools.filter((tool) => tool.enabled).map((tool) => one(tool, "tool")),
-    ...tools.pageTools.filter((tool) => tool.enabled).map((tool) => one(tool, "pageTool")),
-  ];
-}
-
-function sortItems(items: SiteCapabilityItem[]): SiteCapabilityItem[] {
-  return items.sort(
-    (left, right) =>
-      Number(left.does === "write") - Number(right.does === "write") ||
-      left.kind.localeCompare(right.kind) ||
-      left.name.localeCompare(right.name),
-  );
+  abilities: SiteAbilitySummary[];
+  operations: SiteOperationSummary[];
+  notes: string;
 }
 
 /** The merged inventory for a site. Missing stores simply contribute nothing. */
 export async function siteCapabilities(site: string): Promise<SiteCapabilities> {
   const host = siteName(site);
-  const [model, recipes, flows, tools, learned] = await Promise.all([
+  const [abilities, notes, model] = await Promise.all([
+    listAbilities(host).catch(() => []),
+    readSiteNotes(host).catch(() => ""),
     loadModel(host).catch(() => undefined),
-    listRecipes(host).catch(() => []),
-    listFlows(host).catch(() => []),
-    listSiteTools(host).catch(() => ({ tools: [], pageTools: [] })),
-    readLearned(host).catch(() => undefined),
   ]);
-  const items = [
-    ...operationItems(model?.operations ?? []),
-    ...recipes.map(recipeItem),
-    ...flows.map(flowItem),
-    ...toolItems(tools as Tools),
-  ];
-  const hint = learnedHint(learned);
-  return { site: host, items: sortItems(items), notes: hint ? [hint] : [] };
+  const operations = model?.operations ?? [];
+  const index = capabilityIndex(operations);
+  const roles = new Map<string, string[]>();
+  for (const [capability, ids] of Object.entries(index))
+    for (const id of ids ?? []) roles.set(id, [...(roles.get(id) ?? []), capability]);
+  return {
+    site: host,
+    abilities: abilities.map((ability) => ({
+      name: ability.name,
+      title: ability.description ?? ability.name,
+      does: ability.kind,
+      inputs: Object.keys((ability.inputs.properties ?? {}) as Record<string, unknown>),
+      ways: ability.ways.map((way) => way.kind),
+      stats: ability.stats,
+    })),
+    operations: operations.map((operation) => ({
+      name: operation.id,
+      title: operation.summary ?? operation.id,
+      does: operation.role === "read" ? "read" : "write",
+      inputs: inputParams(operation).map((param) => param.name),
+      ...(roles.get(operation.id)?.length ? { capabilities: roles.get(operation.id) } : {}),
+    })),
+    notes,
+  };
 }
 
-/** Merge Aeon's skills and the page's WebMCP tools into the same answer. */
-export function mergeSiteCapabilities(
+/** Merge WebMCP tools the page exposes into the same answer. */
+export function withWebMcp(
   base: SiteCapabilities,
-  extra: { items?: SiteCapabilityItem[]; notes?: string[] } = {},
+  tools: { name: string; description?: string }[],
 ): SiteCapabilities {
+  const clean = tools.filter((tool) => tool.name);
+  if (!clean.length) return base;
   return {
-    site: base.site,
-    items: sortItems([...base.items, ...(extra.items ?? [])]),
-    notes: [...new Set([...base.notes, ...(extra.notes ?? [])])],
+    ...base,
+    abilities: [
+      ...base.abilities,
+      ...clean.map((tool) => ({
+        name: tool.name,
+        title: tool.description ?? tool.name,
+        does: "read" as const,
+        inputs: [],
+        ways: ["webmcp"],
+      })),
+    ],
   };
 }

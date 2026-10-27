@@ -7,6 +7,8 @@ export interface Command {
   summary: string;
   /** Printed by `browserkit <command> --help`. */
   help: string;
+  /** Kept for callers but not listed in usage. */
+  hidden?: boolean;
   run(args: Args): Promise<number>;
 }
 
@@ -14,18 +16,15 @@ const PROGRAM = "browserkit";
 
 /** Short answers for `browserkit help <topic>`, so the full explanation is a command away. */
 export const HELP_TOPICS: Record<string, string> = {
-  workflows: `Workflows (browserkit workflow *)
-A workflow is saved JSON: typed inputs, templated arguments ({{inputs.x}}, {{steps.id.field}}),
-repeat/each/until, retries, delays, conditional steps, dry-run, on-error. Actions: goto, wait,
-read, extract, collect, click, fill, press, api, assert, save, sleep. Run one with
-  browserkit workflow run <name> --inputs '{"url":"https://example.com"}'
-and see what happened with "workflow runs <name>".`,
-  recipes: `Recipes (browserkit recipe *)
-A recipe is one named way to read or write a site, stored in its site pack. Strategies run in
-order: the captured API with cursor paging, then the page (row selector plus field specs), then
-a script. Records are mapped, filtered and de-duplicated; writes keep receipts. Install the
-built-in pack with "recipe install x.com", draft one from a mapped site with "recipe draft
-<site> --save", then "recipe run <site> <name> --feed".`,
+  abilities: `Abilities (browserkit abilities *)
+An ability is one named thing a site can do, read or write. It is tried as an API call/chain, a
+saved replay of steps, page code or node code, in that order unless --via picks one. Abilities
+carry inputs (JSON schema), run/failure stats and notes.md beside them in the site pack.
+  browserkit abilities list [site]
+  browserkit abilities show <site> <name>
+  browserkit abilities run <site> <name> --inputs '{"q":"lamps"}'
+Old recipes, actions, workflows and site tools migrate once into abilities; their command names
+remain as hidden aliases for one release.`,
   sessions: `Sessions (browserkit sessions *)
 A named session owns one quiet tab or its own window, runs its cells in the order sent, and
 reports live tabs, busy cells and queued work. create/ensure/reopen/info/cleanup/delete; the name
@@ -57,7 +56,8 @@ export function commandHelp(command: Command, program = PROGRAM): string {
   return program === PROGRAM ? help : help.replace(/\bbrowserkit\b/g, program);
 }
 
-export function usageText(commands: Command[], program = PROGRAM): string {
+export function usageText(allCommands: Command[], program = PROGRAM): string {
+  const commands = allCommands.filter((command) => !command.hidden);
   const groups = [...new Set(commands.map((command) => command.group))];
   const lines = [
     `${program}: let agents use your real Chrome, and turn sites into APIs and data.`,
