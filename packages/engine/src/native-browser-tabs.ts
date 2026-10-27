@@ -12,7 +12,6 @@ import {
 import { ensureAgentTabsRestored, mineTabIds } from "./native-browser-tab-cleanup.js";
 import { safePage, sameTarget } from "./native-browser-common.js";
 import { controlOf } from "./native-browser-control.js";
-import { isSharedBrowserTab } from "./native-browser-session.js";
 import { ensureSpacesRestored, labelOf } from "./native-browser-spaces.js";
 
 // Listing tabs as Chrome has them now. `mine` marks this session's tabs; another session's tab is
@@ -26,8 +25,7 @@ export async function listTabs(request: BrowserExecutorRequest): Promise<Browser
   const mine = new Set(mineTabIds(request.chatId));
   const tabs = currentInventoryTabs()
     .filter((tab) => safePage(tab.url))
-    .filter((tab) => !step?.mine || mine.has(tab.target.tabId))
-    .filter((tab) => !step?.shared || isSharedBrowserTab(tab.target.tabId));
+    .filter((tab) => !step?.mine || mine.has(tab.target.tabId));
   const filtered = query
     ? tabs.filter((tab) => `${tab.title} ${tab.url}`.toLowerCase().includes(query.toLowerCase()))
     : tabs;

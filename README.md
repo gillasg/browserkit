@@ -156,7 +156,8 @@ with `workflow export/import` and `recipe export/import`.
   Chrome has no per-tab proxy, so an extension cannot block a hostname that resolves private
   before the first connection: the network store marks such a response with `privateNetwork`
   when it comes back from a private `remoteIPAddress`, which reports DNS rebinding instead of
-  silently allowing it.
+  silently allowing it. A request that resolves private only after the preflight can still reach
+  the network; it is reported after the first response, not blocked before it.
 
 ## How it fits together
 

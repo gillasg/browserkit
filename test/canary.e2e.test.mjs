@@ -1,10 +1,10 @@
-// One targeted real-Chrome check: a short flight recording is saved as a non-trivial WebM.
+// Per-push canary: the shortest real-Chrome path through the bridge, sandbox and one click.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn, execFile } from "node:child_process";
 import { createServer } from "node:http";
 import { existsSync } from "node:fs";
-import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -19,25 +19,21 @@ const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
 const run = promisify(execFile);
 
 test(
-  "the last seconds of an agent tab save as a WebM",
-  {
-    skip:
-      !process.env.REQUIRE_E2E &&
-      (!existsSync(chromePath) || !existsSync(extension) || !existsSync(cli)),
-  },
+  "canary: sandbox and one click",
+  { skip: !process.env.REQUIRE_E2E && !existsSync(chromePath) },
   async () => {
-    const home = await mkdtemp(join(tmpdir(), "bue-flight-"));
+    const home = await mkdtemp(join(tmpdir(), "bue-canary-"));
     const env = { ...process.env, BROWSERKIT_HOME: home, SITE_TO_API_HOME: join(home, "s2a") };
     const site = createServer((_request, response) => {
       response.setHeader("content-type", "text/html");
       response.end(
-        `<title>Flight</title><h1 id="tick">0</h1><script>let n=0;setInterval(()=>{n++;document.getElementById('tick').textContent=String(n)},150)</script>`,
+        "<title>Canary</title><button id='go' onclick=\"document.title='clicked'\">Go</button>",
       );
     });
     await new Promise((done) => site.listen(0, "127.0.0.1", done));
     const url = `http://127.0.0.1:${site.address().port}/`;
     const bridge = spawn(process.execPath, [cli, "serve"], { env, stdio: "ignore" });
-    const profile = await mkdtemp(join(tmpdir(), "bue-flight-chrome-"));
+    const profile = await mkdtemp(join(tmpdir(), "bue-canary-chrome-"));
     let chrome;
     try {
       await waitFor(async () => JSON.parse(await readFile(join(home, "bridge.json"), "utf8")));
@@ -57,33 +53,27 @@ test(
         { stdio: "ignore" },
       );
       await connectExtension(profile, env);
-      const { stdout } = await run(
+      const result = await run(
         process.execPath,
         [
           cli,
           "repl",
           "--session",
-          "flight",
-          `
-          page = await browser.openTab(${JSON.stringify(url)});
-          await page.waitForTimeout(2600);
-          const saved = await page.flight.save();
-          console.log("FLIGHT " + JSON.stringify(saved));`,
+          "canary",
+          `page = await browser.openTab(${JSON.stringify(url)});
+           console.log("SUM " + (1 + 1));
+           await page.click('text=Go');
+           console.log("TITLE " + (await page.title()));`,
         ],
         { env },
       );
-      const saved = JSON.parse(/FLIGHT (\{.*)/.exec(stdout)?.[1] ?? "{}");
-      assert.ok(saved.path, stdout);
-      const info = await stat(saved.path);
-      assert.equal(info.isFile(), true);
-      assert.ok(info.size > 1000, `WebM was ${info.size} bytes`);
-      assert.ok(Number(saved.frames) >= 3, JSON.stringify(saved));
-      assert.ok(Number(saved.durationMs) >= 1500, JSON.stringify(saved));
+      assert.match(result.stdout, /SUM 2/);
+      assert.match(result.stdout, /TITLE clicked/);
     } finally {
       chrome?.kill();
       bridge.kill();
       site.close();
-      await sleep(300);
+      await sleep(200);
       await rm(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }).catch(
         () => {},
       );
@@ -92,6 +82,7 @@ test(
       );
     }
   },
+  60000,
 );
 
 async function connectExtension(profile, env) {
@@ -123,10 +114,9 @@ async function connectExtension(profile, env) {
     const { stdout } = await run(process.execPath, [cli, "status"], { env });
     if (!/1 browser/.test(stdout)) throw new Error(stdout);
   }, 30000);
-  return cdp;
 }
 
-function nativeBootstrap(env, message) {
+function nativeBootstrap(env) {
   return new Promise((resolveReply, reject) => {
     const host = spawn(
       process.execPath,
@@ -143,14 +133,12 @@ function nativeBootstrap(env, message) {
       resolveReply(JSON.parse(buffer.subarray(4, 4 + buffer.readUInt32LE(0)).toString("utf8")));
     });
     const body = Buffer.from(
-      JSON.stringify(
-        message ?? {
-          kind: "native.bootstrap",
-          protocolVersion: { major: 1, minor: 6 },
-          clientInstanceId: "091b9308-1ee9-420e-b71f-a564a5a27701",
-          browserRunId: "3ee7ba6e-5aad-4692-9e4e-fb4cff0964f8",
-        },
-      ),
+      JSON.stringify({
+        kind: "native.bootstrap",
+        protocolVersion: { major: 1, minor: 6 },
+        clientInstanceId: "091b9308-1ee9-420e-b71f-a564a5a27701",
+        browserRunId: "3ee7ba6e-5aad-4692-9e4e-fb4cff0964f8",
+      }),
     );
     const header = Buffer.alloc(4);
     header.writeUInt32LE(body.length, 0);
@@ -166,7 +154,7 @@ async function waitFor(check, timeout = 15000) {
       return await check();
     } catch (error) {
       last = error;
-      await sleep(150);
+      await sleep(100);
     }
   }
   throw last ?? new Error("timed out");
@@ -184,9 +172,8 @@ function connect(url) {
   const opened = new Promise((done) => socket.once("open", done));
   return async (method, params = {}) => {
     await opened;
-    return new Promise((done) => {
-      waiting.set(++id, done);
-      socket.send(JSON.stringify({ id, method, params }));
-    });
+    const callId = ++id;
+    socket.send(JSON.stringify({ id: callId, method, params }));
+    return new Promise((done) => waiting.set(callId, done));
   };
 }

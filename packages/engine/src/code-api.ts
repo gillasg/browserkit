@@ -108,7 +108,6 @@ var browser = Object.freeze({
       var result = await __step({op:'listTabs',
         ...(options.query ? {query: options.query} : {}),
         ...(options.mine === true ? {mine:true} : {}),
-        ...(options.shared === true ? {shared:true} : {}),
         ...(options.all === true ? {all:true} : {})});
       __focusedWindowId = result.focusedWindowId;
       var listed = result.tabs.map(tab => __listedTab(__compactTab(tab)));
@@ -484,27 +483,18 @@ var browser = Object.freeze({
     getByText: (value, options = {}) => __locator(target,__withOptions({kind:'query',by:'text',value:String(value)}, options)),
     getByLabel: (value, options = {}) => __locator(target,__withOptions({kind:'query',by:'label',value:String(value)}, options)),
     getByPlaceholder: (value, options = {}) => __locator(target,__withOptions({kind:'query',by:'placeholder',value:String(value)}, options)),
-    press: (element, key, options = {}) => __press(target, __element(target, element), key, options),
+    press: (element, key, options = {}) => __press(target, __element(target, element), key, options, __locatorFor(target, element) || undefined),
     screenshot: (options = {}) => options.labels ? __labeledScreenshot(target) : __step({op:'observe', target, kind:'screenshot'}),
     diffScreenshot: (baseline, options = {}) => __diffScreenshot(target, baseline, options),
     recordDemonstration: (options = {}) => __recordDemonstration(target, options),
-    click: (element) => __step({op:'click',target,element:__wire(__element(target,element)),observe:false}),
-    fill: (element, value) => __step({op:'fill',target,element:__wire(__element(target,element)),value:String(value),observe:false}),
+    click: (element) => { var loc = __locatorFor(target, element); return loc ? loc.click() : __step({op:'click',target,element:__wire(__element(target,element)),observe:false}); },
+    fill: (element, value) => { var loc = __locatorFor(target, element); return loc ? loc.fill(value) : __step({op:'fill',target,element:__wire(__element(target,element)),value:String(value),observe:false}); },
     paste: (element, html, text = '') => __step({op:'paste',target,element:__wire(__element(target,element)),html:String(html),text:String(text || html.replace(/<[^>]+>/g, ' ')),observe:false}),
     evaluate: async (fn, arg) => (await __step({op:'evaluate',target,expression:__expression(fn,arg)})).data.value,
     control: async () => (await __step({op:'control', target, action:'status'})).data,
     waitForControl: async (options = {}) =>
       (await __step({op:'control', target, action:'wait', timeoutMs: Math.min(Number(options.timeoutMs ?? options.timeout ?? 30000) || 0, 120000)})).data,
     giveBack: async () => (await __step({op:'control', target, action:'giveback'})).data,
-    flight: Object.freeze({
-      save: async (options = {}) => {
-        var recording = (await __step({op:'flight', target, action:'save'})).data;
-        if (!recording || !recording.data) throw Error('FLIGHT_EMPTY: no frames were recorded for this tab');
-        return __call({flight:{tabId: target.tabId, data: recording.data, frames: recording.frames, durationMs: recording.durationMs, startedAt: recording.startedAt, ...(options.name ? {name: String(options.name)} : {})}});
-      },
-      status: async () => (await __step({op:'flight', target, action:'status'})).data,
-      clear: async () => (await __step({op:'flight', target, action:'clear'})).data,
-    }),
     inspect: async (fn, arg) => (await __step({op:'evaluate',target,expression:__expression(fn,arg)},true)).data.value,
     // Functions the page exposes on window, with their arity: what a page script can be built on.
     functions: async () => browser.page(target).inspect(__pageFunctions),

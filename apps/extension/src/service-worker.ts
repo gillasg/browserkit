@@ -23,8 +23,6 @@ import {
   resetRealm,
   scheduleExecutorReconnect,
   startExecutorHeartbeat,
-  shareBrowserTab,
-  isSharedBrowserTab,
   synchronizeBrowserInventory,
   type BrowserIdentity,
 } from "@browserkit/engine";
@@ -57,19 +55,6 @@ installNativeStartup(ensureConnection, () => scheduleExecutorReconnect(ensureCon
 // Status for the toolbar popup and the welcome page.
 chrome.runtime.onMessage.addListener((message, sender, reply) => {
   if (sender.id !== chrome.runtime.id) return;
-  if (message?.kind === "bue.tabState") {
-    reply({ shared: isSharedBrowserTab(Number(message.tabId)) });
-    return true;
-  }
-  if (message?.kind === "bue.shareTab") {
-    const tabId = Number(message.tabId);
-    const shared = !isSharedBrowserTab(tabId);
-    shareBrowserTab(tabId, shared);
-    void chrome.action.setBadgeText({ tabId, text: shared ? "ON" : "" });
-    void chrome.action.setBadgeBackgroundColor({ tabId, color: shared ? "#22c55e" : "#4299ff" });
-    reply({ shared });
-    return true;
-  }
   if (message?.kind !== "bue.status") return;
   void ensureConnection().then(
     () => reply({ connected: true }),

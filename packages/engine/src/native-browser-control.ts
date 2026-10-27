@@ -1,6 +1,5 @@
 import { onEngineInstall } from "./native-engine-install.js";
 import { onBrowserDebuggerAttached, browserSessionOwner } from "./native-browser-session.js";
-import { stopFlight } from "./native-browser-flight.js";
 
 // Who is driving a tab. CDP's Input events are trusted, just like a real click, so the engine
 // records the moments it is dispatching input; a trusted event outside those moments came from
@@ -75,7 +74,6 @@ export function noteUserInput(tabId: number, at: number): void {
   if (!browserSessionOwner(tabId) || handoffActive(tabId) || agentInput(tabId, at)) return;
   if (controlled.has(tabId)) return;
   controlled.set(tabId, { at, reported: false });
-  void stopFlight(tabId);
   void injectTop(tabId, controlBanner);
   notify(tabId, "user");
 }
@@ -104,9 +102,10 @@ export function forgetControl(tabId: number): void {
 }
 
 function notify(tabId: number, control: "agent" | "user"): void {
-  // Hosts (Aeon) can show a line about it; a context with no listener ignores this.
+  // Hosts (Aeon) can show a line about it; the chatId routes it to that chat only.
+  const chatId = browserSessionOwner(tabId);
   void chrome.runtime
-    .sendMessage({ kind: "browserkit.control", tabId, control })
+    .sendMessage({ kind: "browserkit.control", tabId, control, ...(chatId ? { chatId } : {}) })
     .catch(() => undefined);
 }
 

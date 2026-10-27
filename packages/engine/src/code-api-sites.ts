@@ -107,42 +107,6 @@ function __siteToolGroup(kind) {
   });
 }
 var site = Object.freeze({tools: __siteToolGroup('tool'), pageTools: __siteToolGroup('pageTool')});
-// Named secret profiles: run a Node script with the profile values in BK_* variables. The host
-// scrubs every value from the output before it reaches this result.
-var secrets = Object.freeze({run: (name, script) => __call({secrets: {action: 'run', name, script}})});
-
-// The here: line at the top of bu.state(): what already exists for this page and site (its
-// embedded data, the API the site learned, its boosts), printed only when it changes, so the
-// agent reaches for them without being told twice.
-var __hereShown = new Map(), __siteFacts = new Map();
-async function __here(target, url) {
-  var host; try { host = new URL(String(url)).hostname.replace(/^www\\./, ''); } catch { return ''; }
-  var parts = [], data = await __fastProbe(target, url);
-  if (data) parts.push(data);
-  var facts = __siteFacts.get(host);
-  if (!facts || Date.now() - facts.at > 60000) {
-    var operations = await __call({siteMapper: 'operations', site: host}).catch(() => []);
-    var tools = await __call({siteTool: {action: 'summary', url}}).catch(() => ({tools: [], pageTools: []}));
-    var boosts = await browser.boosts.list(String(url)).catch(() => []);
-    facts = {at: Date.now(), operations: Array.isArray(operations) ? operations : [], boosts: Array.isArray(boosts) ? boosts : [], tools: tools || {tools: [], pageTools: []}};
-    __siteFacts.set(host, facts);
-  }
-  if (facts.operations.length) {
-    var reads = facts.operations.filter(op => !op.writes).map(op => op.id), writes = facts.operations.filter(op => op.writes).map(op => op.id);
-    parts.push('site API (siteMapper.call): ' + reads.slice(0, 6).join(', ') + (reads.length > 6 ? ' +' + (reads.length - 6) : '') + (writes.length ? ' · writes: ' + writes.slice(0, 4).join(', ') : ''));
-  }
-  var doc = await __call({siteDoc: {url}}).catch(() => null);
-  if (doc?.actions?.length) parts.push("agent manifest: " + doc.actions.length + " actions");
-  var webmcp = await browser.page(target).webmcp.list().catch(() => ({tools: []}));
-  if (webmcp?.tools?.length) parts.push("webmcp: " + webmcp.tools.length + " tool(s) (" + webmcp.tools.slice(0, 3).map((t) => t.name).join(", ") + ")");
-  if (facts.tools?.tools?.length || facts.tools?.pageTools?.length)
-    parts.push('site tools: ' + [...(facts.tools.tools || []), ...(facts.tools.pageTools || [])].slice(0, 8).join(', '));
-  if (facts.boosts.length) parts.push('boosts: ' + facts.boosts.slice(0, 3).map(b => b.name).join(', '));
-  var text = parts.length ? 'here: ' + parts.join(' · ') : '';
-  if (!text || __hereShown.get(host) === text) return '';
-  __hereShown.set(host, text);
-  return text;
-}
 // Saved reads: a page whose content the agent read this cell (page.data, page.markdown,
 // page.table) has its visible text saved after the cell, so when the user comes back to it the
 // page can show what changed since. The same text the page itself compares against.

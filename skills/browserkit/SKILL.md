@@ -93,10 +93,6 @@ const rows = await page.list("tr"); // every row, scrolling lists that draw lazi
   `.claim()` leaves the whole space to the user; `.spaces()` lists sessions and their status. Tabs
   carry stable labels (`p1`, `p2…`) in `browser.tabs()` and `bu.use("p2")`, re-bound by URL after
   a browser restart.
-- `page.flight.save()` writes the last two minutes of the tab as WebM under `BROWSERKIT_HOME/flight`
-  (or `--out`), returning its path, frame count and duration. A failed cell saves one automatically
-  and names the files in its result; `browserkit repl --no-flight` turns recording off for a run.
-  `page.flight.status()` says what is buffered; `clear()` drops it.
 
 ## Reading pages
 
@@ -109,9 +105,6 @@ row of a list (it scrolls lists that only draw what is on screen; check `complet
 The site's own API next; your own DOM or network code last. Never parse `__NEXT_DATA__` or
 `innerText` by hand. Large scripts or responses: fetch once and keep the text in a top-level
 variable, which persists between cells; never refetch them each cell.
-
-A site used before has a `here:` line at the top of `bu.state()`: its learned API, boosts and
-embedded data. Use them before clicking.
 
 ## Forms and overlays
 
@@ -309,10 +302,6 @@ Saved tools are callable helpers beside the model: `browserkit site tools list <
 them, `run <site> <name> --params '<json>'` runs a Node tool, and `enable|disable` manages their
 code. Use `site.tools.<name>(args)` and `site.pageTools.<name>(args)` in browser code for the
 current host.
-
-Named secret profiles keep the sign-in headers and cookies of a site encrypted for the current
-user: `browserkit secrets save <name> --site <host>`, `list`, `run <name> --script <file|->`
-(with values in `BK_*` variables and output redacted), and `delete`.
 
 ## Chat providers and media
 

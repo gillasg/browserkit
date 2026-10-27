@@ -17,10 +17,6 @@
       "types": "./dist/browser-crawl.d.ts",
       "import": "./dist/browser-crawl.js"
     },
-    "./secrets": {
-      "types": "./dist/secrets.d.ts",
-      "import": "./dist/secrets.js"
-    },
     "./host": {
       "types": "./dist/host.d.ts",
       "import": "./dist/host.js"

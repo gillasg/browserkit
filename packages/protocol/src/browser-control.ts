@@ -20,7 +20,6 @@ export const BrowserStepSchema = z.discriminatedUnion("op", [
       op: z.literal("listTabs"),
       query: z.string().max(160).optional(),
       mine: z.boolean().optional(),
-      shared: z.boolean().optional(),
       all: z.boolean().optional(),
     })
     .strict(),

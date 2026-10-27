@@ -3,6 +3,7 @@ import { currentFocusedWindowId } from "./native-inventory-client.js";
 import { releaseBrowserSessions } from "./native-browser-session.js";
 import { forgetAgentTab, mineTabIds } from "./native-browser-tab-cleanup.js";
 import { controlOf, handoffActive } from "./native-browser-control.js";
+import { ownerTitle } from "./native-browser-owner.js";
 
 // A session's tabs live either in the user's window (an interactive chat) or in one window of
 // their own (sweeps, jobs, outside clients), created behind the user's window and kept normal so
@@ -96,6 +97,19 @@ export function noteSpace(chatId: string, space: SpaceKind, windowId?: number): 
   else if (windowId !== undefined) record.windowId = windowId;
   spaces.set(chatId, record);
   save();
+  notifySpaces();
+}
+
+export function touchSpace(chatId: string): void {
+  const record = spaces.get(chatId);
+  if (!record) return;
+  record.updatedAt = Date.now();
+  save();
+}
+
+async function notifySpaces(): Promise<void> {
+  const spaces = await listSpaces().catch(() => []);
+  void chrome.runtime.sendMessage({ kind: "browserkit.spaces", spaces }).catch(() => undefined);
 }
 
 /** One window per session, reused; created behind the user's window and never minimized. */
@@ -183,9 +197,11 @@ export interface SpaceSummary {
   chatId: string;
   space: SpaceKind;
   windowId?: number;
+  title: string;
   tabs: number;
   labels: string[];
   status: "running" | "waiting" | "user" | "idle";
+  lastActiveAt: number;
 }
 
 export async function listSpaces(): Promise<SpaceSummary[]> {
@@ -203,9 +219,11 @@ export async function listSpaces(): Promise<SpaceSummary[]> {
       chatId: record.chatId,
       space: record.space,
       ...(record.windowId !== undefined ? { windowId: record.windowId } : {}),
+      title: ownerTitle(record.chatId) ?? record.chatId,
       tabs: tabs.length,
       labels: record.labels.map((entry) => entry.label),
       status,
+      lastActiveAt: record.updatedAt,
     };
   });
 }
@@ -250,6 +268,7 @@ export async function finishSpace(
   await releaseBrowserSessions(chatId, true);
   spaces.delete(chatId);
   save();
+  notifySpaces();
   return { kept, closed };
 }
 
@@ -261,10 +280,25 @@ export async function claimSpace(chatId: string): Promise<{ tabs: number }> {
   await releaseBrowserSessions(chatId, true);
   spaces.delete(chatId);
   save();
+  notifySpaces();
   return { tabs: tabs.length };
 }
 
+async function closeIdleWindows(): Promise<void> {
+  await ensureSpacesRestored();
+  const now = Date.now();
+  for (const [chatId, record] of spaces) {
+    if (record.space !== "window" || now - record.updatedAt < 10 * 60_000) continue;
+    await finishSpace(chatId, []).catch(() => undefined);
+  }
+}
+
 onEngineInstall(() => {
+  chrome.alarms.create("browserkit-spaces-idle", { periodInMinutes: 1 });
+  chrome.alarms.onAlarm.addListener((alarm) => {
+    if (alarm.name !== "browserkit-spaces-idle") return;
+    void closeIdleWindows();
+  });
   chrome.tabs.onRemoved.addListener((tabId) => {
     let changed = false;
     for (const record of spaces.values()) {

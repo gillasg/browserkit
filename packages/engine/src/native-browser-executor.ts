@@ -46,14 +46,14 @@ import { showAgentCaption } from "./native-browser-cursor.js";
 import { openTab } from "./native-browser-open-tab.js";
 import { attachTab, hostOf, isLivePage, listTabs } from "./native-browser-tabs.js";
 import { handleCdpMessage, noteCdpSocket } from "./native-browser-cdp.js";
-import { handleBrowserViewMessage, installBrowserView } from "./native-browser-view.js";
 import { handleBrowserDnsMessage, installBrowserDns } from "./native-browser-dns.js";
 import { guardPrivateTab } from "./native-browser-private-rules.js";
-import { unparkAgentTab } from "./native-browser-park.js";
-import { withManualScreencast } from "./native-browser-flight.js";
+import { handlesHostPlumbing, hostPlumbing } from "./native-browser-host-plumbing.js";
+import { touchSpace } from "./native-browser-spaces.js";
+import { withManualScreencast } from "./native-browser-screencast.js";
 import { injectedScripts, judgeStealth, noteInjectedScript, type StealthProbe } from "./stealth.js";
 import { controlError, controlOf, stepInput } from "./native-browser-control.js";
-import { controlOrSessionStep, flightStep } from "./native-browser-extra-session.js";
+import { controlOrSessionStep } from "./native-browser-extra-session.js";
 import {
   clearReadOnly,
   isReadOnly,
@@ -205,7 +205,6 @@ type ExtraRequest = BrowserExecutorRequest & {
         | "stealth"
         | "control"
         | "session"
-        | "flight"
         | "siteScript"
         | "popups"
         | "evaluate"
@@ -239,9 +238,6 @@ export async function performExtra(
   } else if (step.op === "control" || step.op === "session") {
     await revalidate(request, tabId);
     data = await controlOrSessionStep(step, request.chatId);
-  } else if (step.op === "flight") {
-    await revalidate(request, tabId);
-    data = await flightStep(step, tabId);
   } else if (step.op === "siteScript") {
     await revalidate(request, tabId);
     data = await executeSiteScript(step.action, tabId, step.definition, step.scriptId, () =>
@@ -306,8 +302,7 @@ export async function performExtra(
   if (!tab || !sameTarget(tab.target, request.step.target) || !safePage(tab.url))
     throw new Error("TARGET_LOST");
   const encoded = JSON.stringify(data);
-  // A flight recording is a whole WebM file; other results stay small enough for one message.
-  if (encoded && encoded.length > (step.op === "flight" ? 60_000_000 : 1_000_000))
+  if (encoded && encoded.length > 1_000_000)
     throw new BrowserActionError(
       "UNSUPPORTED",
       "Result exceeds its size limit; extract in smaller batches and save artifacts.",
@@ -456,10 +451,12 @@ export function handleBrowserExecutorMessage(
   candidate: unknown,
 ): boolean {
   noteCdpSocket(socket, identity);
-  installBrowserView(socket);
   installBrowserDns(socket);
   if (handleBrowserDnsMessage(candidate)) return true;
-  if (handleBrowserViewMessage(candidate as Record<string, unknown>)) return true;
+  if (handlesHostPlumbing(candidate)) {
+    void hostPlumbing(candidate, socket);
+    return true;
+  }
   if (handleCdpMessage(candidate)) return true;
   if (handleScriptSync(candidate) || handleBrowserRelease(candidate)) return true;
   const request = BrowserExecutorRequestSchema.safeParse(candidate);
@@ -543,10 +540,10 @@ async function executeStep(
     throw new Error("READ_ONLY: this tab was claimed for reading only");
   const tab = await assertTarget(request);
   bindBrowserSession(step.target.tabId, request.chatId);
+  touchSpace(request.chatId);
   // One step per tab at a time, and writes one at a time browser-wide: two sessions cannot type
   // into each other's page, and a session's own steps keep their order.
   return scheduleStep(step, step.target.tabId, async () => {
-    await unparkAgentTab(step.target.tabId);
     stepInput(step.target.tabId, true);
     try {
       return await dispatchStep(request, step, tab);
@@ -655,7 +652,6 @@ function isExtraStep(step: BrowserStep): step is Extract<
       | "stealth"
       | "control"
       | "session"
-      | "flight"
       | "siteScript"
       | "popups"
       | "evaluate"
@@ -678,7 +674,6 @@ function isExtraStep(step: BrowserStep): step is Extract<
     "stealth",
     "control",
     "session",
-    "flight",
     "siteScript",
     "popups",
     "evaluate",

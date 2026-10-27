@@ -215,6 +215,16 @@ export async function humanType(debuggee: chrome.debugger.Debuggee, text: string
     await chrome.debugger.sendCommand(debuggee, "Input.insertText", { text });
     return;
   }
+  // Long text is sent in chunks with pacing between chunks, not per character.
+  if (text.length > 120) {
+    for (let index = 0; index < text.length; index += 32) {
+      await paceKey(debuggee);
+      await chrome.debugger.sendCommand(debuggee, "Input.insertText", {
+        text: text.slice(index, index + 32),
+      });
+    }
+    return;
+  }
   for (const char of text) {
     await paceKey(debuggee);
     await chrome.debugger.sendCommand(debuggee, "Input.insertText", { text: char });

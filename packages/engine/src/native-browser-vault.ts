@@ -27,6 +27,25 @@ export type VaultAsk = (request: unknown) => Promise<unknown>;
 
 const candidates = new Map<number, VaultCandidate>();
 const MAX_AGE = 15 * 60_000;
+const NEVER_SAVE = "vault-never-save";
+
+/** Sites the user told Aeon never to save passwords for. */
+export async function vaultNeverSaveSites(): Promise<string[]> {
+  const saved = (await chrome.storage.local.get(NEVER_SAVE).catch(() => ({}))) as Record<
+    string,
+    unknown
+  >;
+  return Array.isArray(saved[NEVER_SAVE])
+    ? (saved[NEVER_SAVE] as unknown[]).map(String).filter(Boolean)
+    : [];
+}
+
+async function neverSave(site: string): Promise<boolean> {
+  const host = site.toLowerCase().replace(/^www\./, "");
+  return (await vaultNeverSaveSites()).some(
+    (entry) => host === entry || host.endsWith("." + entry),
+  );
+}
 
 const PROBE = `(() => {
   const shown = (el) => {
@@ -147,6 +166,7 @@ export async function finishVaultCapture(
     return;
   }
   candidates.delete(tabId);
+  if (await neverSave(candidate.site || new URL(candidate.url).hostname)) return;
   if (candidate.signup) await saveVaultCandidate(candidate, ask);
   else void promptVaultSave(tabId, candidate, ask, active);
 }

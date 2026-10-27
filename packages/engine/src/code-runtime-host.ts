@@ -43,8 +43,6 @@ import {
 } from "./native-browser-tab-cleanup.js";
 import { setOwnerTitle } from "./native-browser-owner.js";
 import { disableQuietTab, enableQuietTab } from "./native-browser-quiet.js";
-import { saveFlight } from "./native-browser-flight.js";
-import { setFlightAllowed } from "./native-browser-flight.js";
 import { networkCall } from "./native-browser-network.js";
 import { mediaCall, type MediaRequest } from "./native-browser-media.js";
 import { isLibraryRequest, libraryCall } from "./native-browser-library.js";
@@ -141,7 +139,6 @@ export async function resetRealm(chatId: string): Promise<void> {
 
 async function startCell(identity: BrowserIdentity, socket: WebSocket, run: BrowserCodeRun) {
   setOwnerTitle(run.chatId, run.ownerTitle);
-  setFlightAllowed(run.chatId, run.flight !== false);
   const allowed = new Map(run.targets.map((target) => [targetIdentity(target), target]));
   const cell: Cell = {
     run,
@@ -197,35 +194,12 @@ function finish(
   if (cell.done) return;
   cell.done = true;
   if (cell.progressTimer) clearTimeout(cell.progressTimer);
-  if (!result.error) {
-    finalize(cell, result, []);
-    return;
-  }
-  // A failed run keeps its last two minutes: encode for the tabs it opened, save through the host,
-  // and name the file in the result so a chat can link it.
-  void attachFlights(cell)
-    .then((flights) => finalize(cell, result, flights))
-    .catch(() => finalize(cell, result, []));
-}
-
-async function attachFlights(cell: Cell): Promise<Record<string, unknown>[]> {
-  if (cell.run.flight === false) return [];
-  const tabs = [...new Set([...cell.opened.values()].map((target) => target.tabId))].slice(0, 4);
-  const saved: Record<string, unknown>[] = [];
-  for (const tabId of tabs) {
-    const encoded = await saveFlight(tabId).catch(() => undefined);
-    if (!encoded) continue;
-    const written = (await callCore(cell, { flight: encoded }).catch(() => undefined)) as
-      Record<string, unknown> | undefined;
-    if (written) saved.push(written);
-  }
-  return saved;
+  finalize(cell, result);
 }
 
 function finalize(
   cell: Cell,
   result: { value?: unknown; output?: string; error?: string; reset?: boolean },
-  flights: Record<string, unknown>[],
 ): void {
   cells.delete(cell.run.cellId);
   void releaseTabs(cell.guarded);
@@ -256,7 +230,6 @@ function finalize(
     ...(result.value !== undefined ? { value: result.value } : {}),
     ...(result.error ? { error: result.error.slice(0, 20000) } : {}),
     ...(result.reset ? { reset: true } : {}),
-    ...(flights.length ? { flight: flights } : {}),
     steps: cell.steps.slice(-MAX_TRACE),
     ms: Math.max(0, Date.now() - (cell.startedAt ?? Date.now())),
     opened: [...cell.opened.values()],
@@ -663,9 +636,7 @@ const MAX_MESSAGE_CHARS = 3_500_000;
 function send(socket: WebSocket, message: unknown): boolean {
   if (socket.readyState !== WebSocket.OPEN) return false;
   let text = JSON.stringify(message);
-  const limit = Array.isArray((message as { flight?: unknown }).flight)
-    ? 80_000_000
-    : MAX_MESSAGE_CHARS;
+  const limit = MAX_MESSAGE_CHARS;
   if (text.length > limit) {
     const result = message as { kind?: string; value?: unknown; steps?: unknown[] };
     if (result.kind !== "browser.code.result") return false;

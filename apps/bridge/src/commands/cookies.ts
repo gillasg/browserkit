@@ -108,64 +108,10 @@ async function remove(args: Args): Promise<number> {
   return 0;
 }
 
-import { readCookies, type CookieSource } from "../cookie-import.js";
-
-async function importCookies(args: Args): Promise<number> {
-  const from = flag(args, "from") as CookieSource["from"] | undefined;
-  const profile = flag(args, "profile");
-  const domains = args.flags.domain ? String(args.flags.domain).split(",") : [];
-  if (!from || !["firefox", "edge", "brave", "opera"].includes(from) || !profile)
-    throw new Error(
-      "Usage: browserkit cookies import --from firefox|edge|brave|opera --profile <name> --domain <host> [--include-session] [--dry-run] [--json]",
-    );
-  const source: CookieSource = {
-    from,
-    profile,
-    domains: domains.filter(Boolean),
-    includeSession: has(args, "include-session"),
-  };
-  const read = await readCookies(source);
-  const result = {
-    imported: 0,
-    skipped: 0,
-    skippedV20: read.skippedV20,
-    skippedEncrypted: read.skippedEncrypted,
-    errors: [] as string[],
-  };
-  const dry = has(args, "dry-run");
-  if (!dry) {
-    const bridge = await BridgeClient.connect();
-    try {
-      for (const cookie of read.cookies) {
-        const reply = await bridge.request("run", {
-          session: SESSION,
-          code: `const tabs = await browser.tabs();
-                 if (tabs[0]) await browser.attachTab(tabs[0].target);
-                 browser.cookies.set(${JSON.stringify(cookie)})`,
-        });
-        if (reply.error) {
-          result.skipped += 1;
-          result.errors.push(String(reply.error));
-        } else result.imported += 1;
-      }
-    } finally {
-      bridge.close();
-    }
-  } else result.skipped = read.cookies.length;
-  if (has(args, "json")) out(JSON.stringify(result));
-  else {
-    out(
-      `${result.imported} imported, ${result.skipped} skipped, skipped v20: ${result.skippedV20}`,
-    );
-  }
-  return 0;
-}
-
 async function cookies(args: Args): Promise<number> {
   const action = args.positional[0] ?? "list";
   if (action === "list") return list(args);
   if (action === "set") return set(args);
-  if (action === "import") return importCookies(args);
   if (action === "clear") return clear(args);
   if (action === "delete" || action === "remove") return remove(args);
   throw new Error("Usage: browserkit cookies list|set|clear|delete [--domain <host>] [--json]");
@@ -179,9 +125,6 @@ export const cookiesCommand: Command = {
        browserkit cookies set --domain <host> --name <name> --value <value> [--path /] [--secure] [--http-only]
        browserkit cookies delete --name <name> --domain <host> [--json]
        browserkit cookies clear --domain <host> [--json]
-       browserkit cookies import --from firefox|edge|brave|opera --profile <name> --domain a,b [--include-session] [--dry-run] [--json]
-
-For import, --domain takes one comma-separated list or repeated --domain flags; both are the same.
 
 Values are hidden unless --values is passed, so a listing does not put a session token in your
 terminal by accident. Uses the open browser; the active tab is only borrowed to answer.`,

@@ -63,10 +63,31 @@ test(
       const denied = await fetch(`${info.url}/json/version`);
       assert.equal(denied.status, 401);
 
+      const user = await run(
+        process.execPath,
+        [
+          cli,
+          "repl",
+          "--session",
+          "other",
+          `page = await browser.openTab(${JSON.stringify(`${url}?user`)});
+           console.log("USER " + JSON.stringify((await browser.tabs()).find((tab) => tab.url.includes("?user"))));`,
+        ],
+        { env },
+      );
+      assert.match(user.stdout, /USER/, user.stdout + user.stderr);
       const browser = await chromium.connectOverCDP(info.connectUrl, { timeout: 30_000 });
       try {
         const context = browser.contexts()[0];
         assert.ok(context, "a default context");
+        const session = await browser.newBrowserCDPSession();
+        const targets = await session.send("Target.getTargets");
+        const userTarget = targets.targetInfos.find((item) => item.url.includes("?user"));
+        assert.ok(userTarget, "the other session's tab is visible to the CDP client");
+        await assert.rejects(
+          session.send("Target.closeTarget", { targetId: userTarget.targetId }),
+          /TAB_NOT_YOURS/,
+        );
         const page = await context.newPage();
         await page.goto(url);
         assert.equal(await page.evaluate(() => document.title), "CDP page");
@@ -75,7 +96,6 @@ test(
         assert.ok(shot.length > 100);
         await page.close();
 
-        const session = await browser.newBrowserCDPSession();
         await assert.rejects(session.send("Browser.close"), /not supported/);
         await assert.rejects(session.send("Network.clearBrowserCookies"), /not allowed/);
 
@@ -86,7 +106,7 @@ test(
       }
       await waitFor(async () => {
         const tabs = await fetch(`http://127.0.0.1:${chromePort}/json/list`).then((r) => r.json());
-        if (tabs.some((tab) => tab.url.startsWith(url))) throw new Error("client tab still open");
+        if (tabs.some((tab) => tab.url.includes("?left"))) throw new Error("client tab still open");
       });
     } finally {
       chrome?.kill();

@@ -64,6 +64,8 @@ export const browserCapabilitySteps = [
       toY: z.number().finite().min(0).max(50000).optional(),
     })
     .strict(),
-  z.object({ op: z.literal("keys"), target, keys: z.string().min(1).max(120), ...frame }).strict(),
+  z
+    .object({ op: z.literal("keys"), target, keys: z.string().min(1).max(20000), ...frame })
+    .strict(),
   z.object({ op: z.literal("reconnect"), target }).strict(),
 ] as const;

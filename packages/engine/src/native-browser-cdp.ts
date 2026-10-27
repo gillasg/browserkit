@@ -5,7 +5,8 @@ import {
   ensureBrowserAttachment,
   holdBrowserDebugger,
 } from "./native-browser-session.js";
-import { refreshInventoryTab } from "./native-inventory-client.js";
+import { currentInventoryTabs, refreshInventoryTab } from "./native-inventory-client.js";
+import { browserSessionOwner } from "./native-browser-session.js";
 import { claimAgentTab, groupAgentTab } from "./native-browser-groups.js";
 import { markAgentTabGrouped, trackAgentTab } from "./native-browser-tab-cleanup.js";
 import { noteLabel, noteSpace, spaceWindow } from "./native-browser-spaces.js";
@@ -45,6 +46,10 @@ export function handleCdpMessage(candidate: unknown): boolean {
     void closeTab(String(message.id ?? ""), Number(message.tabId), String(message.chatId ?? ""));
     return true;
   }
+  if (message.kind === "cdp.listTabs") {
+    void listTabs(String(message.id ?? ""));
+    return true;
+  }
   if (message.kind === "cdp.release") {
     const tabId = Number(message.tabId);
     enabled.delete(tabId);
@@ -79,6 +84,31 @@ async function runCommand(
       params,
     );
     send({ kind: "cdp.result", id, result });
+  } catch (error) {
+    send({
+      kind: "cdp.result",
+      id,
+      error: String(error instanceof Error ? error.message : error).slice(0, 4000),
+    });
+  }
+}
+
+async function listTabs(id: string): Promise<void> {
+  try {
+    const tabs = [];
+    for (const tab of currentInventoryTabs()) {
+      if (!/^https?:/i.test(tab.url)) continue;
+      tabs.push({
+        tabId: tab.target.tabId,
+        targetId: await realTargetId(tab.target.tabId),
+        url: tab.url,
+        title: tab.title,
+        ...(browserSessionOwner(tab.target.tabId)
+          ? { owner: browserSessionOwner(tab.target.tabId) }
+          : {}),
+      });
+    }
+    send({ kind: "cdp.result", id, result: { tabs } });
   } catch (error) {
     send({
       kind: "cdp.result",

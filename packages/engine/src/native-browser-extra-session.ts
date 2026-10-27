@@ -3,7 +3,6 @@ import { BrowserActionError } from "./native-browser-common.js";
 import { controlOf, giveBack, waitForGiveBack } from "./native-browser-control.js";
 import { claimSpace, finishSpace, listSpaces, resolveLabel } from "./native-browser-spaces.js";
 import { refreshInventoryTab } from "./native-inventory-client.js";
-import { clearFlight, flightStatus, saveFlight } from "./native-browser-flight.js";
 
 type ControlStep = Extract<BrowserStep, { op: "control" | "session" }>;
 
@@ -38,14 +37,4 @@ export async function controlOrSessionStep(step: ControlStep, chatId: string): P
     return { label: step.label, tab };
   }
   return { spaces: await listSpaces() };
-}
-
-/** The flight steps: encode the ring buffer, report it, or drop it. */
-export async function flightStep(
-  step: Extract<BrowserStep, { op: "flight" }>,
-  tabId: number,
-): Promise<unknown> {
-  if (step.action === "save") return saveFlight(tabId);
-  if (step.action === "status") return flightStatus(tabId);
-  return clearFlight(tabId);
 }

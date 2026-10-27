@@ -10,7 +10,6 @@ import { currentInventoryTabs } from "./native-inventory-client.js";
 import { tidyAllChatTabs, tidyChatTabs, touchAgentTab } from "./native-browser-tab-cleanup.js";
 import type { BrowserExecutorRequest } from "@browserkit/protocol";
 import { onEngineInstall } from "./native-engine-install.js";
-import { startFlight, stopFlight } from "./native-browser-flight.js";
 
 interface Attachment {
   chatId: string;
@@ -19,7 +18,6 @@ interface Attachment {
 }
 const attachments = new Map<number, Attachment>();
 const owners = new Map<number, string>();
-const shared = new Set<number>();
 const cancelled = new Map<number, string | undefined>();
 const closing = new Map<number, Promise<void>>();
 /** Tabs that must stay attached while idle, e.g. while their network traffic is being recorded. */
@@ -57,7 +55,6 @@ onEngineInstall(() => {
     emulated.delete(tabId);
     forget(tabId);
     owners.delete(tabId);
-    shared.delete(tabId);
     cancelled.delete(tabId);
   });
 });
@@ -68,16 +65,6 @@ export function browserSessionTabs(chatId?: string): number[] {
 }
 export function browserSessionOwner(tabId: number): string | undefined {
   return owners.get(tabId);
-}
-
-export function shareBrowserTab(tabId: number, value: boolean): void {
-  if (value) shared.add(tabId);
-  else shared.delete(tabId);
-  persistBrowserOwners(owners);
-}
-
-export function isSharedBrowserTab(tabId: number): boolean {
-  return shared.has(tabId);
 }
 
 export function bindBrowserSession(tabId: number, chatId: string): void {
@@ -134,7 +121,6 @@ async function runWithBrowserDebugger<T>(
     await entry.attached;
     touchAgentTab(tabId);
     await ensureBrowserViewport(tabId);
-    void startFlight(tabId, chatId);
     if (attachments.get(tabId) !== entry) throw new Error("OPERATION_FAILED");
     if (entry.timer !== undefined) clearTimeout(entry.timer);
     entry.timer = globalThis.setTimeout(() => idleDetach(tabId), 90_000);
@@ -173,7 +159,6 @@ export async function releaseBrowserSessions(chatId?: string, reset = false): Pr
   for (const [tabId] of tabs) {
     void removeAgentCursor(tabId);
     owners.delete(tabId);
-    shared.delete(tabId);
     if (reset || !chatId) cancelled.delete(tabId);
     await detach(tabId);
   }
@@ -181,7 +166,6 @@ export async function releaseBrowserSessions(chatId?: string, reset = false): Pr
 }
 
 function forget(tabId: number): void {
-  void stopFlight(tabId);
   const entry = attachments.get(tabId);
   if (entry?.timer !== undefined) clearTimeout(entry.timer);
   attachments.delete(tabId);
@@ -250,7 +234,7 @@ export function persistBrowserOwners(owners: Map<number, string>): void {
   const tabs = currentInventoryTabs();
   const records = [...owners].flatMap(([tabId, chatId]) => {
     const tab = tabs.find((item) => item.target.tabId === tabId);
-    return tab ? [{ chatId, target: tab.target, shared: shared.has(tabId) }] : [];
+    return tab ? [{ chatId, target: tab.target }] : [];
   });
   writes = writes
     .catch(() => undefined)
@@ -260,13 +244,12 @@ export function persistBrowserOwners(owners: Map<number, string>): void {
 export async function restoreBrowserOwners(owners: Map<number, string>): Promise<void> {
   if (!chrome.storage?.session) return;
   const stored = (await chrome.storage.session.get(key))[key] as
-    { chatId: string; target: unknown; shared?: boolean }[] | undefined;
+    { chatId: string; target: unknown }[] | undefined;
   const tabs = currentInventoryTabs();
   for (const record of stored ?? []) {
     const tab = tabs.find((item) => JSON.stringify(item.target) === JSON.stringify(record.target));
     if (tab && !owners.has(tab.target.tabId)) {
       owners.set(tab.target.tabId, record.chatId);
-      if (record.shared) shared.add(tab.target.tabId);
     }
   }
 }

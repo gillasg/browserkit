@@ -37,6 +37,11 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm lint
       - run: pnpm build
+      - name: Canary
+        run: node --test test/canary.e2e.test.mjs
+        env:
+          CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
+          REQUIRE_E2E: "1"
       - run: pnpm test:boosts
       - run: pnpm test:site-mapper
       - run: pnpm test:crawl

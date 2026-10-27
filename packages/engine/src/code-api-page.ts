@@ -227,6 +227,15 @@ function __element(target, element) {
   return node.backendNodeId && !node.frame ? {kind:'backend',backendNodeId:node.backendNodeId,documentEpoch:state.documentEpoch}
     : {kind:'ref',snapshotId:state.snapshotId,ref:node.ref};
 }
+// XPath and filtered shorthands cannot travel in the engine's element schema; use a page-side
+// locator (the indexed path) instead.
+function __locatorFor(target, element) {
+  if (typeof element !== 'string') return null;
+  var parsed = __parseSelector(element);
+  return parsed.spec.by === 'xpath' || parsed.index !== undefined || parsed.spec.filters || parsed.spec.scopeSpec
+    ? __locator(target, parsed.spec, parsed.index === undefined ? 0 : parsed.index)
+    : null;
+}
 // Many controls with the same role and name (YouTube's 40 "Action menu" buttons) print as one
 // line with all their ids, instead of 40 near-identical lines.
 function __repeats(nodes) {
@@ -334,8 +343,6 @@ var bu = Object.freeze({
     var text = __formatState(state, options.max, final);
     var loaded = await __autoLoadSkills(state.url);
     if (loaded) text = loaded + '\\n' + text;
-    var here = await __here(target, state.url);
-    if (here) text = here + String.fromCharCode(10) + text;
     var challenge = await __challengeNote(target, state.url);
     if (challenge) text = challenge + String.fromCharCode(10) + text;
     console.log(text);
@@ -360,16 +367,6 @@ var bu = Object.freeze({
   },
   // The user clicked or typed in this tab: the agent is paused until they give it back.
   control: async () => (await __step({op:'control', target, action:'status'})).data,
-  // A low-frame-rate recording of the last two minutes, kept in the offscreen document.
-  flight: Object.freeze({
-    save: async (options = {}) => {
-      var recording = (await __step({op:'flight', target, action:'save'})).data;
-      if (!recording || !recording.data) throw Error('FLIGHT_EMPTY: no frames were recorded for this tab');
-      return __call({flight:{tabId: target.tabId, data: recording.data, frames: recording.frames, durationMs: recording.durationMs, startedAt: recording.startedAt, ...(options.name ? {name: String(options.name)} : {})}});
-    },
-    status: async () => (await __step({op:'flight', target, action:'status'})).data,
-    clear: async () => (await __step({op:'flight', target, action:'clear'})).data,
-  }),
   waitForControl: async (options = {}) =>
     (await __step({op:'control', target, action:'wait', timeoutMs: Math.min(Number(options.timeoutMs ?? options.timeout ?? 30000) || 0, 120000)})).data,
   giveBack: async () => (await __step({op:'control', target, action:'giveback'})).data,

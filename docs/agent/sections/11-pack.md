@@ -16,7 +16,3 @@ Saved tools are callable helpers beside the model: `browserkit site tools list <
 them, `run <site> <name> --params '<json>'` runs a Node tool, and `enable|disable` manages their
 code. Use `site.tools.<name>(args)` and `site.pageTools.<name>(args)` in browser code for the
 current host.
-
-Named secret profiles keep the sign-in headers and cookies of a site encrypted for the current
-user: `browserkit secrets save <name> --site <host>`, `list`, `run <name> --script <file|->`
-(with values in `BK_*` variables and output redacted), and `delete`.

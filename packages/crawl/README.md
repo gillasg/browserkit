@@ -37,7 +37,7 @@ const page = await scrape("https://shop.example/p/lamp", { formats: ["markdown",
 | `map <url>`                      | A fast list of a site's URLs from its sitemaps and links. `--search` ranks them by a phrase.                           |
 | `crawl <url>`                    | A whole site, or the part you choose. Ctrl+C pauses; `--resume` continues.                                             |
 | `crawl --prompt "<request>"`     | Describe the crawl in plain English (needs a model).                                                                   |
-| `crawl --api <site>:<operation>` | Every item of a paginated operation of a site mapped with site-to-api (needs a host that installs the adapter).                    |
+| `crawl --api <site>:<operation>` | Every item of a paginated operation of a site mapped with site-to-api (needs a host that installs the adapter).        |
 | `sync <url> <folder>`            | A Markdown mirror that only re-fetches pages that changed and removes pages that are gone.                             |
 | `search "<query>"`               | Google in your browser (your region and language). `--scrape` reads the results too.                                   |
 | `find "<query>"`                 | Build a list: search, keep results that meet `--criteria`, fill `--columns name,founded=year founded` (needs a model). |

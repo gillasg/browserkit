@@ -3,16 +3,6 @@ import { learnAbout, readLearned, learnedHint } from "@browserkit/site-mapper";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { handleCredentialRequest, isCredentialRequest } from "@browserkit/credentials";
 import {
-  deleteSecretProfile,
-  isSecretRequest,
-  listSecretProfiles,
-  runSecretScript,
-  saveSecretProfile,
-  type SecretRequest,
-  type SecretValues,
-} from "./secrets.js";
-import { isSiteDocRequest, siteDoc } from "./site-doc.js";
-import {
   isSiteToolRequest,
   listSiteTools,
   readPageTool,
@@ -138,41 +128,13 @@ export function createHostHandler(
   return (request, context) => {
     if (isCredentialRequest(request)) return handleCredentialRequest(request, home);
     if (isSiteRulesRequest(request)) return answerSiteRules(context, options, home);
-    if (isFlightRequest(request)) return saveFlightRecording(request, home);
     if (isSiteToolRequest(request)) return handleSiteTool(request);
-    if (isSecretRequest(request)) return handleSecretRequest(request, home);
-    if (isSiteDocRequest(request)) return siteDoc(String(request.siteDoc.url ?? ""));
     if (isLearnRequest(request)) return answerLearn(request);
     if (isLearnedRequest(request)) return answerLearned(request);
     if (isSiteMapperRequest(request))
       return options.siteMapper?.(request, context) ?? handleSiteMapperRequest(request);
     return options.extra?.(request, context);
   };
-}
-
-interface FlightRequest {
-  flight: {
-    tabId?: unknown;
-    data?: unknown;
-    frames?: unknown;
-    durationMs?: unknown;
-    startedAt?: unknown;
-    name?: unknown;
-  };
-}
-
-export function isFlightRequest(value: unknown): value is FlightRequest {
-  return Boolean(value && typeof (value as { flight?: unknown }).flight === "object");
-}
-
-async function handleSecretRequest(request: SecretRequest, home: string): Promise<unknown> {
-  const { action, name, script, values } = request.secrets;
-  const profileName = String(name ?? "");
-  if (action === "list") return listSecretProfiles(home);
-  if (action === "run") return runSecretScript(profileName, String(script ?? ""), home);
-  if (action === "delete") return { deleted: await deleteSecretProfile(profileName, home) };
-  if (action === "save") return saveSecretProfile(profileName, values as SecretValues, home);
-  throw new Error(`SECRET_ACTION_UNKNOWN: ${String(action)}`);
 }
 
 interface SiteToolRequest {
@@ -209,36 +171,6 @@ function siteNameFrom(request: SiteToolRequest["siteTool"]): string {
   } catch {
     return value.replace(/^https?:\/\//, "").split("/")[0] ?? "";
   }
-}
-
-/** Writes a saved flight recording under BROWSERKIT_HOME/flight and returns its path. */ async function saveFlightRecording(
-  request: FlightRequest,
-  home: string,
-): Promise<unknown> {
-  const flight = request.flight;
-  const data = typeof flight.data === "string" ? flight.data : "";
-  if (!data) throw new Error("FLIGHT_EMPTY: no frames were recorded");
-  const tabId = Number(flight.tabId);
-  const folder = join(home, "flight");
-  await mkdir(folder, { recursive: true });
-  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const given =
-    typeof flight.name === "string" ? flight.name.replace(/[^\w.-]+/g, "-").slice(0, 80) : "";
-  const name = given
-    ? given.endsWith(".webm")
-      ? given
-      : `${given}.webm`
-    : `${stamp}-${tabId}.webm`;
-  const path = join(folder, name);
-  const bytes = Buffer.from(data, "base64");
-  await writeFile(path, bytes);
-  return {
-    path,
-    bytes: bytes.length,
-    frames: Number(flight.frames ?? 0),
-    durationMs: Number(flight.durationMs ?? 0),
-    startedAt: Number(flight.startedAt ?? 0),
-  };
 }
 
 /** What a run learned about a site, kept in the site's pack (see site-mapper's learned.ts). */

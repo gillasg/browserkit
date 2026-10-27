@@ -14,11 +14,13 @@ export interface CdpTab {
   targetId: string;
   url: string;
   title: string;
+  owner?: string;
 }
 
 export interface CdpAdapter {
   openTab(session: string, url: string): Promise<CdpTab>;
   closeTab(session: string, tabId: number): Promise<void>;
+  listTabs(): Promise<CdpTab[]>;
   command(
     session: string,
     tabId: number,
@@ -47,6 +49,7 @@ interface Client {
   session: string;
   socket: WebSocket;
   targets: Map<number, CdpTab>;
+  owned: Set<number>;
   roots: Map<number, string>;
   sessions: Map<string, SessionRoute>;
   announced: Set<number>;
@@ -155,7 +158,7 @@ export class CdpServer {
       });
     }
     if (url.pathname === "/json/list" || url.pathname === "/json") {
-      return json(response, this.allTargets());
+      return json(response, await this.allTargets());
     }
     if (url.pathname === "/json/new") {
       if (request.method !== "PUT" && request.method !== "GET")
@@ -199,6 +202,7 @@ export class CdpServer {
       session: `cdp-${randomUUID()}`,
       socket,
       targets: new Map(),
+      owned: new Set(),
       roots: new Map(),
       sessions: new Map(),
       announced: new Set(),
@@ -271,17 +275,19 @@ export class CdpServer {
       throw new Error("Browser.close is not supported; close the agent tab instead");
     if (method === "Target.setDiscoverTargets") {
       client.discovered = params.discover !== false;
-      if (client.discovered)
-        for (const tab of client.targets.values()) this.targetCreated(client, tab);
+      if (client.discovered) {
+        for (const tab of await this.refreshTargets(client)) this.targetCreated(client, tab);
+      }
       return {};
     }
     if (method === "Target.setAutoAttach") {
       client.autoAttach = params.autoAttach !== false;
-      if (client.autoAttach) for (const tab of client.targets.values()) this.announce(client, tab);
+      if (client.autoAttach)
+        for (const tab of await this.refreshTargets(client)) this.announce(client, tab);
       return {};
     }
     if (method === "Target.getTargets")
-      return { targetInfos: [...client.targets.values()].map(targetInfo) };
+      return { targetInfos: (await this.refreshTargets(client)).map(targetInfo) };
     if (method === "Target.getBrowserContexts") return { browserContextIds: [CONTEXT] };
     if (method === "Target.createBrowserContext")
       throw new Error("Browser contexts are not supported; use Target.createTarget");
@@ -291,6 +297,7 @@ export class CdpServer {
       const url = String(params.url ?? "about:blank");
       const tab = await this.adapter.openTab(client.session, url);
       client.targets.set(tab.tabId, tab);
+      client.owned.add(tab.tabId);
       this.targetCreated(client, tab);
       if (client.autoAttach) this.announce(client, tab);
       return { targetId: tab.targetId };
@@ -298,6 +305,8 @@ export class CdpServer {
     if (method === "Target.closeTarget") {
       const found = this.clientTarget(client, String(params.targetId ?? ""));
       if (!found) throw new Error(`Target not found: ${String(params.targetId ?? "")}`);
+      if (!client.owned.has(found.tabId))
+        throw new Error("TAB_NOT_YOURS: this client did not open that tab");
       await this.adapter.closeTab(client.session, found.tabId);
       this.forget(client, found.tabId);
       return { success: true };
@@ -442,15 +451,20 @@ export class CdpServer {
     return undefined;
   }
 
-  private allTargets(): unknown[] {
+  private async refreshTargets(client: Client): Promise<CdpTab[]> {
+    const tabs = await this.adapter.listTabs().catch(() => [] as CdpTab[]);
     const seen = new Set<number>();
-    const tabs: CdpTab[] = [];
-    for (const client of this.clients)
-      for (const tab of client.targets.values())
-        if (!seen.has(tab.tabId)) {
-          seen.add(tab.tabId);
-          tabs.push(tab);
-        }
+    for (const tab of tabs) {
+      client.targets.set(tab.tabId, tab);
+      seen.add(tab.tabId);
+    }
+    for (const tabId of [...client.targets.keys()])
+      if (!seen.has(tabId) && !client.owned.has(tabId)) client.targets.delete(tabId);
+    return [...client.targets.values()];
+  }
+
+  private async allTargets(): Promise<unknown[]> {
+    const tabs = await this.adapter.listTabs().catch(() => [] as CdpTab[]);
     return tabs.map(targetInfo);
   }
 
@@ -462,9 +476,12 @@ export class CdpServer {
   }
 
   private async closeClientTabs(client: Client): Promise<void> {
-    for (const tab of [...client.targets.values()])
-      await this.adapter.closeTab(client.session, tab.tabId).catch(() => undefined);
+    for (const tabId of [...client.owned]) {
+      const tab = client.targets.get(tabId);
+      if (tab) await this.adapter.closeTab(client.session, tab.tabId).catch(() => undefined);
+    }
     client.targets.clear();
+    client.owned.clear();
     client.roots.clear();
     client.sessions.clear();
   }
