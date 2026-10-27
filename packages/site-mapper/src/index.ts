@@ -20,6 +20,13 @@ export { inputParams, documentedParams, isDerived } from "./params.js";
 export { inferSchema } from "./infer/schema.js";
 export { templatePaths } from "./infer/templates.js";
 export { detectCapabilities, capabilityIndex } from "./infer/capabilities.js";
+export {
+  siteCapabilities,
+  mergeSiteCapabilities,
+  type SiteCapabilities,
+  type SiteCapabilityItem,
+  type CapabilityKind,
+} from "./site-capabilities.js";
 export { volatileFields, type VolatileField, type VolatileReason } from "./infer/volatile.js";
 export { extractEmbedded } from "./infer/html.js";
 export { toOpenApi, toAsyncApi } from "./emit/openapi.js";

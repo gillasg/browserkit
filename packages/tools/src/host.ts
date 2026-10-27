@@ -13,6 +13,7 @@ import {
   bridgeDataDirectory,
   handleSiteMapperRequest,
   isSiteMapperRequest,
+  siteCapabilities,
 } from "@browserkit/site-mapper";
 
 // One answer for what a browser cell asks the machine: a login from the password manager, the
@@ -129,12 +130,24 @@ export function createHostHandler(
     if (isCredentialRequest(request)) return handleCredentialRequest(request, home);
     if (isSiteRulesRequest(request)) return answerSiteRules(context, options, home);
     if (isSiteToolRequest(request)) return handleSiteTool(request);
+    if (isSiteCapabilitiesRequest(request))
+      return siteCapabilities(String(request.siteCapabilities.host ?? ""));
     if (isLearnRequest(request)) return answerLearn(request);
     if (isLearnedRequest(request)) return answerLearned(request);
     if (isSiteMapperRequest(request))
       return options.siteMapper?.(request, context) ?? handleSiteMapperRequest(request);
     return options.extra?.(request, context);
   };
+}
+
+interface SiteCapabilitiesRequest {
+  siteCapabilities: { host?: unknown };
+}
+
+function isSiteCapabilitiesRequest(value: unknown): value is SiteCapabilitiesRequest {
+  return Boolean(
+    value && typeof (value as { siteCapabilities?: unknown }).siteCapabilities === "object",
+  );
 }
 
 interface SiteToolRequest {

@@ -107,6 +107,24 @@ function __siteToolGroup(kind) {
   });
 }
 var site = Object.freeze({tools: __siteToolGroup('tool'), pageTools: __siteToolGroup('pageTool')});
+// One entry point for what already exists on a site: mapped operations, recipes, flows, site
+// tools, learned notes, site skills and WebMCP tools. Reads sort before writes.
+site.capabilities = async (host) => {
+  var url = host ? (/^https?:/.test(host) ? host : 'https://' + host) : (__lastTarget ? String(await browser.page(__lastTarget).url()) : '');
+  var siteName = host || (url ? new URL(url).hostname.replace(/^www\\./, '') : '');
+  if (!siteName) throw Error('SITE_UNKNOWN: pass a site or open a tab first');
+  var base = await __call({siteCapabilities: {host: siteName}});
+  var items = Array.isArray(base && base.items) ? base.items.slice() : [];
+  var notes = Array.isArray(base && base.notes) ? base.notes.slice() : [];
+  var skills = await __siteSkills(url || ('https://' + siteName)).catch(() => []);
+  for (var skill of Array.isArray(skills) ? skills : [])
+    items.push({kind: 'skill', name: String(skill.name), title: String(skill.description || skill.name), does: 'read', inputs: [], how: 'script', source: 'site-skill'});
+  var webmcp = __lastTarget ? await browser.page(__lastTarget).webmcp.list().catch(() => ({tools: []})) : {tools: []};
+  for (var tool of (webmcp && webmcp.tools) || [])
+    items.push({kind: 'webmcp', name: String(tool.name), title: String(tool.description || tool.name), does: 'read', inputs: [], how: 'page', source: 'webmcp'});
+  items.sort((left, right) => Number(left.does === 'write') - Number(right.does === 'write') || String(left.kind).localeCompare(String(right.kind)) || String(left.name).localeCompare(String(right.name)));
+  return {site: siteName, items, notes};
+};
 // Saved reads: a page whose content the agent read this cell (page.data, page.markdown,
 // page.table) has its visible text saved after the cell, so when the user comes back to it the
 // page can show what changed since. The same text the page itself compares against.
