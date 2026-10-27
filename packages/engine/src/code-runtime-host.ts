@@ -3,8 +3,10 @@ import {
   BrowserCodeCancelSchema,
   BrowserCodeReplySchema,
   BrowserCodeRunSchema,
+  BrowserCodeStageSchema,
   BrowserStepSchema,
   type BrowserCodeRun,
+  type BrowserCodeStage,
   type BrowserStep,
   type BrowserTargetKey,
 } from "@browserkit/protocol";
@@ -254,6 +256,13 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
   if (sender.id !== chrome.runtime.id || sender.url !== chrome.runtime.getURL(OFFSCREEN)) return;
   if (message.kind === "jobDone") {
     finishJob(message as Record<string, unknown>);
+    reply({ ok: true });
+    return true;
+  }
+  if (message.kind === "stage") {
+    const cell = cells.get(String(message.cellId));
+    const stage = BrowserCodeStageSchema.safeParse(message.stage);
+    if (cell && stage.success) sendStage(cell, stage.data);
     reply({ ok: true });
     return true;
   }
@@ -515,6 +524,17 @@ function authorizedTarget(cell: Cell, target: unknown): BrowserTargetKey {
   if (!parsed.success || parsed.data.op !== "observe") throw new Error("INVALID_TARGET");
   authorize(cell, parsed.data);
   return parsed.data.target;
+}
+
+/** One line saying how far the cell got; Core names it if the deadline fires. */
+function sendStage(cell: Cell, stage: BrowserCodeStage): void {
+  if (cell.done) return;
+  send(cell.socket, {
+    kind: "browser.code.progress",
+    cellId: cell.run.cellId,
+    steps: progressSteps(cell),
+    stage,
+  });
 }
 
 // Sent at once rather than throttled: Core pauses or restarts the cell deadline on it.

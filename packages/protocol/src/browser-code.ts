@@ -46,6 +46,17 @@ export const BrowserCodeReplySchema = z
   })
   .strict();
 
+/** The last hop a cell reached; a deadline names it instead of failing as a black box. */
+export const BrowserCodeStageSchema = z.enum([
+  "sent",
+  "received",
+  "offscreen",
+  "realm-ready",
+  "evaluating",
+  "result-sent",
+]);
+export type BrowserCodeStage = z.infer<typeof BrowserCodeStageSchema>;
+
 export const BrowserCodeProgressSchema = z
   .object({
     kind: z.literal("browser.code.progress"),
@@ -53,6 +64,7 @@ export const BrowserCodeProgressSchema = z
     steps: z.array(z.record(z.string(), z.unknown())).max(256),
     // True while the cell is handed off to the user; the cell deadline is paused meanwhile.
     waitingForUser: z.boolean().optional(),
+    stage: BrowserCodeStageSchema.optional(),
   })
   .strict();
 

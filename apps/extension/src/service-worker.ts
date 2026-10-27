@@ -134,6 +134,16 @@ function onMessage(current: Connection, data: unknown): void {
     current.socket.close(4002, "Invalid bridge message");
     return;
   }
+  const arrival = candidate as { kind?: unknown; cellId?: unknown } | null;
+  if (arrival?.kind === "browser.code.run" && typeof arrival.cellId === "string")
+    current.socket.send(
+      JSON.stringify({
+        kind: "browser.code.progress",
+        cellId: arrival.cellId,
+        steps: [],
+        stage: "received",
+      }),
+    );
   if (BrowserExecutorHeartbeatReplySchema.safeParse(candidate).success) return;
   if (BrowserInventoryReplySchema.safeParse(candidate).success) return;
   if (handleBrowserCodeMessage(current, current.socket, candidate)) return;

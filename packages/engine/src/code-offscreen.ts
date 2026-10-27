@@ -39,6 +39,14 @@ function jobRealm(jobId: string, chatId: string): JobRealm {
   return created;
 }
 
+/** Tell the service worker how far this cell got, for the deadline error. */
+function stage(cellId: string, value: string): void {
+  if (!cells.has(cellId)) return;
+  void chrome.runtime
+    .sendMessage({ target: "aeon-code-host", kind: "stage", cellId, stage: value })
+    .catch(() => undefined);
+}
+
 function drop(chatId: string): void {
   realms.get(chatId)?.frame.remove();
   realms.delete(chatId);
@@ -108,9 +116,14 @@ window.addEventListener("message", (event) => {
     });
     return;
   }
+  if (message.kind === "started") {
+    stage(message.cellId, "evaluating");
+    return;
+  }
   if (message.kind === "done") {
     const cell = cells.get(message.cellId);
     if (!cell || cell.chatId !== chatId) return;
+    stage(message.cellId, "result-sent");
     cells.delete(message.cellId);
     const done = message as Record<string, unknown>;
     cell.reply({ value: done.value, output: done.output, error: done.error });
@@ -154,6 +167,10 @@ async function clipboardRestore(): Promise<Record<string, unknown>> {
 }
 chrome.runtime.onMessage.addListener((message, sender, reply) => {
   if (message?.target !== "aeon-code-offscreen" || sender.id !== chrome.runtime.id) return;
+  if (message.kind === "ping") {
+    reply({ ok: true });
+    return;
+  }
   if (message.kind === "clipboardSwap") {
     void clipboardSwap(String(message.text ?? ""), String(message.html ?? "")).then(reply);
     return true;
@@ -190,7 +207,9 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
   if (message.kind !== "cell") return;
   const target = realm(message.chatId);
   cells.set(message.cellId, { chatId: message.chatId, reply });
-  void target.ready.then(() =>
+  stage(message.cellId, "offscreen");
+  void target.ready.then(() => {
+    stage(message.cellId, "realm-ready");
     target.frame.contentWindow?.postMessage(
       {
         kind: "cell",
@@ -200,7 +219,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
         challengeAssist: message.challengeAssist,
       },
       "*",
-    ),
-  );
+    );
+  });
   return true;
 });

@@ -117,6 +117,7 @@ window.addEventListener("message", (event) => {
 
 async function run(message: Record<string, unknown>): Promise<void> {
   cellId = String(message.cellId);
+  parent.postMessage({ kind: "started", cellId }, "*");
   output = "";
   asynchronousError = undefined;
   let value: unknown;
