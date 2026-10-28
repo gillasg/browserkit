@@ -187,11 +187,15 @@ function watchUserInput(): void {
       return;
     if (event instanceof KeyboardEvent && (modifiers.has(event.key) || !document.hasFocus()))
       return;
-    // Esc (with nothing of the page's own open to close) is the deliberate take-over.
-    const takeOver = event instanceof KeyboardEvent && event.key === "Escape";
-    void chrome.runtime
-      .sendMessage({ kind: "browserkit.user-input", at: Date.now(), takeOver })
-      .catch(() => undefined);
+    const send = (takeOver: boolean): void =>
+      void chrome.runtime
+        .sendMessage({ kind: "browserkit.user-input", at: Date.now(), takeOver })
+        .catch(() => undefined);
+    // Esc (with nothing of the page's own open to close) is the deliberate take-over. Wait one
+    // tick so a menu, dialog or overlay that handles Esc first (preventDefault) keeps it.
+    if (event instanceof KeyboardEvent && event.key === "Escape")
+      setTimeout(() => send(!event.defaultPrevented), 0);
+    else send(false);
   };
   // Wheel is deliberately absent: scrolling to watch the agent is not taking the tab over.
   for (const type of ["pointerdown", "keydown"]) {
