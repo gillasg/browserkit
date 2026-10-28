@@ -38,7 +38,7 @@ if (existsSync(join(aeonRepo, "skills", "aeon"))) {
     rewriteForAeon(sections.get("01-setup")),
     parts.get("10-handoff"),
     ...commonSections(sections).map(rewriteForAeon),
-    parts.get("30-recipes"),
+    parts.get("30-abilities"),
     parts.get("20-routines"),
     parts.get("40-review"),
   ]);

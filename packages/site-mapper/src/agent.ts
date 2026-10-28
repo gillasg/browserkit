@@ -212,7 +212,7 @@ function withTabs(error: unknown, tabs: number[], leftOpen = false): Error {
   });
 }
 
-function modelSummary(model: SiteModel): string {
+export function modelSummary(model: SiteModel): string {
   const params = (list: { in: string; name: string }[]) =>
     list.map((p) => `${p.in}:${p.name}`).join(", ");
   return [

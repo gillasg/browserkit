@@ -4,6 +4,7 @@ import { checkSites, crawl, findList, mapSite, scrape, search, type Format } fro
 import {
   checkCaptures,
   code as readSiteCode,
+  buildAbility,
   explore,
   importCaptures,
   isSiteToolAction,
@@ -33,6 +34,7 @@ export const AGENT_SITE_MAPPER_ACTIONS = [
   "learn",
   "import",
   "explore",
+  "build",
   ...SITE_TOOL_ACTIONS,
 ] as const;
 
@@ -259,6 +261,7 @@ export const SITE_MAPPER_TOOL_ACTIONS = [
   "learn",
   "import",
   "explore",
+  "build",
   "docs",
   "actions",
   "action",
@@ -292,6 +295,13 @@ export type SiteMapperToolInput = {
   transport?: "auto" | "page" | "direct";
   /** ability: only try this way (api, steps, script, page). */
   via?: "api" | "steps" | "script" | "page";
+  /** build: read (default) or write. */
+  kind?: "read" | "write";
+  /** ability (lists): rows per page, and next_cursor from the previous page. */
+  limit?: number;
+  cursor?: string;
+  /** ability: run its stored test cases instead. */
+  test?: boolean;
   files?: string[];
   key?: string;
   grep?: string | string[];
@@ -334,7 +344,16 @@ const siteMapperParameters: JsonObjectSchema = {
       maxItems: 10,
       description: "For explore: site names or URLs to map.",
     },
-    goal: { type: "string", maxLength: 2000, description: "For explore: extra things to do." },
+    goal: {
+      type: "string",
+      maxLength: 2000,
+      description: "For explore: extra things to do. For build: the task the ability does.",
+    },
+    kind: {
+      type: "string",
+      enum: ["read", "write"],
+      description: "For build: read (default) or write; a write is learned in dry run.",
+    },
     operation: { type: "string", maxLength: 200 },
     params: { type: "object" },
     transport: { type: "string", enum: ["auto", "page", "direct"] },
@@ -345,7 +364,25 @@ const siteMapperParameters: JsonObjectSchema = {
       maxItems: 20,
       description: "For learn/import: capture files in the workspace.",
     },
-    key: { type: "string", maxLength: 100, description: "For watch: the item identifier." },
+    key: {
+      type: "string",
+      maxLength: 100,
+      description:
+        "For watch: the item identifier. For a write ability: an idempotency key; the same key never applies twice within a day.",
+    },
+    limit: {
+      type: "integer",
+      minimum: 1,
+      maximum: 500,
+      description:
+        "For a list ability: rows per page; the answer is {items, next_cursor, has_more}.",
+    },
+    cursor: {
+      type: "string",
+      maxLength: 4000,
+      description: "For a list ability: next_cursor from the previous page, exactly as returned.",
+    },
+    test: { type: "boolean", description: "For ability: run its stored test cases instead." },
     grep: {
       oneOf: [{ type: "string" }, { type: "array", items: { type: "string" }, maxItems: 20 }],
       description: "For code: a string or regex to match in chunks and manifests.",
@@ -360,7 +397,7 @@ const siteMapperParameters: JsonObjectSchema = {
 export const siteMapperTool: AgentToolDefinition<SiteMapperToolInput> = {
   name: "site_mapper",
   description:
-    "Call a site's abilities (actions: sites, operations, call, ability, watch, channel), see its published docs, keep it working (heal, coverage, edit, name, describe, signing, session, export), or map sites you haven't used: by name (explore) or from capture files (import). ability lists or runs one site ability (its API first, then replay steps, page code or node code). code reads routes, chunks, source maps, robots and sitemap before guessing URLs. Calls use the user's logins.",
+    "Call a site's abilities (actions: sites, operations, call, ability, watch, channel), see its published docs, keep it working (heal, coverage, edit, name, describe, signing, session, export), or map sites you haven't used: by name (explore) or from capture files (import). build makes one tested ability for a task (goal) by doing it once in a background tab; a write is learned in dry run. ability lists or runs one site ability (its API first, then replay steps, page code or node code); key makes a write apply once, limit/cursor page a list, test runs its stored cases. code reads routes, chunks, source maps, robots and sitemap before guessing URLs. Calls use the user's logins.",
   actions: [
     { name: "sites", params: [] },
     { name: "code", params: ["url", "grep", "maxFiles", "maxBytes"] },
@@ -370,8 +407,12 @@ export const siteMapperTool: AgentToolDefinition<SiteMapperToolInput> = {
     { name: "learn", params: ["site", "files"] },
     { name: "import", params: ["site", "files"] },
     { name: "explore", params: ["site", "sites", "goal", "actions"] },
+    { name: "build", params: ["site", "goal", "name", "kind", "params"] },
     { name: "docs", params: ["site"] },
-    { name: "ability", params: ["site", "name", "params", "via"] },
+    {
+      name: "ability",
+      params: ["site", "name", "params", "via", "key", "limit", "cursor", "test"],
+    },
     { name: "channel", params: ["site", "name", "params"] },
     { name: "session", params: ["site"] },
     { name: "export", params: ["site", "folder"] },
@@ -391,6 +432,16 @@ export const siteMapperTool: AgentToolDefinition<SiteMapperToolInput> = {
         ...(input.maxFiles ? { maxFiles: input.maxFiles } : {}),
         ...(input.maxBytes ? { maxBytes: input.maxBytes } : {}),
       });
+    if (input.action === "build") {
+      if (!input.site || !input.goal)
+        throw new Error("Give site and goal: the task the new ability should do");
+      return buildAbility(input.site, input.goal, {
+        ...(input.kind ? { kind: input.kind } : {}),
+        ...(input.name ? { name: input.name } : {}),
+        ...(input.params ? { example: input.params } : {}),
+        ...(context.model ? { model: (await context.model()) as never } : {}),
+      });
+    }
     if (input.action === "explore") {
       const sites = input.sites?.length ? input.sites : input.site ? [input.site] : [];
       if (!sites.length) throw new Error("Give sites: the names or URLs of the sites to map");

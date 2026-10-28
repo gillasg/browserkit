@@ -136,12 +136,24 @@ var __siteHostName = async (site) => {
   if (!__lastTarget) throw Error('SITE_UNKNOWN: pass a site or open a tab first');
   return new URL(String(await browser.page(__lastTarget).url())).hostname.replace(/^www\\./, '');
 };
+// Saves an ability for the current site (or spec.site). A script way may be a function; a
+// demonstration's skill ({name, code}) is saved as a page-script ability.
+var __saveAbility = async (spec = {}) => {
+  var value = {...spec};
+  value.site = await __siteHostName(value.site || (Array.isArray(value.domains) ? value.domains[0] : undefined));
+  var source = (code) => typeof code === 'function' ? code.toString() : code;
+  if (Array.isArray(value.ways)) value.ways = value.ways.map(way => way && way.kind === 'script' ? {...way, code: source(way.code)} : way);
+  if (value.code) value.code = source(value.code);
+  return __call({abilitySave: value});
+};
+var saveAbility = __saveAbility;
 var __siteAbilities = {
-  run: async (name, inputs = {}, options = {}) => __call({abilityRun: {site: await __siteHostName(options.site), name, inputs, ...(options.via ? {via: options.via} : {})}}),
+  run: async (name, inputs = {}, options = {}) => __call({abilityRun: {site: await __siteHostName(options.site), name, inputs, ...(options.via ? {via: options.via} : {}), ...(options.key ? {key: String(options.key)} : {}), ...(options.limit ? {limit: Number(options.limit)} : {}), ...(options.cursor ? {cursor: String(options.cursor)} : {})}}),
+  test: async (name, site) => __call({abilityRun: {site: await __siteHostName(site), name, test: true}}),
   list: async (site) => __call({abilityList: {site: await __siteHostName(site)}}),
   notes: async (site) => __call({siteNotes: await __siteHostName(site)}),
 };
-var __siteBase = {tools: __siteToolGroup('tool'), pageTools: __siteToolGroup('pageTool'), capabilities: __siteCapabilities, run: __siteAbilities.run, list: __siteAbilities.list, notes: __siteAbilities.notes};
+var __siteBase = {tools: __siteToolGroup('tool'), pageTools: __siteToolGroup('pageTool'), capabilities: __siteCapabilities, run: __siteAbilities.run, test: __siteAbilities.test, save: __saveAbility, list: __siteAbilities.list, notes: __siteAbilities.notes};
 var site = Object.freeze(new Proxy(__siteBase, {
   get: (target, name) => {
     if (typeof name !== 'string' || name in target) return target[name];

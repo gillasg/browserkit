@@ -39,7 +39,7 @@ function base(overrides = {}) {
     site: "example.com",
     kind: "read",
     inputs: { type: "object", properties: { q: { type: "string" } } },
-    ways: [{ kind: "api", operation: "search" }],
+    ways: [{ kind: "api", operation: "search", params: { q: "{{inputs.q}}" } }],
     options: {},
     stats: { runs: 0, failures: 0 },
     createdBy: "agent",
@@ -126,7 +126,7 @@ test("runner tries ways in order, honors via, and records stats", async () => {
     await saveAbility(
       base({
         ways: [
-          { kind: "api", operation: "search" },
+          { kind: "api", operation: "search", params: { q: "{{inputs.q}}" } },
           { kind: "script", code: "return 'from script'", runtime: "node" },
         ],
       }),

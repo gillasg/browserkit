@@ -7,11 +7,17 @@ browserkit call shop.example search '{"query":"lamp"}' --param page=2
 browserkit watch shop.example listings '{}' --key id     # only new/changed items since the last watch
 browserkit federate shop.example:search other.example:search --params '{"query":"lamp"}'
 browserkit heal shop.example              # drift, breakage, sign-out, bot walls
+browserkit abilities build shop.example "find a product's price and stock"   # a tested ability
+browserkit abilities run shop.example order --inputs '{"item":"tea"}' --key order-tea-1
+browserkit abilities test shop.example search  # its stored cases; fails on constant output
 ```
 
 - **Start with `site.capabilities()`** in browser code (or `browserkit capabilities <site>`): the
   site's abilities, mapped operations, notes and WebMCP tools in one answer. Run one with
-  `site.run(name, inputs, {via})` or `site.<name>(inputs)`.
+  `site.run(name, inputs, {via, key, limit, cursor})` or `site.<name>(inputs)`.
+- **Abilities keep their promises:** lists page with `limit`/`next_cursor`; a write with a `key`
+  never applies twice; a failed write says `possible_commit` and how to `retry`; an ignored filter
+  fails as `INPUT_NOT_APPLIED`. Details: `help('abilities')`.
 - **Site APIs** (or `siteMapper` in browser code) only work on sites that are mapped. Check `sites`
   first. To map a site: `map`, `describe`, `learn`, or use it in `browser_code` so its requests are
   learned as you go.

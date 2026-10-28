@@ -46,7 +46,7 @@
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.mjs\" \"*.{json,yaml,mjs}\"",
     "format:check": "prettier --check \"src/**/*.ts\" \"test/**/*.mjs\" \"*.{json,yaml,mjs}\"",
     "test": "node --test --test-timeout=120000 test/*.test.mjs",
-    "test:unit": "pnpm build && node --test --test-timeout=120000 test/actions.test.mjs test/abilities.test.mjs test/abilities-migrate.test.mjs test/agent.test.mjs test/capabilities.test.mjs test/challenge.test.mjs test/code.test.mjs test/emit.test.mjs test/federate.test.mjs test/live.test.mjs test/pipeline.test.mjs test/recipes.test.mjs test/record.test.mjs test/registry.test.mjs test/pack.test.mjs test/runtime.test.mjs test/serve-mcp.test.mjs test/site-capabilities.test.mjs test/site-tools.test.mjs test/volatile.test.mjs",
+    "test:unit": "pnpm build && node --test --test-timeout=120000 test/actions.test.mjs test/abilities.test.mjs test/abilities-migrate.test.mjs test/ability-contract.test.mjs test/agent.test.mjs test/capabilities.test.mjs test/challenge.test.mjs test/code.test.mjs test/emit.test.mjs test/federate.test.mjs test/live.test.mjs test/pipeline.test.mjs test/recipes.test.mjs test/record.test.mjs test/registry.test.mjs test/pack.test.mjs test/runtime.test.mjs test/serve-mcp.test.mjs test/site-capabilities.test.mjs test/site-tools.test.mjs test/volatile.test.mjs",
     "check": "pnpm format:check && pnpm typecheck && pnpm lint && pnpm build && pnpm test"
   },
   "devDependencies": {

@@ -5,6 +5,34 @@
 import { mkdir, readdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import vm from "node:vm";
+import {
+  contractBreaks,
+  contractWarnings,
+  testAbilityCases,
+  unusedInputs,
+  type AbilityTest,
+  type AbilityTestReport,
+} from "./ability-contract.js";
+import {
+  assertInputsApplied,
+  pageRows,
+  readRecords,
+  rowsOf,
+  usesRecordRuntime,
+  type AbilityCheck,
+  type AbilityPage,
+} from "./ability-records.js";
+import {
+  AbilityWriteError,
+  answerRepeat,
+  classifyFailure,
+  findWriteKey,
+  readBack,
+  recordWriteKey,
+  writeKey,
+  type ReadBack,
+  type WriteOutcome,
+} from "./ability-writes.js";
 import { siteDir, siteName, writeAtomic } from "./registry.js";
 import type { CollectRecipe, RecipePagination } from "./recipes.js";
 import type { Json } from "./types.js";
@@ -30,6 +58,8 @@ export interface AbilityWayApi {
   records?: { find: { exists: string[] } };
   write?: Record<string, unknown>;
   input?: Json;
+  /** Write abilities: index of the operation that applies the change (default: the last). */
+  commit?: number;
 }
 
 export interface AbilityWaySteps {
@@ -61,6 +91,10 @@ export interface AbilityOptions {
   paging?: RecipePagination;
   recordMapping?: Record<string, unknown>;
   dryRun?: boolean;
+  /** Rules a read's rows must satisfy when the caller passed the input. */
+  checks?: AbilityCheck[];
+  /** Write abilities: a read run afterwards to confirm the change. */
+  readBack?: ReadBack;
   /** Old fields with no dedicated home live here (write receipts, render, thread, derive…). */
   [key: string]: unknown;
 }
@@ -78,7 +112,11 @@ export interface Ability {
   description?: string;
   kind: AbilityKind;
   inputs: Record<string, unknown>;
+  /** JSON Schema of the result (its properties are the fields callers may rely on). */
+  outputs?: Record<string, unknown>;
   ways: AbilityWay[];
+  /** Cases `testAbility` runs: inputs and values the result must contain. */
+  tests?: AbilityTest[];
   options: AbilityOptions;
   stats: AbilityStats;
   createdBy: AbilityCreatedBy;
@@ -92,6 +130,21 @@ export interface AbilityRunResult {
   result: unknown;
   via: AbilityVia;
   tried: { via: AbilityVia; error: string }[];
+  /** Writes: how the call left the site, and the key it ran under. */
+  write?: Partial<WriteOutcome> & { key?: string; replayed?: boolean };
+  /** Writes with readBack: whether the site shows the change. */
+  readBack?: { ok: boolean; missing: string[] };
+}
+
+export interface AbilityRunOptions {
+  via?: AbilityVia;
+  host?: AbilityHost;
+  /** Writes: the same key never applies twice (kept a day). */
+  key?: string;
+  /** Lists: rows per page; the result becomes {items, next_cursor, has_more}. */
+  limit?: number;
+  /** Lists: next_cursor from the previous page. */
+  cursor?: string;
 }
 
 export interface AbilityHost {
@@ -152,12 +205,21 @@ async function readAbilityFile(path: string): Promise<Ability | undefined> {
   }
 }
 
+export interface SaveAbilityOptions {
+  replace?: boolean;
+  /** Allow a replacement that drops or retypes an input, or drops an output field. */
+  breaking?: boolean;
+  /** Skip the caller-contract checks (run stats and migrations). */
+  check?: boolean;
+}
+
 export async function saveAbility(
   ability: Ability,
-  options: { replace?: boolean } = {},
+  options: SaveAbilityOptions = {},
 ): Promise<{
   ability: Ability;
   path: string;
+  warnings: string[];
 }> {
   const site = siteName(ability.site);
   const name = validAbilityName(ability.name);
@@ -167,6 +229,7 @@ export async function saveAbility(
   const existing = await readAbilityFile(path);
   if (existing && options.replace === false)
     throw new Error(`ABILITY_EXISTS: ${site} already has ${name}`);
+  if (options.check !== false) checkContract(ability, existing, options);
   const next: Ability = {
     ...ability,
     name,
@@ -176,7 +239,29 @@ export async function saveAbility(
     updatedAt: new Date().toISOString(),
   };
   await writeAtomic(path, JSON.stringify(next, null, 2) + "\n");
-  return { ability: next, path };
+  return { ability: next, path, warnings: options.check === false ? [] : contractWarnings(next) };
+}
+
+function checkContract(
+  ability: Ability,
+  existing: Ability | undefined,
+  options: SaveAbilityOptions,
+): void {
+  if (ability.createdBy === "agent") {
+    const unused = unusedInputs(ability);
+    if (unused.length)
+      throw new Error(
+        `ABILITY_INPUT_UNUSED: ${ability.name} declares ${unused.join(", ")} but no way uses it; ` +
+          'use it, drop it, or say "By design:" in its description',
+      );
+  }
+  if (!existing || options.breaking) return;
+  const breaks = contractBreaks(existing, ability);
+  if (breaks.length)
+    throw new Error(
+      `ABILITY_CONTRACT_WEAKENED: ${ability.name}: ${breaks.join("; ")}. Callers rely on these; ` +
+        "keep them, save under a new name, or pass breaking: true",
+    );
 }
 
 export async function createAbility(
@@ -184,7 +269,7 @@ export async function createAbility(
     name: string;
     site: string;
   },
-): Promise<{ ability: Ability; path: string }> {
+): Promise<{ ability: Ability; path: string; warnings: string[] }> {
   const base = validAbilityName(ability.name);
   let name = base;
   for (let index = 2; await readAbility(ability.site, name); index++) name = `${base}-${index}`;
@@ -250,28 +335,169 @@ export async function runAbility(
   site: string,
   name: string,
   inputs: Record<string, unknown> = {},
-  options: { via?: AbilityVia; host?: AbilityHost } = {},
+  options: AbilityRunOptions = {},
 ): Promise<AbilityRunResult> {
   const ability = await readAbility(site, name);
   if (!ability) throw new Error(`ABILITY_UNKNOWN: ${siteName(site)} has no ability ${name}`);
   const host = options.host ?? defaultHost(site);
+  if (ability.kind === "write") return runWrite(ability, inputs, host, options);
+  const run = await runRead(ability, inputs, host, options);
+  assertInputsApplied(ability, inputs, run.result);
+  await recordAbilityRun(ability, true);
+  if (options.limit === undefined && options.cursor === undefined) return run;
+  return { ...run, result: pageOf(ability, run.result, options) };
+}
+
+function pageOf(ability: Ability, result: unknown, options: AbilityRunOptions): AbilityPage {
+  const key = (ability.options.recordMapping as { key?: string } | undefined)?.key;
+  return pageRows(rowsOf(result) ?? [result], {
+    ...(options.limit ? { limit: options.limit } : {}),
+    ...(options.cursor ? { cursor: options.cursor } : {}),
+    ...(key ? { key } : {}),
+  });
+}
+
+/** Rows a first page needs from the site: the page plus one, to know whether more exist. */
+function wantedRows(options: AbilityRunOptions): number | undefined {
+  if (options.limit === undefined || options.cursor) return undefined;
+  return options.limit + 1;
+}
+
+async function runRead(
+  ability: Ability,
+  inputs: Record<string, unknown>,
+  host: AbilityHost,
+  options: AbilityRunOptions,
+): Promise<AbilityRunResult> {
   const tried: { via: AbilityVia; error: string }[] = [];
-  for (const way of ability.ways) {
+  let ways = ability.ways;
+  if (usesRecordRuntime(ability) && options.via !== "script") {
+    try {
+      return { ...(await readRecords(ability, inputs, host, wantedRows(options))), tried };
+    } catch (error) {
+      tried.push({ via: "api", error: messageOf(error) });
+      // The recipe runtime already tried every way it can run; node scripts remain.
+      ways = ways.filter((way) => way.kind === "script" && way.runtime === "node");
+    }
+  }
+  for (const way of ways) {
     if (options.via && way.kind !== options.via) continue;
     try {
-      const result = await attemptWay(ability, way, inputs, host);
-      await recordAbilityRun(ability, true);
-      return { result, via: way.kind, tried };
+      return { result: await attemptWay(ability, way, inputs, host), via: way.kind, tried };
     } catch (error) {
-      tried.push({
-        via: way.kind,
-        error: error instanceof Error ? error.message : String(error),
-      });
+      tried.push({ via: way.kind, error: messageOf(error) });
     }
   }
   await recordAbilityRun(ability, false);
-  const detail = tried.map((item) => `${item.via}: ${item.error}`).join("; ") || "no way matched";
-  throw new Error(`ABILITY_FAILED: ${siteName(site)} ${ability.name} (${detail})`);
+  throw new Error(`ABILITY_FAILED: ${ability.site} ${ability.name} (${triedText(tried)})`);
+}
+
+function messageOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function triedText(tried: { via: AbilityVia; error: string }[]): string {
+  return tried.map((item) => `${item.via}: ${item.error}`).join("; ") || "no way matched";
+}
+
+/**
+ * A write tries its ways in order only while nothing may have applied: once a way fails after its
+ * commit step started, the runner stops and reports it instead of trying again another way.
+ */
+async function runWrite(
+  ability: Ability,
+  inputs: Record<string, unknown>,
+  host: AbilityHost,
+  options: AbilityRunOptions,
+): Promise<AbilityRunResult> {
+  const key = writeKey(ability, inputs, options.key);
+  const entry = key ? await findWriteKey(ability, key) : undefined;
+  const repeat = key && entry ? answerRepeat(ability, key, entry) : undefined;
+  if (repeat)
+    return {
+      result: repeat.result,
+      via: "api",
+      tried: [],
+      write: { write_status: "applied", key, replayed: true },
+    };
+  const tried: { via: AbilityVia; error: string }[] = [];
+  let last: WriteOutcome | undefined;
+  for (const way of ability.ways) {
+    if (options.via && way.kind !== options.via) continue;
+    const progress = { reachedCommit: way.kind !== "api" };
+    try {
+      const result = await attemptWay(ability, way, inputs, host, progress);
+      return await appliedWrite(ability, inputs, host, { result, via: way.kind, tried }, key);
+    } catch (error) {
+      last = classifyFailure(error, progress.reachedCommit);
+      tried.push({ via: way.kind, error: messageOf(error) });
+      if (last.possible_commit) break;
+    }
+  }
+  return failedWrite(ability, key, tried, last);
+}
+
+async function appliedWrite(
+  ability: Ability,
+  inputs: Record<string, unknown>,
+  host: AbilityHost,
+  run: AbilityRunResult,
+  key: string | undefined,
+): Promise<AbilityRunResult> {
+  if (key) await recordWriteKey(ability, key, { write_status: "applied", result: run.result });
+  await recordAbilityRun(ability, true);
+  const rule = ability.options.readBack;
+  const check = rule
+    ? await readBack(
+        rule,
+        inputs,
+        async (name, values) => (await runAbility(ability.site, name, values, { host })).result,
+        fill,
+      )
+    : undefined;
+  return {
+    ...run,
+    write: { write_status: "applied", possible_commit: true, ...(key ? { key } : {}) },
+    ...(check ? { readBack: { ok: check.ok, missing: check.missing } } : {}),
+  };
+}
+
+async function failedWrite(
+  ability: Ability,
+  key: string | undefined,
+  tried: { via: AbilityVia; error: string }[],
+  last: WriteOutcome | undefined,
+): Promise<never> {
+  await recordAbilityRun(ability, false);
+  const outcome: WriteOutcome = last ?? {
+    code: "execution_failed",
+    write_status: "not_attempted",
+    possible_commit: false,
+    retry: "same_key",
+  };
+  if (key && outcome.possible_commit)
+    await recordWriteKey(ability, key, { write_status: "may_have_applied" });
+  throw new AbilityWriteError(
+    `ABILITY_FAILED: ${ability.site} ${ability.name} (${triedText(tried)})`,
+    outcome,
+  );
+}
+
+/** Runs an ability's stored test cases and reports failures and constant output. */
+export async function testAbility(
+  site: string,
+  name: string,
+  options: { host?: AbilityHost } = {},
+): Promise<AbilityTestReport> {
+  const ability = await readAbility(site, name);
+  if (!ability) throw new Error(`ABILITY_UNKNOWN: ${siteName(site)} has no ability ${name}`);
+  if (ability.kind === "write")
+    throw new Error(`ABILITY_TEST_WRITE: ${name} writes; its cases would change the site`);
+  return testAbilityCases(
+    ability,
+    async (inputs) =>
+      (await runAbility(site, name, inputs, options.host ? { host: options.host } : {})).result,
+  );
 }
 
 async function attemptWay(
@@ -279,8 +505,9 @@ async function attemptWay(
   way: AbilityWay,
   inputs: Record<string, unknown>,
   host: AbilityHost,
+  progress?: { reachedCommit: boolean },
 ): Promise<unknown> {
-  if (way.kind === "api") return attemptApi(way, inputs, host);
+  if (way.kind === "api") return attemptApi(way, inputs, host, progress);
   if (way.kind === "steps") return attemptSteps(way, inputs, host);
   if (way.kind === "page") return attemptPage(way, inputs, host);
   return attemptScript(ability, way, inputs, host);
@@ -290,6 +517,7 @@ async function attemptApi(
   way: AbilityWayApi,
   inputs: Record<string, unknown>,
   host: AbilityHost,
+  progress?: { reachedCommit: boolean },
 ): Promise<unknown> {
   const operations = apiOperations(way);
   if (!operations.length) throw new Error("API way has no operation");
@@ -297,9 +525,12 @@ async function attemptApi(
   if (!call) throw new Error("No site API transport");
   if (way.open && host.open) await host.open(String(fill(way.open, inputs)));
   const stepResults: unknown[] = [];
+  const commit = Math.min(way.commit ?? operations.length - 1, operations.length - 1);
   let result: unknown;
-  for (const step of operations)
+  for (const [index, step] of operations.entries()) {
+    if (progress && index >= commit) progress.reachedCommit = true;
     result = await callApiStep(step, way, inputs, stepResults, call, host);
+  }
   return result;
 }
 
@@ -428,7 +659,7 @@ async function recordAbilityRun(ability: Ability, ok: boolean): Promise<void> {
     },
     updatedAt: now,
   };
-  await saveAbility(next);
+  await saveAbility(next, { check: false });
 }
 
 function fill(value: unknown, inputs: Record<string, unknown>, steps: unknown[] = []): unknown {

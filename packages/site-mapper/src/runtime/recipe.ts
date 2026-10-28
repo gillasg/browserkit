@@ -99,7 +99,7 @@ export async function runRecipe(options: RecipeRunOptions): Promise<RecipeRunRes
   const attempts: StrategyAttempt[] = [];
   for (const strategy of recipe.strategies) {
     try {
-      const raw = await collectWith(strategy, inputs, host, maxPages);
+      const raw = await collectWith(strategy, inputs, host, maxPages, wantedRows(recipe, limit));
       const records = finish(raw.items, recipe, limit, inputs);
       await health(site, recipe, { ok: true, strategy: strategy.kind }, options);
       return {
@@ -208,17 +208,23 @@ interface Collected {
   truncated: boolean;
 }
 
+/** Rows worth fetching: past the limit only when filters or threading may drop some. */
+function wantedRows(recipe: SiteRecipe, limit: number): number {
+  return recipe.filter?.length || recipe.thread ? Infinity : limit;
+}
+
 async function collectWith(
   strategy: RecipeStrategy,
   inputs: Record<string, unknown>,
   host: RecipeHost,
   maxPages: number,
+  wanted = Infinity,
 ): Promise<Collected> {
   switch (strategy.kind) {
     case "api":
-      return collectApi(strategy, inputs, host, maxPages);
+      return collectApi(strategy, inputs, host, maxPages, wanted);
     case "collect":
-      return collectRows(strategy, inputs, host);
+      return collectRows(strategy, inputs, host, wanted);
     case "script":
       return collectScript(strategy, inputs, host);
     case "workflow":
@@ -274,10 +280,19 @@ async function collectRows(
   strategy: Extract<RecipeStrategy, { kind: "collect" }>,
   inputs: Record<string, unknown>,
   host: RecipeHost,
+  wanted = Infinity,
 ): Promise<Collected> {
   if (!host.collect) throw new RecipeSkip("No browser is attached for a collect strategy");
   const url = strategy.collect.url === undefined ? undefined : fill(strategy.collect.url, inputs);
-  const items = await host.collect({ ...strategy.collect, ...(url ? { url } : {}) });
+  // Rows past the wanted count are never read, so per-row detail work stops there too.
+  const max = Number.isFinite(wanted)
+    ? Math.min(strategy.collect.max ?? wanted, wanted)
+    : undefined;
+  const items = await host.collect({
+    ...strategy.collect,
+    ...(url ? { url } : {}),
+    ...(max ? { max } : {}),
+  });
   if (!Array.isArray(items)) throw new Error("collect returned no rows");
   return { items, pages: 1, truncated: false };
 }
@@ -298,12 +313,12 @@ async function collectScript(
   return { items, pages: 1, truncated: false };
 }
 
-async function collectApi(
+/** The real operation id, after opening the page an API call must come from. */
+async function prepareApi(
   strategy: Extract<RecipeStrategy, { kind: "api" }>,
   inputs: Record<string, unknown>,
   host: RecipeHost,
-  maxPages: number,
-): Promise<Collected> {
+): Promise<string> {
   const operation = host.resolveOperation
     ? host.resolveOperation(strategy.operation)
     : strategy.operation;
@@ -313,12 +328,23 @@ async function collectApi(
     // The page supplies the session and the signing hooks; a call that works without it survives.
     await host.open(fill(strategy.open, inputs)).catch(() => undefined);
   }
+  return operation;
+}
+
+async function collectApi(
+  strategy: Extract<RecipeStrategy, { kind: "api" }>,
+  inputs: Record<string, unknown>,
+  host: RecipeHost,
+  maxPages: number,
+  wanted = Infinity,
+): Promise<Collected> {
+  const operation = await prepareApi(strategy, inputs, host);
   const params = apiParams(strategy, inputs);
   const pagination = strategy.pagination;
   const items: unknown[] = [];
   let pages = 0;
   let cursor: unknown;
-  while (pages < maxPages) {
+  while (pages < maxPages && items.length < wanted) {
     const page = await host.call(operation, params);
     pages += 1;
     items.push(...itemsOf(page, pagination, strategy.records?.find.exists));
@@ -329,7 +355,7 @@ async function collectApi(
     if (pagination.limitParam && pagination.pageSize)
       setParam(params, pagination.limitParam, pagination.pageSize);
   }
-  return { items, pages, truncated: pages >= maxPages };
+  return { items, pages, truncated: pages >= maxPages && items.length < wanted };
 }
 
 /** "variables.cursor" sets a nested request parameter. */

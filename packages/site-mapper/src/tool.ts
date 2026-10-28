@@ -10,7 +10,7 @@ import { toYaml } from "./emit/yaml.js";
 import { checkHealth, repair } from "./health.js";
 import { loadCapture } from "./load/index.js";
 import { loadModel, readOverrides, siteName } from "./registry.js";
-import { listAbilities, runAbility } from "./abilities.js";
+import { listAbilities, runAbility, testAbility } from "./abilities.js";
 import type { ChannelOptions } from "./runtime/channels.js";
 import { exportSession } from "./runtime/session-export.js";
 import { siteMapper } from "./runtime/site-mapper.js";
@@ -44,6 +44,13 @@ export interface SiteToolInput {
   params?: Record<string, unknown>;
   /** ability: only try this way (api, steps, script, page). */
   via?: "api" | "steps" | "script" | "page";
+  /** ability (writes): the same key never applies twice within a day. */
+  key?: string;
+  /** ability (lists): rows per page, and next_cursor from the previous page. */
+  limit?: number;
+  cursor?: string;
+  /** ability: run its stored test cases instead. */
+  test?: boolean;
   /** actions: save a new action from these operation ids, in order. */
   steps?: string[];
   description?: string;
@@ -165,12 +172,13 @@ const HANDLERS: Record<SiteToolAction, (input: SiteToolInput) => Promise<unknown
   docs: (input) => readDocs(input.site),
   ability: async (input) => {
     if (!input.name) return listAbilities(input.site);
-    return runAbility(
-      input.site,
-      input.name,
-      input.params ?? {},
-      input.via ? { via: input.via } : {},
-    );
+    if (input.test) return testAbility(input.site, input.name);
+    return runAbility(input.site, input.name, input.params ?? {}, {
+      ...(input.via ? { via: input.via } : {}),
+      ...(input.key ? { key: input.key } : {}),
+      ...(input.limit ? { limit: input.limit } : {}),
+      ...(input.cursor ? { cursor: input.cursor } : {}),
+    });
   },
   channel,
   session: async (input) => {

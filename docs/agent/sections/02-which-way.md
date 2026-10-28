@@ -15,3 +15,15 @@
   before guessing from memory.
 - **Anything live or on a specific site** (prices, stock, listings, showtimes, reviews): open that
   site in the browser. Web search only finds which page to open.
+- **A lasting tool for one task on a site** ("make me something that checks X"): build an ability
+  (`browserkit abilities build <site> "<task>"`); it is tested before it is saved, or says why the
+  site cannot do it.
+- **What a page sends** (the API behind it, a download link, a stream): network capture,
+  `help('network')`; live WebSockets and event streams, `help('live')`.
+- **Files and media**: save images, videos and files, or upload into a page, `help('media')`;
+  record a tab's screen and sound, `help('recording')`.
+- **Change a site on every visit** (hide parts, restyle, auto-click a banner): a boost,
+  `help('boosts')`.
+- **Long or wide work**: many pages, `browser.job` (`help('jobs')`); hundreds of sites, a sweep
+  (`help('sweep')`); a background window that never takes over the screen, `help('spaces')`.
+- **An AI the user already pays for** (ChatGPT, Gemini, Grok, Perplexity, Kimi): `browserkit ask`.

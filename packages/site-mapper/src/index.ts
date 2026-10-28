@@ -37,8 +37,11 @@ export {
   readSiteNotes,
   runAbility,
   saveAbility,
+  testAbility,
   trashAbility,
   writeSiteNotes,
+  type AbilityRunOptions,
+  type SaveAbilityOptions,
   type Ability,
   type AbilityCreatedBy,
   type AbilityHost,
@@ -53,6 +56,22 @@ export {
   type AbilityWayScript,
   type AbilityWaySteps,
 } from "./abilities.js";
+export {
+  buildAbility,
+  type BlockedReason,
+  type BuildOptions as AbilityBuildOptions,
+  type BuildResult as AbilityBuildResult,
+} from "./build.js";
+export { pageRows, type AbilityCheck, type AbilityPage } from "./ability-records.js";
+export {
+  AbilityWriteError,
+  type OutcomeCode,
+  type ReadBack,
+  type RetryClass,
+  type WriteOutcome,
+  type WriteStatus,
+} from "./ability-writes.js";
+export type { AbilityTest, AbilityTestReport } from "./ability-contract.js";
 export {
   abilityFromAction,
   abilityFromRecipe,

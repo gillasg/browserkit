@@ -40,6 +40,18 @@ real.
   before guessing from memory.
 - **Anything live or on a specific site** (prices, stock, listings, showtimes, reviews): open that
   site in the browser. Web search only finds which page to open.
+- **A lasting tool for one task on a site** ("make me something that checks X"): build an ability
+  (`browserkit abilities build <site> "<task>"`); it is tested before it is saved, or says why the
+  site cannot do it.
+- **What a page sends** (the API behind it, a download link, a stream): network capture,
+  `help('network')`; live WebSockets and event streams, `help('live')`.
+- **Files and media**: save images, videos and files, or upload into a page, `help('media')`;
+  record a tab's screen and sound, `help('recording')`.
+- **Change a site on every visit** (hide parts, restyle, auto-click a banner): a boost,
+  `help('boosts')`.
+- **Long or wide work**: many pages, `browser.job` (`help('jobs')`); hundreds of sites, a sweep
+  (`help('sweep')`); a background window that never takes over the screen, `help('spaces')`.
+- **An AI the user already pays for** (ChatGPT, Gemini, Grok, Perplexity, Kimi): `browserkit ask`.
 
 ## Browser code in one minute
 
@@ -145,11 +157,17 @@ browserkit call shop.example search '{"query":"lamp"}' --param page=2
 browserkit watch shop.example listings '{}' --key id     # only new/changed items since the last watch
 browserkit federate shop.example:search other.example:search --params '{"query":"lamp"}'
 browserkit heal shop.example              # drift, breakage, sign-out, bot walls
+browserkit abilities build shop.example "find a product's price and stock"   # a tested ability
+browserkit abilities run shop.example order --inputs '{"item":"tea"}' --key order-tea-1
+browserkit abilities test shop.example search  # its stored cases; fails on constant output
 ```
 
 - **Start with `site.capabilities()`** in browser code (or `browserkit capabilities <site>`): the
   site's abilities, mapped operations, notes and WebMCP tools in one answer. Run one with
-  `site.run(name, inputs, {via})` or `site.<name>(inputs)`.
+  `site.run(name, inputs, {via, key, limit, cursor})` or `site.<name>(inputs)`.
+- **Abilities keep their promises:** lists page with `limit`/`next_cursor`; a write with a `key`
+  never applies twice; a failed write says `possible_commit` and how to `retry`; an ignored filter
+  fails as `INPUT_NOT_APPLIED`. Details: `help('abilities')`.
 - **Site APIs** (or `siteMapper` in browser code) only work on sites that are mapped. Check `sites`
   first. To map a site: `map`, `describe`, `learn`, or use it in `browser_code` so its requests are
   learned as you go.
@@ -218,41 +236,17 @@ remain for old pack tools in browser code.
 
 ## Chat providers and media
 
-`browserkit ask` talks to a chat product the user is already signed in to. It uses the session in
-Chrome, so there is no API key and no separate login:
-
 ```bash
-browserkit providers                                   # what is available
-browserkit ask chatgpt "Summarise this page: <url>"     # direct request first
-browserkit ask gemini "Compare these two plans" --ui   # force the page
-browserkit ask grok "What is X saying about <topic>?" --json
+browserkit providers                                        # what is available
+browserkit ask chatgpt|gemini|grok|perplexity|kimi "<question>" [--ui|--direct] [--json]
+browserkit media image "<prompt>" [--image in.png] --out out.png   # Gemini, made or edited
+browserkit media youtube "<url>" --ask "<question>"
 ```
 
-- It sends the provider's own request with the user's cookies and falls back to typing in the page
-  when that fails (`--direct` / `--ui` force one). Signed out says `signed-out`. The output carries
-  the answer only, never cookies or tokens.
-
-Inside a chat, the primitive path is one browser_code cell (`browser.openTab(provider)`,
-locators, `page.inspect`).
-
-### Images and video
-
-```bash
-browserkit media image "a red fox in snow" --out fox.png
-browserkit media image "make it dusk" --image fox.png --out dusk.png
-browserkit media youtube "https://youtu.be/<id>" --ask "What are the three main claims?"
-```
-
-Images are made or edited by Gemini and saved in the workspace; YouTube links are answered as text.
-
-### One action at a time
-
-MCP clients that prefer discrete calls have `browser_action` (`{action: "click", selector}`, plus
-navigate, type, press, scroll, wait, extract, screenshot…). Anything with several steps stays in
-`browser_code`.
-
-### Deep research on X
-
-The `deep-x-research` skill does sourced X work: Grok searches, every post URL is opened and
-checked, a query budget keeps it from looping, and X search in a tab is the fallback. Use it for
-"what is X saying about", not for a single post the user already linked.
+- `ask` uses the session the user is signed in to in Chrome (no API key, no separate login): it
+  sends the provider's own request and falls back to typing in the page. Signed out says
+  `signed-out`; the output carries the answer only, never cookies or tokens.
+- MCP clients that prefer single steps have `browser_action` (click, navigate, type, press, scroll,
+  wait, extract, screenshot…); anything with several steps stays in `browser_code`.
+- Sourced research on X ("what is X saying about"): the `deep-x-research` skill (Grok searches,
+  every post opened and checked, a query budget, X search in a tab as the fallback).

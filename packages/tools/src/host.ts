@@ -16,7 +16,11 @@ import {
   siteCapabilities,
   listAbilities,
   readSiteNotes,
+  readAbility,
   runAbility,
+  saveAbility,
+  testAbility,
+  type Ability,
   type AbilityVia,
 } from "@browserkit/site-mapper";
 
@@ -136,13 +140,8 @@ export function createHostHandler(
     if (isSiteToolRequest(request)) return handleSiteTool(request);
     if (isSiteCapabilitiesRequest(request))
       return siteCapabilities(String(request.siteCapabilities.host ?? ""));
-    if (isAbilityRunRequest(request))
-      return runAbility(
-        String(request.abilityRun.site ?? ""),
-        String(request.abilityRun.name ?? ""),
-        (request.abilityRun.inputs ?? {}) as Record<string, unknown>,
-        request.abilityRun.via ? { via: request.abilityRun.via as AbilityVia } : {},
-      );
+    if (isAbilityRunRequest(request)) return answerAbilityRun(request);
+    if (isAbilitySaveRequest(request)) return answerAbilitySave(request.abilitySave);
     if (isAbilityListRequest(request)) return listAbilities(String(request.abilityList.site ?? ""));
     if (isSiteNotesRequest(request))
       return readSiteNotes(siteNameFrom({ site: request.siteNotes }));
@@ -170,7 +169,75 @@ interface AbilityRunRequest {
     name?: unknown;
     inputs?: unknown;
     via?: unknown;
+    key?: unknown;
+    limit?: unknown;
+    cursor?: unknown;
+    /** Run the ability's stored test cases instead. */
+    test?: unknown;
   };
+}
+
+interface AbilitySaveRequest {
+  abilitySave: Record<string, unknown>;
+}
+
+function isAbilitySaveRequest(value: unknown): value is AbilitySaveRequest {
+  return Boolean(value && typeof (value as { abilitySave?: unknown }).abilitySave === "object");
+}
+
+/** Saves an ability an agent wrote: a full ability, or a demonstration's skill ({name, code}). */
+async function answerAbilitySave(spec: Record<string, unknown>): Promise<unknown> {
+  const now = new Date().toISOString();
+  const ways = Array.isArray(spec.ways)
+    ? (spec.ways as Ability["ways"])
+    : typeof spec.code === "string"
+      ? [
+          {
+            kind: "script" as const,
+            runtime: "page" as const,
+            code: /^\s*(async\s*)?\(/.test(spec.code)
+              ? spec.code
+              : `async (page, bu, inputs) => { ${spec.code}\n return inputs; }`,
+          },
+        ]
+      : [];
+  const existing = await readAbility(String(spec.site ?? ""), String(spec.name ?? ""));
+  const { breaking, code: _code, domains: _domains, ...rest } = spec;
+  const saved = await saveAbility(
+    {
+      kind: spec.kind === "write" ? "write" : "read",
+      inputs: (spec.inputs as Ability["inputs"]) ?? {},
+      options: (spec.options as Ability["options"]) ?? {},
+      ...rest,
+      ways,
+      name: String(spec.name ?? ""),
+      site: String(spec.site ?? ""),
+      createdBy: "agent",
+      stats: existing?.stats ?? { runs: 0, failures: 0 },
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
+    } as Ability,
+    { breaking: breaking === true },
+  );
+  return {
+    saved: saved.ability.name,
+    site: saved.ability.site,
+    kind: saved.ability.kind,
+    warnings: saved.warnings,
+  };
+}
+
+function answerAbilityRun(request: AbilityRunRequest): Promise<unknown> {
+  const run = request.abilityRun;
+  const site = String(run.site ?? "");
+  const name = String(run.name ?? "");
+  if (run.test) return testAbility(site, name);
+  return runAbility(site, name, (run.inputs ?? {}) as Record<string, unknown>, {
+    ...(run.via ? { via: run.via as AbilityVia } : {}),
+    ...(typeof run.key === "string" ? { key: run.key } : {}),
+    ...(typeof run.limit === "number" ? { limit: run.limit } : {}),
+    ...(typeof run.cursor === "string" ? { cursor: run.cursor } : {}),
+  });
 }
 
 function isAbilityRunRequest(value: unknown): value is AbilityRunRequest {

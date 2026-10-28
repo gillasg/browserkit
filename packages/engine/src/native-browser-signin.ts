@@ -1,6 +1,8 @@
 import {
+  clearCover,
   clearPasswords,
   scanFields,
+  typeCodeBoxes,
   submitForm,
   typeInto,
   waitForChange,
@@ -28,7 +30,11 @@ export interface SignInResult {
     | "NO_SIGN_IN_FORM"
     | "NEEDS_CODE"
     | "CAPTCHA"
-    | "REJECTED";
+    | "REJECTED"
+    /** The form posts the login to another site: nothing was typed. */
+    | "FOREIGN_FORM"
+    /** The site wants approval on the user's phone or app, and none came within a minute. */
+    | "APPROVE_ON_DEVICE";
   accounts?: string[];
   detail?: string;
 }
@@ -50,6 +56,7 @@ interface LoginAnswer {
 
 type Ask = (request: unknown) => Promise<unknown>;
 const MAX_STAGES = 4;
+const APPROVE_WAIT_MS = 60_000;
 
 export async function signInToPage(
   tabId: number,
@@ -111,11 +118,14 @@ async function fill(
   let fields = await scanFields(tabId);
   if (!fields || !(fields.user || fields.password || fields.code))
     return { ...base, signedIn: false, reason: "NO_SIGN_IN_FORM" };
+  if (fields.foreign)
+    return { ...base, signedIn: false, reason: "FOREIGN_FORM", detail: fields.foreign };
   for (let stage = 0; stage < MAX_STAGES && fields; stage++) {
     const stop = await step(tabId, fields, login, ask, url);
     if (stop) return { ...base, signedIn: false, reason: stop };
     if (!(fields.user || fields.password || fields.code)) break;
-    const next = await waitForChange(tabId, fields);
+    let next = await waitForChange(tabId, fields);
+    if (next?.approve) next = await waitForChange(tabId, next, APPROVE_WAIT_MS);
     if (!next || sameForm(fields, next)) break;
     fields = next;
   }
@@ -131,7 +141,9 @@ async function step(
   url: string,
 ): Promise<SignInResult["reason"] | undefined> {
   if (fields.captcha) return "CAPTCHA";
-  if (fields.code) return enterCode(tabId, login, ask, url);
+  if (fields.foreign) return "FOREIGN_FORM";
+  if (fields.covered) await clearCover(tabId);
+  if (fields.code) return enterCode(tabId, login, ask, url, fields.codeBoxes ?? 0);
   if (fields.user && login.username && fields.userValue !== login.username)
     await typeInto(tabId, "user", login.username);
   if (fields.password) await typeInto(tabId, "password", login.password);
@@ -144,12 +156,14 @@ async function enterCode(
   login: Login,
   ask: Ask,
   url: string,
+  boxes: number,
 ): Promise<SignInResult["reason"] | undefined> {
   if (!login.hasTotp || !login.id) return "NEEDS_CODE";
   const reply = (await ask({ credential: "totp", url, id: login.id })) as { code?: string | null };
   if (!reply?.code) return "NEEDS_CODE";
   rememberSecrets([reply.code]);
-  await typeInto(tabId, "code", reply.code);
+  if (boxes) await typeCodeBoxes(tabId, reply.code, boxes);
+  else await typeInto(tabId, "code", reply.code);
   await submitForm(tabId);
   return undefined;
 }
@@ -161,6 +175,7 @@ async function outcome(
 ): Promise<SignInResult> {
   const now = (await scanFields(tabId)) ?? last;
   if (now?.captcha) return { ...base, signedIn: false, reason: "CAPTCHA" };
+  if (now?.approve) return { ...base, signedIn: false, reason: "APPROVE_ON_DEVICE" };
   if (now?.code) return { ...base, signedIn: false, reason: "NEEDS_CODE" };
   if (now?.password) {
     await clearPasswords(tabId);
