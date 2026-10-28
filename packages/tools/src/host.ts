@@ -20,6 +20,7 @@ import {
   runAbility,
   saveAbility,
   testAbility,
+  trashAbility,
   type Ability,
   type AbilityVia,
 } from "@browserkit/site-mapper";
@@ -142,6 +143,12 @@ export function createHostHandler(
       return siteCapabilities(String(request.siteCapabilities.host ?? ""));
     if (isAbilityRunRequest(request)) return answerAbilityRun(request);
     if (isAbilitySaveRequest(request)) return answerAbilitySave(request.abilitySave);
+    if (isAbilityRemoveRequest(request))
+      return trashAbility(
+        String(request.abilityRemove.site ?? ""),
+        String(request.abilityRemove.name ?? ""),
+        "removed by agent",
+      ).then((removed) => ({ removed }));
     if (isAbilityListRequest(request)) return listAbilities(String(request.abilityList.site ?? ""));
     if (isSiteNotesRequest(request))
       return readSiteNotes(siteNameFrom({ site: request.siteNotes }));
@@ -175,6 +182,14 @@ interface AbilityRunRequest {
     /** Run the ability's stored test cases instead. */
     test?: unknown;
   };
+}
+
+interface AbilityRemoveRequest {
+  abilityRemove: { site?: unknown; name?: unknown };
+}
+
+function isAbilityRemoveRequest(value: unknown): value is AbilityRemoveRequest {
+  return Boolean(value && typeof (value as { abilityRemove?: unknown }).abilityRemove === "object");
 }
 
 interface AbilitySaveRequest {

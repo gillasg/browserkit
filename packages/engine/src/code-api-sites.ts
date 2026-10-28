@@ -150,10 +150,12 @@ var saveAbility = __saveAbility;
 var __siteAbilities = {
   run: async (name, inputs = {}, options = {}) => __call({abilityRun: {site: await __siteHostName(options.site), name, inputs, ...(options.via ? {via: options.via} : {}), ...(options.key ? {key: String(options.key)} : {}), ...(options.limit ? {limit: Number(options.limit)} : {}), ...(options.cursor ? {cursor: String(options.cursor)} : {})}}),
   test: async (name, site) => __call({abilityRun: {site: await __siteHostName(site), name, test: true}}),
+  // Moves an ability to the site's trash/ (nothing is hard-deleted); returns {removed}.
+  remove: async (name, site) => __call({abilityRemove: {site: await __siteHostName(site), name}}),
   list: async (site) => __call({abilityList: {site: await __siteHostName(site)}}),
   notes: async (site) => __call({siteNotes: await __siteHostName(site)}),
 };
-var __siteBase = {tools: __siteToolGroup('tool'), pageTools: __siteToolGroup('pageTool'), capabilities: __siteCapabilities, run: __siteAbilities.run, test: __siteAbilities.test, save: __saveAbility, list: __siteAbilities.list, notes: __siteAbilities.notes};
+var __siteBase = {tools: __siteToolGroup('tool'), pageTools: __siteToolGroup('pageTool'), capabilities: __siteCapabilities, run: __siteAbilities.run, test: __siteAbilities.test, remove: __siteAbilities.remove, save: __saveAbility, list: __siteAbilities.list, notes: __siteAbilities.notes};
 var site = Object.freeze(new Proxy(__siteBase, {
   get: (target, name) => {
     if (typeof name !== 'string' || name in target) return target[name];

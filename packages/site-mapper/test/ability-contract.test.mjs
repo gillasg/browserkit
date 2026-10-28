@@ -243,3 +243,40 @@ test("test cases catch an ability whose output ignores its inputs", async () => 
     assert.equal(honest.ok, true);
   });
 });
+
+test("a node script's browser.fetch answers in browser code's shape", async () => {
+  const { createServer } = await import("node:http");
+  const server = createServer((request, response) => {
+    response.setHeader("content-type", "application/json");
+    response.end(JSON.stringify({ path: request.url, method: request.method }));
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const url = `http://127.0.0.1:${server.address().port}/books`;
+  try {
+    await withHome(async () => {
+      await saveAbility(
+        ability({
+          name: "fetcher",
+          inputs: { type: "object", properties: { url: { type: "string" } } },
+          ways: [
+            {
+              kind: "script",
+              runtime: "node",
+              code: "const a = await browser.fetch(inputs.url); const b = await browser.fetch(inputs.url, {as: 'text'}); return {status: a.status, ok: a.ok, json: a.json, text: typeof b.text};",
+            },
+          ],
+        }),
+      );
+      const answer = await runAbility("example.com", "fetcher", { url });
+      // Objects built inside the vm sandbox carry its prototypes; compare them as JSON.
+      assert.deepEqual(JSON.parse(JSON.stringify(answer.result)), {
+        status: 200,
+        ok: true,
+        json: { path: "/books", method: "GET" },
+        text: "string",
+      });
+    });
+  } finally {
+    server.close();
+  }
+});

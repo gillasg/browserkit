@@ -4,7 +4,7 @@
 
 import { mkdir, readdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import vm from "node:vm";
+import { runNodeScript } from "./ability-node.js";
 import {
   contractBreaks,
   contractWarnings,
@@ -603,28 +603,6 @@ async function attemptScript(
     inputs,
     host.call ?? (async (operation, params) => handleCall(ability.site, operation, params)),
   );
-}
-
-async function runNodeScript(
-  code: string,
-  inputs: Record<string, unknown>,
-  call: (operation: string, params: Record<string, unknown>) => Promise<unknown>,
-): Promise<unknown> {
-  const context = vm.createContext({
-    siteMapper: { call, write: call },
-    browser: { fetch: (url: string, options: RequestInit = {}) => fetch(url, options) },
-    inputs,
-    args: inputs,
-  });
-  const result = new vm.Script(`(async () => { ${code}\n })()`, {
-    filename: "ability.js",
-  }).runInContext(context, { timeout: 30_000 }) as Promise<unknown>;
-  return Promise.race([
-    result,
-    new Promise((_, reject) =>
-      setTimeout(() => reject(new Error("ABILITY_TIMEOUT: node script exceeded 30s")), 30_000),
-    ),
-  ]);
 }
 
 async function handleCall(
