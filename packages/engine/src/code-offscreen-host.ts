@@ -9,8 +9,9 @@ export async function ensureOffscreen(): Promise<void> {
   creating ??= chrome.offscreen
     .createDocument({
       url: OFFSCREEN,
-      reasons: [chrome.offscreen.Reason.WORKERS],
-      justification: "Runs browser_code cells in a persistent sandboxed JavaScript realm.",
+      reasons: [chrome.offscreen.Reason.WORKERS, chrome.offscreen.Reason.USER_MEDIA],
+      justification:
+        "Runs browser_code cells in a persistent sandboxed JavaScript realm and records tabs the user asks for.",
     })
     .catch((error: unknown) => {
       if (!String(error).includes("Only a single offscreen")) throw error;

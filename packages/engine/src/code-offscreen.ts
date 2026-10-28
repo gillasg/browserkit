@@ -1,3 +1,5 @@
+import { recordingMessage } from "./code-offscreen-recorder.js";
+
 // Hosts one sandboxed realm per chat and relays its browser calls to the service worker.
 // A long browser.job (many pages) gets its own realm and stays alive after its cell returns.
 interface Realm {
@@ -203,6 +205,11 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
       }
     reply(true);
     return;
+  }
+  const recorded = recordingMessage(message);
+  if (recorded) {
+    void recorded.then(reply, (error: unknown) => reply({ ok: false, error: String(error) }));
+    return true;
   }
   if (message.kind !== "cell") return;
   const target = realm(message.chatId);

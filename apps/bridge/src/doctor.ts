@@ -37,10 +37,17 @@ export async function runDoctor(): Promise<number> {
     "native host manifest",
     (await exists(manifest)) ? manifest : "missing; run `browserkit setup`",
   );
+  // A source checkout builds the extension; an npm install downloads it into the data folder.
+  const downloaded = join(data, "extension");
+  const extension = (await exists(extensionBuild))
+    ? extensionBuild
+    : (await exists(downloaded))
+      ? downloaded
+      : undefined;
   check(
-    (await exists(extensionBuild)) ? "ok" : "warn",
-    "extension build",
-    (await exists(extensionBuild)) ? extensionBuild : "missing; run the extension build",
+    extension ? "ok" : "warn",
+    "extension",
+    extension ?? "missing; run `browserkit setup` (it downloads the extension)",
   );
   // A half-written dist file makes every command fail with a syntax error, so catch it here.
   const dist = dirname(fileURLToPath(new URL("./cli.js", import.meta.url)));

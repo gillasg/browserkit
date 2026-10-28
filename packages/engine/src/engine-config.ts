@@ -45,7 +45,13 @@ export const engineConfig: EngineConfig = {
   tabGroupTitle: () => "Agent",
   agentView: () => Promise.resolve("split"),
   agentInFront: () => Promise.resolve(false),
-  hideAgentCursor: () => Promise.resolve(false),
+  hideAgentCursor: async () =>
+    (
+      (await chrome.storage.local.get("browserkit-hide-agent-cursor").catch(() => ({}))) as Record<
+        string,
+        unknown
+      >
+    )["browserkit-hide-agent-cursor"] === true,
   agentGlow: () => Promise.resolve(true),
   agentGlowColor: () => Promise.resolve("#8b93a7"),
   privateNetwork: async () =>

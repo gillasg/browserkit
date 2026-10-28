@@ -356,11 +356,19 @@ var bu = Object.freeze({
     if (options.enter) result = await browser.page(target).press(element, 'Enter', {focus:false});
     return result;
   },
+  // {selector} points the amber cursor at the element; {start: true} registers the hand-off and
+  // returns at once ({wait, cancel}), for a click that opens a prompt the page then blocks on.
   handoff: async (message, options = {}) => {
     var target = options.target || __lastTarget;
     if (!target) throw Error('Use bu.use(attachedTarget) or browser.page(target) first');
     __handedOff = true;
-    var outcome = await __call({handoff: {message: String(message).slice(0, 500), target}});
+    var spotlight = options.selector ? await browser.page(target).locator(options.selector).boundingBox().catch(() => null) : null;
+    var request = {message: String(message ?? '').slice(0, 500), target, ...(spotlight ? {spotlight} : {})};
+    if (options.start) {
+      await __call({handoff: {...request, start: true}});
+      return Object.freeze({wait: () => bu.handoff(message, {target}), cancel: () => __call({handoff: {target, cancel: true}})});
+    }
+    var outcome = await __call({handoff: request});
     __states.delete(__key(target));
     if (outcome === 'cancelled') throw Error('HANDOFF_CANCELLED: the user cancelled the hand-off');
     return 'done';

@@ -12,6 +12,8 @@ on:
 
 permissions:
   contents: write
+  # npm trusted publishing (no token): turned on with the repository variable NPM_PUBLISH=true.
+  id-token: write
 
 concurrency:
   group: release
@@ -63,7 +65,14 @@ jobs:
             cat build-info.json
             echo '```'
             echo
-            echo "Unzip it and load the folder with Load unpacked in chrome://extensions. The bridge, CLI and MCP server come from the source at this tag (see Setup in the README)."
+            echo "Unzip it and load the folder with Load unpacked in chrome://extensions. Or let `npx browserkit setup` download and set it up for you."
           } > notes.md
           gh release create "$TAG" "browserkit-$TAG.zip" build-info.json \
             --target "$GITHUB_SHA" --title "$TAG" --notes-file notes.md
+      - name: Publish to npm
+        if: steps.build.outputs.tag && vars.NPM_PUBLISH == 'true'
+        env:
+          NPM_VERSION: 0.${{ github.run_number }}.0
+        run: |
+          node scripts/pack-npm.mjs
+          npm publish dist-npm --provenance --access public

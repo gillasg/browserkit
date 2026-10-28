@@ -104,6 +104,27 @@ function __extendPageEvents(target, base) {
       }
       return null;
     },
+    // Records the tab as a video file (MP4, else WebM) in the workspace, with nothing of ours
+    // drawn on it ({cursor: true} keeps the cursor). Sound comes with it when Chrome lets the
+    // tab be captured (the user invoked the extension on it); otherwise the picture alone.
+    // {seconds} records and returns; without it a handle with stop() and cancel() comes back.
+    recordVideo: async (options = {}) => {
+      var started = await __call({recording: 'start', target, audio: options.audio !== false, cursor: options.cursor === true, format: options.format, fps: options.fps});
+      var name = String(options.name || 'video-' + Date.now()).replace(/[^A-Za-z0-9._-]+/g, '-');
+      var finish = async () => {
+        var done = await __call({recording: 'stop', target});
+        var file = /[.](mp4|webm)$/.test(name) ? name : name + (String(done.mimeType).includes('mp4') ? '.mp4' : '.webm');
+        try {
+          for (var offset = 0; offset < done.bytes; offset += 750000) {
+            var part = await __call({recording: 'read', target, offset});
+            await __call({workspace: offset ? 'append' : 'artifact', name: file, value: part.base64, base64: true});
+          }
+        } finally { await __call({recording: 'drop', target}).catch(() => {}); }
+        return {saved: file, mode: done.mode, audio: done.audio, seconds: Math.round(done.ms / 100) / 10, bytes: done.bytes, type: done.mimeType, ...(started.note ? {note: started.note} : {})};
+      };
+      if (options.seconds) { await __sleep(Math.min(options.seconds, 50) * 1000); return finish(); }
+      return Object.freeze({mode: started.mode, audio: started.audio, ...(started.note ? {note: started.note} : {}), stop: finish, cancel: () => __call({recording: 'cancel', target})});
+    },
     // Records a playing video or audio element (its sound included) for some seconds into the
     // workspace as WebM. Protected (DRM) media cannot be recorded.
     recordMedia: async (selector = 'video, audio', options = {}) => {

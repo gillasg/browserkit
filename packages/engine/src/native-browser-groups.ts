@@ -1,6 +1,7 @@
 import { engineConfig } from "./engine-config.js";
 import { ownerTitle as storedOwnerTitle } from "./native-browser-owner.js";
 import { onEngineInstall } from "./native-engine-install.js";
+import { settleAgentGroups } from "./native-browser-group-placement.js";
 
 // Tabs an agent opens are kept together in one tab group per chat, per window, so the user can
 // see, collapse or close an agent's work at once. Grouping is presentation only: it never fails a
@@ -149,6 +150,7 @@ async function joinGroup(
     setRecord(owner, record);
     await chrome.tabGroups.update(groupId, { title, color: record.color });
     await save();
+    await settleAgentGroups(windowId);
   } catch {
     // A dragged-out tab, a closed window or a browser without groups: leave the tab ungrouped.
   }
@@ -239,6 +241,13 @@ export async function tabGroupsCall(value: Record<string, unknown>): Promise<{ e
   if (value.tabGroups === "set")
     return { enabled: await setAgentTabGrouping(value.enabled === true) };
   throw new Error("UNSUPPORTED");
+}
+
+/** Every tab group that belongs to an agent session. */
+export function agentGroupIds(): number[] {
+  return [...groups.values()].flatMap((byWindow) =>
+    [...byWindow.values()].map((record) => record.groupId),
+  );
 }
 
 /** Whether a Chrome tab group belongs to an agent session. */

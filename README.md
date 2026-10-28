@@ -11,29 +11,36 @@ Most browser-automation tools start a separate, empty browser. This one runs ins
 - **Site APIs.** Record a site's own requests while doing a task once (`page.network.start()`), with full headers, bodies and the script that made each call, and export them as HAR. Then call them from inside the page with `page.replay(id, changes)` or `page.request(url)`, so cookies, CSRF tokens and request signing all work: often many times faster than clicking.
 - **Data without scraping.** `page.data()` returns a page's embedded JSON (JSON-LD, `__NEXT_DATA__`, app state) and metadata; `page.markdown()` returns its main content as clean Markdown.
 - **Many pages at once.** `browser.fetch(url)` fetches with your cookies and no tab; `browser.pool(urls, fn)` works through pages in parallel tabs, with retries and back-off.
-- **Site skills.** Flows an agent works out are saved per site and offered to every later session.
+- **Abilities.** What an agent works out on a site is saved as a named, tested ability and offered to every later session.
 - **Hand-off.** When a step needs you (signing in, a 2FA code, a choice), the agent calls `bu.handoff("…")`. The tab comes forward with the request and **Done / Cancel**, and the agent continues from there.
 - **Many agents, one browser.** Each session owns the tabs it opens; sessions do not interfere with each other or with your own tabs.
-- **Visible work.** An on-page cursor shows where the agent clicks.
+- **Visible work.** An on-page cursor shows where the agent clicks and what it is doing; a glow marks the tab it works in, and its toolbar icon carries a dot on that tab.
+- **Clean recordings.** `page.recordVideo()` records a tab to MP4 or WebM, with its sound when Chrome allows, and nothing of browserkit's in the picture.
 - **Boosts.** `browser.boosts.save({ name, sites, css, zaps, actions, network, js })` saves a lasting change to a site that applies on every visit, from the [Site Boosts](https://github.com/gillasg/site-boosts) engine built in.
 - **Crawling and site APIs.** The `crawl` tool reads pages and whole sites as Markdown (the crawler in `packages/crawl`); `site_mapper` turns sites mapped from your own traffic into APIs (the mapper in `packages/site-mapper`).
 
 ## Setup
 
-Requires Node.js 22+ and Chrome, Edge or Brave.
+Requires Node.js 22+ and a Chromium browser (Chrome, Edge, Brave, Arc and others).
 
 ```sh
-pnpm install
-pnpm build
-node apps/bridge/dist/cli.js setup
+npx browserkit setup
 ```
 
-`setup` registers the native messaging host and prints the remaining steps:
+`setup` does everything it can by itself:
 
-1. Open `chrome://extensions`, turn on **Developer mode**, choose **Load unpacked**, and select `apps/extension/build`.
-2. Add the MCP server to your agent: the command is `node /path/to/apps/bridge/dist/cli.js mcp` (stdio). `setup` prints ready-to-paste config.
+- registers the native messaging host that lets the extension reach the bridge;
+- downloads the extension from the latest release;
+- adds the browserkit MCP server to the coding agents it finds (Claude Code, Codex, opencode, Cursor, Gemini CLI, Claude Desktop) and links the browserkit skill into `~/.agents/skills`;
+- opens `chrome://extensions` with the extension's folder on your clipboard, and waits.
 
-The bridge starts on demand and stays in the background. The extension's toolbar popup shows whether it is connected.
+One step is yours: turn on **Developer mode**, click **Load unpacked** and choose that folder. `setup` sees the extension connect and finishes. Restart your agent so it loads the MCP server, then ask it to _"open news.ycombinator.com and tell me the top story"_.
+
+**Or let your agent do it.** Paste this into your coding agent: _"Set up browserkit with `npx browserkit setup` and tell me which folder to load."_
+
+From a clone instead: `pnpm install && pnpm build && node apps/bridge/dist/cli.js setup` (it uses the extension you just built, in `apps/extension/build`).
+
+The bridge starts on demand and stays in the background. The extension's toolbar popup shows whether it is connected; `browserkit doctor` says which piece is missing.
 
 ## Connecting an agent (MCP)
 
@@ -74,7 +81,7 @@ Agents without MCP can use the CLI below; `repl` takes the same code.
 ## CLI
 
 ```sh
-browserkit setup                                  # native host, then load apps/extension/build
+browserkit setup                                  # host, extension, agents, skill
 browserkit repl "page = await browser.openTab('https://example.com'); await bu.state()"
 browserkit tabs
 browserkit status
@@ -90,13 +97,9 @@ browserkit federate shop.example:searchProducts other.example:search
 browserkit heal shop.example
 browserkit rest                                   # local REST API over every mapped site
 browserkit boosts list
-browserkit workflow save flows/read-thread.json
-browserkit workflow run read-thread --inputs '{"url":"https://x.com/a/status/1"}'
-browserkit recipe install x.com
-browserkit recipe run x.com thread --inputs '{"url":"https://x.com/a/status/1"}' --feed
-browserkit recipe draft shop.example --save
-browserkit recipe list x.com
-browserkit workflow runs read-thread
+browserkit abilities build shop.example "search products by name"
+browserkit abilities run shop.example searchProducts --inputs '{"q":"headphones"}' --limit 20
+browserkit abilities list x.com
 browserkit sessions create research --url https://x.com/home
 browserkit sessions list
 browserkit cookies list --domain example.com
@@ -112,25 +115,21 @@ mapped site.
 
 Agents bring their own model: this extension does not sign in to model providers and does not provide a model to other extensions. A companion asking for one is told that none is available.
 
-## Workflows and recipes
+## Abilities
 
-Three layers, one recipe system:
+An **ability** is one named thing a site can do (`searchProducts`, `placeOrder`), saved per site
+and callable as `site.<name>()` in the REPL, `browserkit abilities run` or the MCP tools. Each one
+keeps the ways it can run, tried in order: the site's own API call (or a chain of them), replayed
+page steps, page code, or node code. Lists keep their paging (`--limit`, `--cursor`) and record
+mapping. Writes take a `key` so a retry never applies twice, and a failure says whether the write
+may have gone through and whether retrying is safe. Saving refuses an ability that ignores its
+inputs, and `abilities test` runs its stored cases.
 
-- **Site pack**: everything about one site. Its mapped API, named **recipes**, field mappings,
-  health and the browser skills and boosts written for it. A recipe runs in order: the captured
-  API with cursor paging, then the page (rows by selector, with expand buttons and scrolling),
-  then a script. Records are mapped, filtered and de-duplicated; a write recipe keeps receipts so
-  a repeat is skipped. `browserkit recipe install x.com` adds the built-in thread and feed
-  recipes; `recipe draft <site>` turns a mapped operation and its sample into a recipe.
-- **Workflow**: a saved, reusable sequence that can span sites. Typed inputs with defaults,
-  templated arguments (`{{steps.<id>.field}}`), repeat/each/until, retries, delays, timeouts,
-  conditional steps, dry-run and on-error handling. Runs are recorded per step and kept under the
-  data folder (`browserkit workflow runs <name>`). The workflow engine is host-agnostic: browserkit
-  supplies the browser actions, and other hosts can supply their own.
-- **Skill**: the code escape hatch when a recipe or a workflow is not enough.
-
-Recipes are carried in site packs (`browserkit pack export/import`); workflows and recipes move
-with `workflow export/import` and `recipe export/import`.
+- `browserkit abilities build <site> "<task>"` does the task once in a background tab (a write
+  in dry run) and saves a tested ability, or answers why it can't (`signed_out`, `bot_wall`,
+  `site_lacks_capability` and others).
+- Agents save their own with `saveAbility()` after working something out.
+- Sites move with everything they know through `browserkit pack export/import`.
 
 ## Sessions, network, cookies and readiness
 

@@ -6,7 +6,9 @@ import { runDoctor } from "../doctor.js";
 import { formatResult } from "../format.js";
 import { installSkill } from "../install-skill.js";
 import { runMcpServer } from "../mcp.js";
-import { nextSteps, setup } from "../setup.js";
+import { connectAgents } from "../connect-agents.js";
+import { mcpCommand, nextSteps, setup } from "../setup.js";
+import { extensionFolder, presentExtension } from "../setup-extension.js";
 import { flag, has, type Args } from "../args.js";
 import { out } from "../output.js";
 import type { Command } from "../usage.js";
@@ -121,12 +123,56 @@ async function serve(): Promise<number> {
   return 0;
 }
 
+// One command: native host, extension folder, agents, skill, then wait for the extension.
 async function register(args: Args): Promise<number> {
   await setup({ register: !has(args, "no-register") });
-  process.stdout.write(nextSteps() + "\n");
-  const linked = await installSkill();
-  for (const path of linked) out(`Linked the browserkit skill at ${path}`);
-  return 0;
+  out("Native host registered for Chrome, Edge, Chromium, Brave, Vivaldi, Opera, Arc and Helium.");
+  const folder = await extensionFolder(out);
+  if (!has(args, "no-agents")) {
+    const results = await connectAgents({ name: "browserkit", ...mcpCommand() });
+    for (const result of results)
+      out(`${result.done ? "Connected" : "Could not connect"} ${result.agent} (${result.detail})`);
+    if (!results.length) out(nextSteps());
+  }
+  for (const path of await installSkill()) out(`Linked the browserkit skill at ${path}`);
+  // Only a person at a terminal gets the page opened and the wait; scripts get the steps.
+  const interactive = process.stdout.isTTY === true && !has(args, "no-wait");
+  if (interactive && (await browserConnected())) {
+    out('The extension is connected. Try: browserkit repl "(await browser.tabs()).length"');
+    return 0;
+  }
+  if (interactive) presentExtension(folder);
+  out("");
+  out("Last step: load the extension. In chrome://extensions, turn on");
+  out(
+    "Developer mode, click Load unpacked and choose this folder (its path is on your clipboard):",
+  );
+  out(`  ${folder}`);
+  out("Then restart your agent so it picks up the browserkit MCP server.");
+  if (!interactive) return 0;
+  out("Waiting for the extension to connect (Ctrl+C to stop)…");
+  for (let waited = 0; waited < 10 * 60_000; waited += 2000) {
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+    if (await browserConnected()) {
+      out('Connected. Try: browserkit repl "(await browser.tabs()).length"');
+      return 0;
+    }
+  }
+  out("Still not connected; run `browserkit doctor` to see why.");
+  return 1;
+}
+
+async function browserConnected(): Promise<boolean> {
+  try {
+    const bridge = await BridgeClient.connect();
+    try {
+      return Number((await bridge.request("status")).browsers) > 0;
+    } finally {
+      bridge.close();
+    }
+  } catch {
+    return false;
+  }
 }
 
 async function mcp(): Promise<number> {
@@ -138,13 +184,16 @@ export const browserGroup: Command[] = [
   {
     name: "setup",
     group: "Browser",
-    summary: "register the native host and print how to connect agents",
-    help: `Usage: browserkit setup [--no-register]
+    summary: "set everything up: native host, extension, agents, skill",
+    help: `Usage: browserkit setup [--no-register] [--no-agents] [--no-wait]
 
-Writes the native messaging host manifest and registers it for Chrome, Edge, Chromium and Brave.
-An older registration from before the rename is removed. --no-register only writes the files.
-It also links the browserkit skill into ~/.agents/skills (and ~/.claude/skills) so coding agents
-on this machine find it.`,
+Registers the native messaging host for Chromium browsers (Chrome, Edge, Brave, Arc and others),
+finds the extension (the built folder, or the latest release downloaded), adds the browserkit
+MCP server to the coding agents on this machine (Claude Code, Codex, opencode, Cursor, Gemini
+CLI, Claude Desktop), links the browserkit skill into ~/.agents/skills, then opens
+chrome://extensions with the extension folder on the clipboard and waits until it connects.
+--no-register only writes the host files; --no-agents leaves agent configs alone; --no-wait
+returns without waiting.`,
     run: register,
   },
   {

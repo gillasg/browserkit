@@ -3,10 +3,13 @@ import { guardAgentTab } from "./native-browser-tab-cleanup.js";
 import { withBrowserDebugger } from "./native-browser-session.js";
 import { onEngineInstall } from "./native-engine-install.js";
 import { handoffActive } from "./native-browser-control.js";
+import { showAgentNeeds, tabRecording } from "./native-browser-cursor.js";
 
 // Hand-off: the agent pauses and asks the user to do something in the real tab (sign in, 2FA,
 // pick an option). A banner on the page carries the request plus Done and Cancel; the cell
 // waits until one is clicked. Login flows navigate, so the banner is re-shown on every poll.
+// The cursor turns amber and points at the element when one is given. While the tab is recorded
+// on video the page shows nothing of ours: the notification (and the chat's card) carry it.
 const POLL_MS = 600;
 const MAX_WAIT_MS = 30 * 60_000;
 const KEY = "Symbol.for('aeon.handoff')";
@@ -48,6 +51,7 @@ export async function handOffToUser(
   tabId: number,
   message: string,
   active: () => boolean,
+  spotlight?: { x: number; y: number; width: number; height: number },
 ): Promise<"done" | "cancelled"> {
   const tab = await chrome.tabs.get(tabId).catch(() => undefined);
   if (!tab) throw new Error("TARGET_LOST");
@@ -67,12 +71,13 @@ export async function handOffToUser(
   answers.delete(tabId);
   guardAgentTab(tabId, true);
   handoffActive(tabId, true);
+  showAgentNeeds(tabId, message, spotlight);
   try {
     while (active() && Date.now() < deadline) {
       if (!(await chrome.tabs.get(tabId).catch(() => undefined))) throw new Error("TARGET_LOST");
       const answered = answers.get(tabId);
       if (answered) return answered;
-      const state = await evaluate(tabId, BANNER(message));
+      const state = tabRecording(tabId) ? "waiting" : await evaluate(tabId, BANNER(message));
       if (state === "done" || state === "cancelled") return state;
       await new Promise((resolve) => setTimeout(resolve, POLL_MS));
     }
@@ -80,6 +85,7 @@ export async function handOffToUser(
   } finally {
     guardAgentTab(tabId, false);
     handoffActive(tabId, false);
+    showAgentNeeds(tabId, null);
     answers.delete(tabId);
     void chrome.notifications.clear(notification).catch(() => undefined);
     void evaluate(tabId, CLEAR).catch(() => undefined);

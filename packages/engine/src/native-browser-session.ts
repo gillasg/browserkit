@@ -1,4 +1,10 @@
-import { removeAgentCursor, showAgentGlow } from "./native-browser-cursor.js";
+import { removeAgentCursor, showAgentBadge, showAgentGlow } from "./native-browser-cursor.js";
+import {
+  evictForeignFrames,
+  FOREIGN_FRAME,
+  protectedUiError,
+  webPage,
+} from "./native-browser-foreign-frames.js";
 import {
   enableDiagnostics,
   forgetDiagnostics,
@@ -92,12 +98,21 @@ export async function withBrowserDebugger<T>(
   tabId: number,
   action: (debuggee: chrome.debugger.Debuggee) => Promise<T>,
 ): Promise<T> {
+  let evicted = 0;
   for (let attempt = 0; ; attempt++) {
     try {
       return await runWithBrowserDebugger(tabId, action);
     } catch (error) {
-      if (attempt >= 4 || !NOT_READY.test(String(error instanceof Error ? error.message : error)))
-        throw error;
+      const text = String(error instanceof Error ? error.message : error);
+      // On a web page the same errors mean another extension's frame: remove it and attach again.
+      if (FOREIGN_FRAME.test(text) && (await webPage(tabId))) {
+        if (evicted >= 2) throw protectedUiError();
+        evicted += 1;
+        await evictForeignFrames(tabId);
+        await detach(tabId);
+        continue;
+      }
+      if (attempt >= 4 || !NOT_READY.test(text)) throw error;
       await new Promise((resolve) => setTimeout(resolve, 300 * (attempt + 1)));
     }
   }
@@ -123,8 +138,7 @@ async function runWithBrowserDebugger<T>(
     if (attachments.get(tabId) !== entry) throw new Error("OPERATION_FAILED");
     if (entry.timer !== undefined) clearTimeout(entry.timer);
     entry.timer = globalThis.setTimeout(() => idleDetach(tabId), 90_000);
-    void chrome.action.setBadgeText({ tabId, text: "AI" });
-    void chrome.action.setBadgeBackgroundColor({ tabId, color: "#4299ff" });
+    void showAgentBadge(tabId);
     void chrome.action.setTitle({ tabId, title: engineConfig.controllingTitle(chatId) });
     return await action({ tabId });
   } catch (error) {

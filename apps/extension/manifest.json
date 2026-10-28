@@ -23,6 +23,7 @@
     "webNavigation",
     "downloads",
     "offscreen",
+    "tabCapture",
     "tabGroups",
     "alarms",
     "history",

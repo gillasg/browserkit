@@ -16,4 +16,5 @@ The password manager is set up once by the user: `browserkit signin setup bitwar
 `bw` CLI) or `signin setup proton` (Proton Pass's `pass-cli`).
 
 Hand back to the user with `bu.handoff("...")` only for what no agent can do: a 2FA code by SMS or
-email, a CAPTCHA, a payment, or a choice that is theirs.
+email, a CAPTCHA, a payment, or a choice that is theirs. Before a click that opens a passkey or 2FA
+prompt the page blocks on, start it first with `{start: true}` (help('signin')).

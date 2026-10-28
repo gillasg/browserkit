@@ -47,7 +47,9 @@ test(
       const old = join(home, folders[process.platform][0], OLD_HOST + ".json");
       await mkdir(dirname(old), { recursive: true });
       await writeFile(old, "{}");
-      const { stdout } = await run(process.execPath, [cli, "setup"], { env });
+      const { stdout } = await run(process.execPath, [cli, "setup", "--no-agents", "--no-wait"], {
+        env,
+      });
       assert.match(stdout, /Native host registered/);
       await assert.rejects(() => access(old), "the old registration is removed");
       let launcher;

@@ -160,6 +160,17 @@ export async function unsplitForClose(
   }
 }
 
+/** The user's idle time (browser.settings idleTabMinutes); 0 means agent tabs never close by age. */
+async function idleMinutes(): Promise<number> {
+  const stored = (await chrome.storage.local.get(IDLE_KEY).catch(() => ({}))) as Record<
+    string,
+    unknown
+  >;
+  const minutes = Number(stored[IDLE_KEY] ?? DEFAULT_IDLE_MINUTES);
+  return Number.isFinite(minutes) && minutes >= 0 ? minutes : DEFAULT_IDLE_MINUTES;
+}
+const IDLE_KEY = "browserkit-idle-tab-minutes";
+
 export async function cleanupAgentTabs(options: { minutes?: number } = {}): Promise<number[]> {
   await restore();
   const idle = (options.minutes ?? DEFAULT_IDLE_MINUTES) * 60_000;
@@ -348,7 +359,10 @@ onEngineInstall(() => {
       forgetAgentTab(tabId);
   });
   chrome.alarms.onAlarm.addListener((alarm) => {
-    if (alarm.name === ALARM) void cleanupAgentTabs();
+    if (alarm.name === ALARM)
+      void idleMinutes().then(async (minutes) => {
+        if (minutes > 0) await cleanupAgentTabs({ minutes });
+      });
   });
   void chrome.alarms.create(ALARM, { periodInMinutes: 1 });
 });

@@ -276,6 +276,9 @@ var browser = Object.freeze({
   // Windows and zoom: the browser's own window list, resizing, and per-tab zoom.
   windows: __windows,
   setZoom: (factor, tabId) => __zoom(factor, tabId),
+  // How agents look and run here, for when the user asks: browser.settings() lists each setting
+  // with its value and choices; browser.settings({name: value}) changes them and returns all.
+  settings: (changes) => __call(changes ? {settings: 'set', values: changes} : {settings: 'get'}),
   // Whether tabs an agent opens are grouped. browser.tabGrouping(false) turns grouping off and
   // takes back every tab an agent had grouped; browser.tabGrouping() reads the setting.
   tabGrouping: async (enabled) => {

@@ -21,7 +21,9 @@
 - **What a page sends** (the API behind it, a download link, a stream): network capture,
   `help('network')`; live WebSockets and event streams, `help('live')`.
 - **Files and media**: save images, videos and files, or upload into a page, `help('media')`;
-  record a tab's screen and sound, `help('recording')`.
+  record a tab as a video with its sound, nothing of ours in it, `help('recording')`.
+- **How agents look and run here**, when the user asks (views, cursor, tab groups, idle tabs):
+  `browser.settings()` lists them; `browser.settings({name: value})` changes them.
 - **Change a site on every visit** (hide parts, restyle, auto-click a banner): a boost,
   `help('boosts')`.
 - **Long or wide work**: many pages, `browser.job` (`help('jobs')`); hundreds of sites, a sweep

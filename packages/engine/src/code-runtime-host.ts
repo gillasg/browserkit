@@ -50,6 +50,8 @@ import { mediaCall, type MediaRequest } from "./native-browser-media.js";
 import { isLibraryRequest, libraryCall } from "./native-browser-library.js";
 import { windowsCall } from "./native-browser-windows.js";
 import { tabGroupsCall } from "./native-browser-groups.js";
+import { recordingCall } from "./native-browser-recording.js";
+import { settingsCall } from "./native-browser-settings.js";
 import { closeTabCall } from "./code-tab-close.js";
 import { rulesCall } from "./native-browser-rules.js";
 import { permissionCall } from "./native-browser-permissions.js";
@@ -318,6 +320,9 @@ function serveCall(cell: Cell, value: Record<string, unknown> | null): Promise<u
   if (value && value.session === "reap")
     return reapChatPopups(cell.run.chatId).then((closed) => ({ closed }));
   if (value && value.tabs === "close") return closeTabCall(cell.run.chatId, value);
+  if (value && (value.settings === "get" || value.settings === "set")) return settingsCall(value);
+  if (value && typeof value.recording === "string")
+    return recordingCall(authorizedTarget(cell, value.target).tabId, value);
   if (value && typeof value.network === "string")
     return networkCall(authorizedTarget(cell, value.target).tabId, value.network, value);
   if (value && typeof value.rules === "string")
@@ -492,22 +497,54 @@ const INPUT_OPS = new Set([
   "keys",
 ]);
 
-async function handoff(cell: Cell, request: object): Promise<"done" | "cancelled"> {
-  const { message } = request as { message?: unknown };
+// A hand-off started ahead ({start}: before a click that opens a passkey, 2FA or payment prompt
+// the page then blocks on) keeps waiting after its cell; the next bu.handoff on the tab waits for it.
+const startedHandoffs = new Map<number, { token: object; run: Promise<"done" | "cancelled"> }>();
+
+async function handoff(cell: Cell, request: object): Promise<unknown> {
+  const { message, start, cancel, spotlight } = request as {
+    message?: unknown;
+    start?: unknown;
+    cancel?: unknown;
+    spotlight?: { x: number; y: number; width: number; height: number };
+  };
   const target = authorizedTarget(cell, (request as { target?: unknown }).target);
+  const pending = startedHandoffs.get(target.tabId);
+  if (cancel === true) {
+    startedHandoffs.delete(target.tabId);
+    return { cancelled: Boolean(pending) };
+  }
+  if (pending && start !== true) return waitForStarted(cell, target.tabId, pending.run);
   void notePreviewActivity(cell.run.chatId, target.tabId);
   // The user needs to see the tab: pair it beside its Chat in Split View, whatever the view setting.
   void presentBrowserTask(cell.run.chatId, target.tabId, true);
   const text = String(message ?? "").slice(0, 500) || "Please take over, then click Done.";
   const entry: Record<string, unknown> = {
     index: cell.steps.length,
-    action: { op: "handoff", message: text, target },
+    action: { op: "handoff", message: text, target, ...(start === true ? { start: true } : {}) },
     disposition: "running",
   };
   cell.steps.push(entry);
+  const box = spotlight && Number.isFinite(spotlight.x) ? spotlight : undefined;
+  if (start === true) {
+    const token = {};
+    const run = handOffToUser(
+      target.tabId,
+      text,
+      () => startedHandoffs.get(target.tabId)?.token === token,
+      box,
+    );
+    startedHandoffs.set(target.tabId, { token, run });
+    void run.then(
+      (outcome) =>
+        Object.assign(entry, { disposition: outcome === "done" ? "completed" : "failed" }),
+      (error: unknown) => Object.assign(entry, { disposition: "failed", code: describe(error) }),
+    );
+    return { started: true };
+  }
   setWaiting(cell, true);
   try {
-    const outcome = await handOffToUser(target.tabId, text, () => !cell.done);
+    const outcome = await handOffToUser(target.tabId, text, () => !cell.done, box);
     Object.assign(entry, { disposition: outcome === "done" ? "completed" : "failed" });
     return outcome;
   } catch (error) {
@@ -515,6 +552,20 @@ async function handoff(cell: Cell, request: object): Promise<"done" | "cancelled
     throw error;
   } finally {
     setWaiting(cell, false);
+  }
+}
+
+async function waitForStarted(
+  cell: Cell,
+  tabId: number,
+  run: Promise<"done" | "cancelled">,
+): Promise<"done" | "cancelled"> {
+  setWaiting(cell, true);
+  try {
+    return await run;
+  } finally {
+    setWaiting(cell, false);
+    if (startedHandoffs.get(tabId)?.run === run) startedHandoffs.delete(tabId);
   }
 }
 

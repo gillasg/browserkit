@@ -46,6 +46,10 @@ export interface CursorUpdate {
   glowColor?: string;
   /** Initial viewport position when the overlay is recreated after a navigation. */
   start?: { x: number; y: number };
+  /** The agent waits for the user: amber cursor and spotlight, no glow, the message as caption. */
+  needs?: string | null;
+  /** The tab is being recorded with the cursor: show only the cursor, nothing else of ours. */
+  clean?: boolean;
 }
 
 const OVERLAY = `(update) => {
@@ -60,7 +64,9 @@ const OVERLAY = `(update) => {
     const root = host.attachShadow({ mode: "closed" });
     root.innerHTML = '<style>' +
       '.g{position:fixed;inset:0;border-radius:18px;pointer-events:none;opacity:0;transform:none;box-shadow:inset 0 0 0 2px rgba(139,147,167,.55),inset 0 0 28px rgba(139,147,167,.35);transition:opacity .3s ease;animation:edge 2.4s ease-in-out infinite}' +
-      '.g.on{opacity:1}.g.user{animation:none;opacity:.35}@keyframes edge{50%{opacity:.55}}' +
+      '.g.on{opacity:1}.g.user{animation:none;opacity:.35}.g.on.wait{opacity:.4;animation-duration:4.8s}@keyframes edge{50%{opacity:.55}}' +
+      '.needs .g{opacity:0!important}.needs .a path{fill:#e08a00}.needs .t path{stroke:#e08a00}.needs .p{background:#e08a00!important}.needs .s{border-color:rgba(224,138,0,.95)}' +
+      '.clean .g,.clean .p,.clean .s,.clean .co,.clean .k,.clean svg.trail{display:none!important}' +
       '.c{position:absolute;left:0;top:0;will-change:transform;transition:opacity .18s ease}' +
       '.a,.t{position:absolute;left:-3px;top:-2px;filter:drop-shadow(0 2px 4px rgba(15,23,42,.35));transition:transform 120ms ease,opacity 120ms ease}' +
       '.t{left:-6px;top:-11px;opacity:0}.c.text .a{opacity:0}.c.text .t{opacity:1}' +
@@ -71,10 +77,10 @@ const OVERLAY = `(update) => {
       '.p{position:absolute;left:18px;top:20px;max-width:320px;padding:5px 10px;border-radius:999px;background:rgba(17,24,39,.88);color:#fff;font:500 12px/16px system-ui,-apple-system,Segoe UI,sans-serif;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;box-shadow:0 4px 14px rgba(0,0,0,.25);opacity:0;transform:translateY(-3px);transition:opacity 160ms ease,transform 160ms ease}' +
       '.p.on{opacity:1;transform:none}' +
       'svg.trail{position:absolute;inset:0;width:100%;height:100%;overflow:visible}' +
-      '</style><div class="g"></div><svg class="trail"></svg><div class="c"><i></i>' +
+      '</style><div class="w"><div class="g"></div><svg class="trail"></svg><div class="c"><i></i>' +
       '<svg class="a" width="22" height="24" viewBox="0 0 22 24"><path d="M2 2l7.5 19 2.6-7.6L20 10.8z" fill="#4f46e5" stroke="#fff" stroke-width="1.6" stroke-linejoin="round"/></svg>' +
       '<svg class="t" width="12" height="22" viewBox="0 0 12 22"><path d="M2 1.5h8M2 20.5h8M6 1.5v19" stroke="#4f46e5" stroke-width="2.2" stroke-linecap="round" fill="none"/></svg>' +
-      '<div class="p"></div></div>';
+      '<div class="p"></div></div></div>';
     const extras = document.createElement("div");
     extras.innerHTML = '<style>' +
       '.s{position:fixed;left:0;top:0;border-radius:12px;border:2px solid rgba(99,102,241,.9);box-shadow:0 0 0 9999px rgba(15,23,42,.55);opacity:0;pointer-events:none;transition:left .25s ease,top .25s ease,width .25s ease,height .25s ease,opacity .2s ease}' +
@@ -84,9 +90,10 @@ const OVERLAY = `(update) => {
       '.k{position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(6px);padding:6px 10px;border-radius:8px;background:rgba(17,24,39,.9);color:#fff;font:600 11px/14px system-ui;opacity:0;transition:opacity .18s ease,transform .18s ease;pointer-events:none}' +
       '.k.on{opacity:1;transform:translateX(-50%)}' +
       '</style><div class="s"></div><div class="co"></div><div class="k"></div>';
-    root.append(...extras.childNodes);
+    const wrap = root.querySelector(".w");
+    wrap.append(...extras.childNodes);
     const state = host.__s = {
-      root, cursor: root.querySelector(".c"), ripple: root.querySelector("i"),
+      root, wrap, cursor: root.querySelector(".c"), ripple: root.querySelector("i"),
       glow: root.querySelector(".g"), glowColor: "",
       pill: root.querySelector(".p"), trail: root.querySelector("svg.trail"),
       spotlight: root.querySelector(".s"), callout: root.querySelector(".co"), keys: root.querySelector(".k"),
@@ -106,6 +113,8 @@ const OVERLAY = `(update) => {
     s.glowColor = update.glowColor;
     const rgb = toRgb(update.glowColor);
     if (rgb) s.glow.style.boxShadow = "inset 0 0 0 2px rgba(" + rgb + ",.55),inset 0 0 28px rgba(" + rgb + ",.35)";
+    // A product colour also colours the caption, so cursor, caption and glow read as one thing.
+    if (rgb && update.glowColor !== "#8b93a7") s.pill.style.background = "rgba(" + rgb + ",.95)";
   }
   if (update.glowOnly && !s.cursorShown) s.cursor.style.opacity = "0";
   if (update.x !== undefined || update.y !== undefined) {
@@ -114,9 +123,19 @@ const OVERLAY = `(update) => {
   }
   if (update.glow !== undefined) s.glow.classList.toggle("on", update.glow);
   if (update.glowDim !== undefined) s.glow.classList.toggle("user", update.glowDim);
+  if (update.clean !== undefined) s.wrap.classList.toggle("clean", update.clean);
+  if (update.needs !== undefined) {
+    s.wrap.classList.toggle("needs", Boolean(update.needs));
+    if (update.needs) { s.cursor.style.opacity = "1"; s.cursorShown = true; }
+    else { s.spotlight.classList.remove("on"); s.pill.classList.remove("on"); }
+  }
   s.cursor.classList.remove("idle");
+  s.glow.classList.remove("wait");
   clearTimeout(s.idle);
+  clearTimeout(s.waitTimer);
   s.idle = setTimeout(() => s.cursor.classList.add("idle"), 2200);
+  // Nothing happened for a while: the agent is waiting (a page, a reply), so the glow dims.
+  s.waitTimer = setTimeout(() => s.glow.classList.add("wait"), 6000);
   if (update.text !== undefined) s.cursor.classList.toggle("text", update.text);
   if (update.spotlight) {
     s.spotlight.style.left = update.spotlight.x + "px";
@@ -175,6 +194,7 @@ const OVERLAY = `(update) => {
     s.trail.innerHTML = '<path d="M' + x1 + ' ' + y1 + ' L' + x2 + ' ' + y2 + '" stroke="rgba(99,102,241,.55)" stroke-width="3" stroke-linecap="round" stroke-dasharray="6 6" fill="none"/>';
     setTimeout(() => { s.trail.innerHTML = ""; }, 900);
   }
+  if (update.needs) update.caption = update.needs;
   if (update.caption && !(update.soft && Date.now() - (s.captionAt || 0) < 1500)) {
     s.captionAt = Date.now();
     const text = String(update.caption).slice(0, 120);
@@ -190,7 +210,7 @@ const OVERLAY = `(update) => {
         if (prefix + shown >= text.length) clearInterval(s.type);
       }, 22);
     } else s.pill.textContent = text;
-    s.hide = setTimeout(() => s.pill.classList.remove("on"), update.transient ? 2000 : 6000);
+    if (!update.needs) s.hide = setTimeout(() => s.pill.classList.remove("on"), update.transient ? 2000 : 6000);
   }
   function toRgb(color) {
     var text = String(color || "").trim();
@@ -232,6 +252,51 @@ onEngineInstall(() => {
 /** A caption without moving the cursor, e.g. while reading or navigating. */
 export function showAgentCaption(debuggee: chrome.debugger.Debuggee, caption: string): void {
   updateAgentCursor(debuggee, { caption, soft: true });
+}
+
+// Tabs being recorded on video: nothing of ours is drawn, or only the cursor when asked for.
+const recording = new Map<number, { cursor: boolean }>();
+export function setTabRecording(tabId: number, state: { cursor: boolean } | undefined): void {
+  if (state) recording.set(tabId, state);
+  else recording.delete(tabId);
+  if (state && !state.cursor) void removeAgentCursor(tabId);
+  if (state?.cursor) updateAgentCursor({ tabId }, { glow: false });
+}
+export function tabRecording(tabId: number): { cursor: boolean } | undefined {
+  return recording.get(tabId);
+}
+
+/** The toolbar dot on a tab an agent drives: the product colour, amber while it needs the user.
+ * Extensions cannot mark the tab itself, so the dot sits on the toolbar icon of that tab. */
+export async function showAgentBadge(tabId: number, needs = false): Promise<void> {
+  const glow = await engineConfig.agentGlowColor().catch(() => NEUTRAL_GLOW);
+  const color = needs ? "#e08a00" : glow === NEUTRAL_GLOW ? "#4f46e5" : glow;
+  await chrome.action.setBadgeText({ tabId, text: " " }).catch(() => undefined);
+  await chrome.action.setBadgeBackgroundColor({ tabId, color }).catch(() => undefined);
+}
+const NEUTRAL_GLOW = "#8b93a7";
+
+/** The agent waits for the user: the cursor turns amber, points (spotlight) and says why. */
+export function showAgentNeeds(
+  tabId: number,
+  message: string | null,
+  spotlight?: { x: number; y: number; width: number; height: number },
+): void {
+  const point = spotlight
+    ? {
+        x: Math.round(spotlight.x + spotlight.width / 2),
+        y: Math.round(spotlight.y + spotlight.height / 2),
+      }
+    : undefined;
+  void showAgentBadge(tabId, message !== null);
+  updateAgentCursor(
+    { tabId },
+    {
+      needs: message,
+      ...(message !== null ? { glow: false } : { glow: true, hideSpotlight: true }),
+      ...(spotlight && message !== null ? { spotlight, ...point } : {}),
+    },
+  );
 }
 
 /** The edge glow around a tab an agent drives; dimmed while the user has control. */
@@ -279,6 +344,9 @@ export function showAgentKeys(debuggee: chrome.debugger.Debuggee, keys: string[]
 }
 
 function updateAgentCursor(debuggee: chrome.debugger.Debuggee, update: CursorUpdate): void {
+  const recorded = debuggee.tabId === undefined ? undefined : recording.get(debuggee.tabId);
+  if (recorded && !recorded.cursor) return;
+  if (recorded) update = { ...update, clean: true, glow: false };
   void engineConfig
     .hideAgentCursor()
     .catch(() => false)

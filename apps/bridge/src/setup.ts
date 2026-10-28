@@ -11,7 +11,6 @@ export const EXTENSION_ID = "dmlgohfphkbenjopdphcojgjeidlmajj";
 /** The host name this bridge used before it was renamed, removed on setup. */
 const OLD_NATIVE_HOST = "com.browser_use_extension.bridge";
 const cli = fileURLToPath(new URL("./cli.js", import.meta.url));
-const extensionBuild = fileURLToPath(new URL("../../extension/build", import.meta.url));
 
 export const browsers: Record<string, { win: string; mac: string; linux: string }> = {
   chrome: {
@@ -141,18 +140,19 @@ function unregisterWindows(key: string): void {
   }
 }
 
+/** How an agent starts browserkit's MCP server on this machine. */
+export function mcpCommand(): { command: string; args: string[] } {
+  return { command: process.execPath, args: [cli, "mcp"] };
+}
+
+/** For when no coding agent was found to connect automatically. */
 export function nextSteps(): string {
   return [
-    "Native host registered for Chrome, Edge, Chromium, Brave, Vivaldi, Opera, Arc and Helium.",
-    "",
-    "1. Load the extension: open chrome://extensions, turn on Developer mode, click",
-    `   "Load unpacked" and choose: ${extensionBuild}`,
-    "2. Connect an agent:",
+    "No coding agent found to connect. To add browserkit to one by hand:",
     `   Codex:        add to ~/.codex/config.toml:`,
     `                 [mcp_servers.browserkit]`,
     `                 command = ${JSON.stringify(process.execPath)}`,
     `                 args = [${JSON.stringify(cli)}, "mcp"]`,
     `   Any MCP client: {"command": ${JSON.stringify(process.execPath)}, "args": [${JSON.stringify(cli)}, "mcp"]}`,
-    '3. Try it: browserkit repl "(await browser.tabs()).length"',
   ].join("\n");
 }

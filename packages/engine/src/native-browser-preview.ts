@@ -5,6 +5,8 @@ import { withBrowserDebugger } from "./native-browser-session.js";
 // - Split view: one preview, the tab touched last, only while that tab is not visible.
 // - Thumbnails: every recently touched tab (up to four), refreshed while the agent works, with
 //   the last-touched one marked, so the chat page can stack them beside the conversation.
+// In both, a tab the user can already see (active, or in a split view) has no preview: a side
+// panel beside the agent's own tab shows none, and one appears as soon as the user looks away.
 const FRAME_MS = 1000;
 const LINGER_MS = { split: 4000, thumbnails: 60_000 };
 const MAX_THUMBNAILS = 4;
@@ -54,7 +56,7 @@ async function frame(chatId: string, preview: Preview): Promise<void> {
   const tab = (await chrome.tabs.get(preview.tabId).catch(() => undefined)) as SplitTab | undefined;
   if (!tab) return stop(chatId, preview);
   const visible = tab.active || (tab.splitViewId ?? -1) >= 0;
-  if (visible && preview.view === "split") {
+  if (visible) {
     publish(chatId, preview, tab, null);
     return schedule(chatId, preview, FRAME_MS);
   }
