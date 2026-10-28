@@ -16,7 +16,7 @@
 - **Anything live or on a specific site** (prices, stock, listings, showtimes, reviews): open that
   site in the browser. Web search only finds which page to open.
 - **A lasting tool for one task on a site** ("make me something that checks X"): build an ability
-  (`browserkit abilities build <site> "<task>"`); it is tested before it is saved, or says why the
+  (`browserkit actions build <site> "<task>"`); it is tested before it is saved, or says why the
   site cannot do it.
 - **What a page sends** (the API behind it, a download link, a stream): network capture,
   `help('network')`; live WebSockets and event streams, `help('live')`.

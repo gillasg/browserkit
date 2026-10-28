@@ -13,8 +13,13 @@ import { dataDirectory } from "./paths.js";
 const RELEASES = "https://api.github.com/repos/gillasg/browserkit/releases/latest";
 const sourceBuild = fileURLToPath(new URL("../../extension/build", import.meta.url));
 
-export async function extensionFolder(log: (line: string) => void): Promise<string> {
+export async function extensionFolder(
+  log: (line: string) => void,
+  options: { fresh?: boolean } = {},
+): Promise<string> {
   if (existsSync(join(sourceBuild, "manifest.json"))) return sourceBuild;
+  const existing = join(dataDirectory(), "extension");
+  if (!options.fresh && existsSync(join(existing, "manifest.json"))) return existing;
   const folder = join(dataDirectory(), "extension");
   log("Downloading the browserkit extension from the latest release…");
   const release = (await (

@@ -1,4 +1,9 @@
-import { agentTabGroupingEnabled, setAgentTabGrouping } from "./native-browser-groups.js";
+import {
+  GROUP_MODE_KEY,
+  agentTabGroupingEnabled,
+  groupMode,
+  setAgentTabGrouping,
+} from "./native-browser-groups.js";
 
 // browser.settings(): read or change how agents look and run in this browser, when the user asks
 // ("always use split view", "close idle tabs after half an hour"). Presentation and run settings
@@ -54,11 +59,12 @@ export const HIDE_CURSOR_KEY = "browserkit-hide-agent-cursor";
 
 registerSetting("tabGroups", {
   about:
-    "Group the tabs an agent opens (one collapsed group per chat or session, at the start of the tab strip)",
-  values: [true, false],
-  read: agentTabGroupingEnabled,
+    "How agents' tabs are grouped at the start of the tab strip, collapsed unless in use: one shared group for every agent, one per chat, or off",
+  values: ["shared", "chat", "off"],
+  read: async () => ((await agentTabGroupingEnabled()) ? await groupMode() : "off"),
   write: async (value) => {
-    await setAgentTabGrouping(value === true);
+    await setAgentTabGrouping(value !== "off");
+    if (value !== "off") await chrome.storage.local.set({ [GROUP_MODE_KEY]: value });
   },
 });
 registerSetting("idleTabMinutes", {

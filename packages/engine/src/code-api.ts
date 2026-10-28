@@ -278,6 +278,8 @@ var browser = Object.freeze({
   setZoom: (factor, tabId) => __zoom(factor, tabId),
   // How agents look and run here, for when the user asks: browser.settings() lists each setting
   // with its value and choices; browser.settings({name: value}) changes them and returns all.
+  // Reloads this extension (after an update); the cell's answer may not arrive.
+  reloadExtension: () => __call({extension: 'reload'}),
   settings: (changes) => __call(changes ? {settings: 'set', values: changes} : {settings: 'get'}),
   // Whether tabs an agent opens are grouped. browser.tabGrouping(false) turns grouping off and
   // takes back every tab an agent had grouped; browser.tabGrouping() reads the setting.

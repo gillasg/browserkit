@@ -321,6 +321,11 @@ function serveCall(cell: Cell, value: Record<string, unknown> | null): Promise<u
     return reapChatPopups(cell.run.chatId).then((closed) => ({ closed }));
   if (value && value.tabs === "close") return closeTabCall(cell.run.chatId, value);
   if (value && (value.settings === "get" || value.settings === "set")) return settingsCall(value);
+  // browserkit update: reload the extension once this answer is on its way.
+  if (value?.extension === "reload") {
+    setTimeout(() => chrome.runtime.reload(), 300);
+    return Promise.resolve({ reloading: true });
+  }
   if (value && typeof value.recording === "string")
     return recordingCall(authorizedTarget(cell, value.target).tabId, value);
   if (value && typeof value.network === "string")

@@ -8,8 +8,9 @@ or another session's; actions in one tab queue, reads run in parallel.
 - **Spaces:** `browser.openTab(url, {space: "window"})` keeps a session's tabs in one background
   window; `browser.session.finish({keep: ["p2"]})` hands the kept tabs to the user. Tabs carry
   stable labels (`p1`, `p2…`). `help('spaces')`.
-- **The user takes over:** clicking or typing in an agent's tab stops it with
-  `USER_TOOK_CONTROL`; `page.waitForControl()` waits until it is given back. Never retry around it.
+- **The user acts in your tab:** a click or typing only pauses you; your next step waits until
+  they stop, then runs. Read the page again before relying on old refs. Esc is a real take-over:
+  steps fail with `USER_TOOK_CONTROL`; `page.waitForControl()` waits until it is given back.
 - **Many sites:** `browser.sweep(urls, {gate: true, pilot: 5})` returns one outcome per URL (`ok`,
   `gated`, `dead`…) as a durable job; start with a pilot. `help('sweep')`, `help('jobs')`.
 - **Network:** `page.network.list()` works without `start()`, `page.network.body(id)` reads what a

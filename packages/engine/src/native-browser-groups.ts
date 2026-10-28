@@ -3,8 +3,9 @@ import { ownerTitle as storedOwnerTitle } from "./native-browser-owner.js";
 import { onEngineInstall } from "./native-engine-install.js";
 import { settleAgentGroups } from "./native-browser-group-placement.js";
 
-// Tabs an agent opens are kept together in one tab group per chat, per window, so the user can
-// see, collapse or close an agent's work at once. Grouping is presentation only: it never fails a
+// Tabs an agent opens are kept together in tab groups, so the user can see, collapse or close
+// agents' work at once: by default one shared group per window for every agent ("Aeon · 3"), or
+// one group per chat, or none (browser.settings tabGroups). Grouping is presentation only: it never fails a
 // step. The owner-group map is persisted in session storage because the MV3 worker sleeps; when
 // it is gone, the invisible owner marker in the group title lets a later tab rejoin its group
 // instead of making one more "Aeon" group.
@@ -34,6 +35,11 @@ interface GroupRecord {
 }
 const STORAGE_KEY = "browserkit-agent-groups";
 const SETTING_KEY = "browserkit-agent-tab-groups";
+export const GROUP_MODE_KEY = "browserkit-agent-tab-group-mode";
+/** The owner key of the one group every agent shares. */
+const SHARED = "shared--";
+// Which chat each tab in a shared group works for, so its title can count the agents.
+const sharedMembers = new Map<number, string>();
 const MARK = "\u2063";
 const MAX_TITLE = 24;
 const groups = new Map<string, Map<number, GroupRecord>>();
@@ -55,19 +61,76 @@ export function groupAgentTab(
   ownerTitle?: string,
 ): Promise<void> {
   if (engineConfig.tabGroups !== true) return Promise.resolve();
-  const run = (pending.get(owner) ?? Promise.resolve()).then(async () => {
+  const queue = SHARED;
+  const run = (pending.get(queue) ?? Promise.resolve()).then(async () => {
     if (!(await agentTabGroupingEnabled())) return;
     await restore();
     claimed.add(tabId);
+    if ((await groupMode()) === "shared") {
+      sharedMembers.set(tabId, owner);
+      await joinGroup(tabId, windowId, SHARED, sharedTitle());
+      return;
+    }
     const prior = groups.get(owner)?.get(windowId)?.title;
     const inherited = prior?.includes(MARK) ? prior.slice(0, prior.indexOf(MARK)) : prior;
     await joinGroup(tabId, windowId, owner, ownerTitle ?? storedOwnerTitle(owner) ?? inherited);
   });
-  pending.set(owner, run);
+  pending.set(queue, run);
   void run.finally(() => {
-    if (pending.get(owner) === run) pending.delete(owner);
+    if (pending.get(queue) === run) pending.delete(queue);
   });
   return run;
+}
+
+/** One shared group, or one per chat. */
+export async function groupMode(): Promise<"shared" | "chat"> {
+  const stored = (await chrome.storage?.local?.get(GROUP_MODE_KEY).catch(() => ({}))) as
+    Record<string, unknown> | undefined;
+  return stored?.[GROUP_MODE_KEY] === "chat" ? "chat" : "shared";
+}
+
+/** "Aeon · 3": the host's name and how many agents have tabs in the shared group. */
+function sharedTitle(): string {
+  const base = engineConfig.tabGroupTitle(SHARED, undefined);
+  const owners = new Set(sharedMembers.values()).size;
+  return owners > 1 ? `${base} · ${owners}` : base;
+}
+
+// A tab the user had open that an agent works in stays where it is while the user looks at it.
+// Once the user has left it and the agent keeps working there (30 s or 5 steps), it joins the
+// agent's group; when that run ends it goes back out of the group.
+const ADOPT_STEPS = 5;
+const ADOPT_MS = 30_000;
+const userTabWork = new Map<number, { owner: string; since: number; steps: number }>();
+const adopted = new Map<number, string>();
+
+export async function noteAgentStep(tabId: number, owner: string): Promise<void> {
+  if (claimed.has(tabId) || adopted.has(tabId) || engineConfig.tabGroups !== true) return;
+  const tab = await chrome.tabs.get(tabId).catch(() => undefined);
+  if (!tab || tab.windowId === undefined) return;
+  const current = userTabWork.get(tabId);
+  // While the user is on the tab, nothing moves and the count starts over when they leave.
+  if (tab.active || !current || current.owner !== owner) {
+    userTabWork.set(tabId, { owner, since: Date.now(), steps: tab.active ? 0 : 1 });
+    return;
+  }
+  current.steps += 1;
+  if (current.steps < ADOPT_STEPS && Date.now() - current.since < ADOPT_MS) return;
+  userTabWork.delete(tabId);
+  adopted.set(tabId, owner);
+  await groupAgentTab(tabId, tab.windowId, owner);
+}
+
+/** The run is over: tabs adopted from the user leave the agent's group. */
+async function releaseAdopted(owner: string): Promise<void> {
+  for (const [tabId, adopter] of [...adopted]) {
+    if (adopter !== owner) continue;
+    adopted.delete(tabId);
+    claimed.delete(tabId);
+    sharedMembers.delete(tabId);
+    await chrome.tabs.ungroup(tabId).catch(() => undefined);
+  }
+  for (const [tabId, work] of [...userTabWork]) if (work.owner === owner) userTabWork.delete(tabId);
 }
 
 /** A tab the agent created and will group: claim it before Chrome can inherit a group. */
@@ -145,7 +208,7 @@ async function joinGroup(
       windowId,
       groupId,
       title,
-      color: COLORS[hash(owner) % COLORS.length] ?? "blue",
+      color: owner === SHARED ? "purple" : (COLORS[hash(owner) % COLORS.length] ?? "blue"),
     };
     setRecord(owner, record);
     await chrome.tabGroups.update(groupId, { title, color: record.color });
@@ -203,13 +266,15 @@ function marker(owner: string): string | undefined {
   return MARK + owner.slice(0, 8);
 }
 function colorFor(owner: string): Color {
+  if (owner === SHARED) return "purple";
   return COLORS[hash(owner) % COLORS.length] ?? "blue";
 }
 
 /** After a run: keep its tabs but get the group out of the way. */
 export async function collapseAgentGroups(owner: string): Promise<void> {
   await restore();
-  const byWindow = groups.get(owner);
+  await releaseAdopted(owner);
+  const byWindow = groups.get(owner) ?? groups.get(SHARED);
   if (!byWindow) return;
   for (const record of [...byWindow.values()]) {
     const updated = await chrome.tabGroups
@@ -320,6 +385,9 @@ onEngineInstall(() => {
     void save();
   });
   chrome.tabs.onRemoved.addListener((tabId) => {
+    sharedMembers.delete(tabId);
+    adopted.delete(tabId);
+    userTabWork.delete(tabId);
     if (claimed.delete(tabId)) void save();
   });
 });

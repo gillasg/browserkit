@@ -64,7 +64,7 @@ const OVERLAY = `(update) => {
     const root = host.attachShadow({ mode: "closed" });
     root.innerHTML = '<style>' +
       '.g{position:fixed;inset:0;border-radius:18px;pointer-events:none;opacity:0;transform:none;box-shadow:inset 0 0 0 2px rgba(139,147,167,.55),inset 0 0 28px rgba(139,147,167,.35);transition:opacity .3s ease;animation:edge 2.4s ease-in-out infinite}' +
-      '.g.on{opacity:1}.g.user{animation:none;opacity:.35}.g.on.wait{opacity:.4;animation-duration:4.8s}@keyframes edge{50%{opacity:.55}}' +
+      '.g.on{opacity:1}.g.user{animation:none;opacity:.35}@keyframes edge{50%{opacity:.55}}' +
       '.needs .g{opacity:0!important}.needs .a path{fill:#e08a00}.needs .t path{stroke:#e08a00}.needs .p{background:#e08a00!important}.needs .s{border-color:rgba(224,138,0,.95)}' +
       '.clean .g,.clean .p,.clean .s,.clean .co,.clean .k,.clean svg.trail{display:none!important}' +
       '.c{position:absolute;left:0;top:0;will-change:transform;transition:opacity .18s ease}' +
@@ -130,12 +130,9 @@ const OVERLAY = `(update) => {
     else { s.spotlight.classList.remove("on"); s.pill.classList.remove("on"); }
   }
   s.cursor.classList.remove("idle");
-  s.glow.classList.remove("wait");
   clearTimeout(s.idle);
-  clearTimeout(s.waitTimer);
   s.idle = setTimeout(() => s.cursor.classList.add("idle"), 2200);
-  // Nothing happened for a while: the agent is waiting (a page, a reply), so the glow dims.
-  s.waitTimer = setTimeout(() => s.glow.classList.add("wait"), 6000);
+
   if (update.text !== undefined) s.cursor.classList.toggle("text", update.text);
   if (update.spotlight) {
     s.spotlight.style.left = update.spotlight.x + "px";

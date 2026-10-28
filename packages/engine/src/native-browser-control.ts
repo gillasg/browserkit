@@ -1,12 +1,13 @@
 import { onEngineInstall } from "./native-engine-install.js";
 import { onBrowserDebuggerAttached, browserSessionOwner } from "./native-browser-session.js";
-import { dimAgentGlow, showAgentGlow } from "./native-browser-cursor.js";
+import { dimAgentGlow, showAgentCaption, showAgentGlow } from "./native-browser-cursor.js";
 
 // Who is driving a tab. CDP's Input events are trusted, just like a real click, so the engine
 // records the moments it is dispatching input; a trusted event outside those moments came from
 // the user. A page-side watcher in an isolated world reports events (its globals stay invisible
-// to the page). On the first one the agent stops with USER_TOOK_CONTROL and waits to be given
-// the tab back.
+// to the page). A click or key from the user only pauses the agent quietly: its next step waits
+// until the user has been still for a moment, then carries on in its flow. Esc is the deliberate
+// take-over: the agent stops with USER_TOOK_CONTROL and waits to be given the tab back.
 
 interface Control {
   at: number;
@@ -71,8 +72,17 @@ export function controlError(tabId: number): string {
   return "USER_HAS_CONTROL";
 }
 
-export function noteUserInput(tabId: number, at: number): void {
+const QUIET_MS = 3000;
+const MAX_PAUSE_MS = 60_000;
+const lastUserInput = new Map<number, number>();
+
+/** The user clicked or typed in an agent's tab: steps wait until they have been still a moment. */
+export function noteUserInput(tabId: number, at: number, takeOver = false): void {
   if (!browserSessionOwner(tabId) || handoffActive(tabId) || agentInput(tabId, at)) return;
+  if (!takeOver) {
+    lastUserInput.set(tabId, at);
+    return;
+  }
   if (controlled.has(tabId)) return;
   controlled.set(tabId, { at, reported: false });
   void injectTop(tabId, controlBanner);
@@ -97,7 +107,32 @@ export async function waitForGiveBack(tabId: number, timeoutMs: number): Promise
   return !controlled.has(tabId);
 }
 
+/**
+ * Before a step: while the user is acting in the tab, wait until they have been still for
+ * QUIET_MS (at most a minute), then go on. Returns whether the user acted since the agent's
+ * previous step, so the step can tell the agent to look at the page again.
+ */
+export async function waitForQuietUser(tabId: number): Promise<boolean> {
+  const first = lastUserInput.get(tabId);
+  if (first === undefined) return false;
+  const deadline = Date.now() + MAX_PAUSE_MS;
+  let captioned = false;
+  for (;;) {
+    const last = lastUserInput.get(tabId) ?? 0;
+    const quietFor = Date.now() - last;
+    if (quietFor >= QUIET_MS || Date.now() > deadline || controlled.has(tabId)) break;
+    if (!captioned) {
+      showAgentCaption({ tabId }, "Waiting for you to finish");
+      captioned = true;
+    }
+    await new Promise((resolve) => setTimeout(resolve, Math.min(300, QUIET_MS - quietFor)));
+  }
+  lastUserInput.delete(tabId);
+  return true;
+}
+
 export function forgetControl(tabId: number): void {
+  lastUserInput.delete(tabId);
   controlled.delete(tabId);
   windows.delete(tabId);
   dispatchDepth.delete(tabId);
@@ -152,8 +187,10 @@ function watchUserInput(): void {
       return;
     if (event instanceof KeyboardEvent && (modifiers.has(event.key) || !document.hasFocus()))
       return;
+    // Esc (with nothing of the page's own open to close) is the deliberate take-over.
+    const takeOver = event instanceof KeyboardEvent && event.key === "Escape";
     void chrome.runtime
-      .sendMessage({ kind: "browserkit.user-input", at: Date.now() })
+      .sendMessage({ kind: "browserkit.user-input", at: Date.now(), takeOver })
       .catch(() => undefined);
   };
   // Wheel is deliberately absent: scrolling to watch the agent is not taking the tab over.
@@ -192,7 +229,7 @@ onEngineInstall(() => {
     const tabId = own && typeof message.tabId === "number" ? message.tabId : sender.tab?.id;
     if (tabId === undefined) return;
     if (message.kind === "browserkit.user-input")
-      noteUserInput(tabId, Number(message.at) || Date.now());
+      noteUserInput(tabId, Number(message.at) || Date.now(), message.takeOver === true);
     if (message.kind === "browserkit.control.giveback") giveBack(tabId);
   });
   onBrowserDebuggerAttached((tabId) => {

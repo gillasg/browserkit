@@ -33,7 +33,7 @@ import {
   readDiagnostics,
 } from "./native-browser-events.js";
 import { executeDownload } from "./native-browser-downloads.js";
-import { claimAgentTab, groupAgentTab } from "./native-browser-groups.js";
+import { claimAgentTab, groupAgentTab, noteAgentStep } from "./native-browser-groups.js";
 import {
   ensureAgentTabsRestored,
   markAgentTabGrouped,
@@ -52,7 +52,7 @@ import { handlesHostPlumbing, hostPlumbing } from "./native-browser-host-plumbin
 import { touchSpace } from "./native-browser-spaces.js";
 import { withManualScreencast } from "./native-browser-screencast.js";
 import { injectedScripts, judgeStealth, noteInjectedScript, type StealthProbe } from "./stealth.js";
-import { controlError, controlOf, stepInput } from "./native-browser-control.js";
+import { controlError, controlOf, stepInput, waitForQuietUser } from "./native-browser-control.js";
 import { isWriteStep } from "./native-browser-scheduler.js";
 import { controlOrSessionStep } from "./native-browser-extra-session.js";
 import { refusedCdp } from "./native-browser-guards.js";
@@ -526,9 +526,14 @@ async function executeStep(
   if (step.op === "attachTab") return attachTab(step.target);
   if (controlOf(step.target.tabId) === "user" && step.op !== "control" && step.op !== "session")
     throw new Error(controlError(step.target.tabId));
+  // The user clicked or typed here: wait until they are done, then carry on with this step.
+  if (step.op !== "control" && step.op !== "session") await waitForQuietUser(step.target.tabId);
+  if (controlOf(step.target.tabId) === "user" && step.op !== "control" && step.op !== "session")
+    throw new Error(controlError(step.target.tabId));
   if (isWriteStep(step)) activateClaim(request);
   const tab = await assertTarget(request);
   bindBrowserSession(step.target.tabId, request.chatId);
+  void noteAgentStep(step.target.tabId, request.chatId);
   touchSpace(request.chatId);
   // One step per tab at a time, and writes one at a time browser-wide: two sessions cannot type
   // into each other's page, and a session's own steps keep their order.

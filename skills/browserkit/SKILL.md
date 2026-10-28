@@ -41,7 +41,7 @@ real.
 - **Anything live or on a specific site** (prices, stock, listings, showtimes, reviews): open that
   site in the browser. Web search only finds which page to open.
 - **A lasting tool for one task on a site** ("make me something that checks X"): build an ability
-  (`browserkit abilities build <site> "<task>"`); it is tested before it is saved, or says why the
+  (`browserkit actions build <site> "<task>"`); it is tested before it is saved, or says why the
   site cannot do it.
 - **What a page sends** (the API behind it, a download link, a stream): network capture,
   `help('network')`; live WebSockets and event streams, `help('live')`.
@@ -153,6 +153,8 @@ user changes the list, with `browserkit block|unblock|blocked`.
 
 ## Mapped sites
 
+Users say "actions" for abilities (the `actions` command).
+
 ```sh
 browserkit sites                          # which sites are mapped
 browserkit ops shop.example               # what it can do, with inputs and capabilities
@@ -160,9 +162,9 @@ browserkit call shop.example search '{"query":"lamp"}' --param page=2
 browserkit watch shop.example listings '{}' --key id     # only new/changed items since the last watch
 browserkit federate shop.example:search other.example:search --params '{"query":"lamp"}'
 browserkit heal shop.example              # drift, breakage, sign-out, bot walls
-browserkit abilities build shop.example "find a product's price and stock"   # a tested ability
-browserkit abilities run shop.example order --inputs '{"item":"tea"}' --key order-tea-1
-browserkit abilities test shop.example search  # its stored cases; fails on constant output
+browserkit actions build shop.example "find a product's price and stock"   # a tested ability
+browserkit actions run shop.example order --inputs '{"item":"tea"}' --key order-tea-1
+browserkit actions test shop.example search  # its stored cases; fails on constant output
 ```
 
 - **Start with `site.capabilities()`** in browser code (or `browserkit capabilities <site>`): the
@@ -191,8 +193,9 @@ or another session's; actions in one tab queue, reads run in parallel.
 - **Spaces:** `browser.openTab(url, {space: "window"})` keeps a session's tabs in one background
   window; `browser.session.finish({keep: ["p2"]})` hands the kept tabs to the user. Tabs carry
   stable labels (`p1`, `p2…`). `help('spaces')`.
-- **The user takes over:** clicking or typing in an agent's tab stops it with
-  `USER_TOOK_CONTROL`; `page.waitForControl()` waits until it is given back. Never retry around it.
+- **The user acts in your tab:** a click or typing only pauses you; your next step waits until
+  they stop, then runs. Read the page again before relying on old refs. Esc is a real take-over:
+  steps fail with `USER_TOOK_CONTROL`; `page.waitForControl()` waits until it is given back.
 - **Many sites:** `browser.sweep(urls, {gate: true, pilot: 5})` returns one outcome per URL (`ok`,
   `gated`, `dead`…) as a durable job; start with a pilot. `help('sweep')`, `help('jobs')`.
 - **Network:** `page.network.list()` works without `start()`, `page.network.body(id)` reads what a

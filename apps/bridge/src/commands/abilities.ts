@@ -191,13 +191,12 @@ async function migrate(args: Args): Promise<number> {
 }
 
 export const abilitiesCommand: Command = {
-  name: "abilities",
+  name: "actions",
   group: "Use a site",
-  summary:
-    "one named thing a site can do, and its one-time migration from recipes, actions, workflows, skills and tools",
-  help: `Usage: browserkit abilities <list|show|run|test|build|delete|migrate> [site] [name]
+  summary: "the named things a site can do (actions; `abilities` is the same command)",
+  help: `Usage: browserkit actions <list|show|run|test|build|delete|migrate> [site] [name]
 
-  list [site] [--json]          abilities, with kind, ways and description
+  list [site] [--json]          actions, with kind, ways and description
   show <site> <name> [--json]   full definition and run stats
   run <site> <name> [--inputs '<json>'] [--via api|steps|script|page] [--json]
       [--key <k>]                 writes: the same key never applies twice within a day
@@ -205,10 +204,19 @@ export const abilitiesCommand: Command = {
   test <site> <name> [--json]   run its stored test cases; fails on constant output
   build <site> "<task>" [--write] [--name <n>] [--json]
                                 an agent does the task in a background tab (writes in dry
-                                run) and saves a tested ability for it, or says why not
+                                run) and saves a tested action for it, or says why not
   delete <site> <name>          move it to trash/ instead of hard-deleting
-  migrate [--dry-run] [--json]  convert every old site store into abilities + notes
+  migrate [--dry-run] [--json]  convert every old site store into actions + notes
 
-Old recipe/action/workflow/site-tools names remain as hidden aliases for one release.`,
+In code and the agent tools an action is an "ability" (saveAbility, site_mapper ability_*);
+\`browserkit abilities\` is the same command. Old recipe/action/workflow/site-tools names
+remain as hidden aliases for one release.`,
   run: abilities,
+};
+
+/** The code's own name for actions, kept as a command too. */
+export const abilitiesAliasCommand: Command = {
+  ...abilitiesCommand,
+  name: "abilities",
+  hidden: true,
 };

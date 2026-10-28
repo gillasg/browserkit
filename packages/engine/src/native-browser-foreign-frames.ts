@@ -1,5 +1,5 @@
-// Another extension's frame in a page (a password manager's inline menu: 1Password, LastPass,
-// Bitwarden) makes Chrome refuse debugger commands on the tab or drop the debugger. Removing those
+// Another extension's frame in a page (a password manager's inline menu, for example) makes
+// Chrome refuse debugger commands on the tab or drop the debugger. Removing those
 // frames and attaching again recovers; when a frame keeps coming back, the step fails with
 // PROTECTED_UI so the agent asks the user instead of retrying. Pages the user browses are never
 // touched: only tabs a step is running on.
@@ -30,32 +30,33 @@ export function protectedUiError(): Error {
   );
 }
 
-// Runs in the page (isolated world), so it sees closed shadow hosts and the page cannot stop it.
+// Runs in the page's isolated world. Walks the document and every shadow root, closed ones too
+// (chrome.dom reaches them from an extension). A frame of another extension goes with the element
+// whose shadow root holds it (that extension's own wrapper), never anything further out, so a
+// page built from web components keeps its own elements.
 function evict(ownId: string): number {
-  const own = "chrome-extension://" + ownId;
-  const foreign = (element: Element): boolean => {
-    const tag = element.tagName.toLowerCase();
-    if (
-      tag.startsWith("com-1password-") ||
-      element.hasAttribute("data-onepassword-extension") ||
-      element.hasAttribute("data-lastpass-root") ||
-      element.id.startsWith("bitwarden-")
-    )
-      return true;
-    if (!["iframe", "frame", "object", "embed"].includes(tag)) return false;
-    const src = element.getAttribute("src") ?? element.getAttribute("data") ?? "";
-    return src.startsWith("chrome-extension://") && !src.startsWith(own);
-  };
-  let removed = 0;
-  const visit = (root: Document | ShadowRoot | Element): void => {
-    for (const element of Array.from(root.querySelectorAll("*"))) {
-      if (!element.isConnected) continue;
-      if (foreign(element)) {
-        element.remove();
-        removed += 1;
-      } else if (element.shadowRoot) visit(element.shadowRoot);
+  const own = `chrome-extension://${ownId}/`;
+  const shadowOf = (element: Element): ShadowRoot | null => {
+    try {
+      return chrome.dom.openOrClosedShadowRoot(element as HTMLElement) ?? null;
+    } catch {
+      return element.shadowRoot;
     }
   };
-  visit(document);
-  return removed;
+  const foreignFrame = (element: Element): boolean => {
+    if (!/^(IFRAME|FRAME|OBJECT|EMBED)$/.test(element.tagName)) return false;
+    const url = element.getAttribute("src") ?? element.getAttribute("data") ?? "";
+    return url.startsWith("chrome-extension://") && !url.startsWith(own);
+  };
+  const doomed = new Set<Element>();
+  const walk = (root: Document | ShadowRoot, host: Element | undefined): void => {
+    for (const element of Array.from(root.querySelectorAll("*"))) {
+      if (foreignFrame(element)) doomed.add(host ?? element);
+      const inner = shadowOf(element);
+      if (inner) walk(inner, element);
+    }
+  };
+  walk(document, undefined);
+  for (const element of doomed) element.remove();
+  return doomed.size;
 }

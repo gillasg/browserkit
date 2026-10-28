@@ -1,5 +1,7 @@
 ## Mapped sites
 
+Users say "actions" for abilities (the `actions` command).
+
 ```sh
 browserkit sites                          # which sites are mapped
 browserkit ops shop.example               # what it can do, with inputs and capabilities
@@ -7,9 +9,9 @@ browserkit call shop.example search '{"query":"lamp"}' --param page=2
 browserkit watch shop.example listings '{}' --key id     # only new/changed items since the last watch
 browserkit federate shop.example:search other.example:search --params '{"query":"lamp"}'
 browserkit heal shop.example              # drift, breakage, sign-out, bot walls
-browserkit abilities build shop.example "find a product's price and stock"   # a tested ability
-browserkit abilities run shop.example order --inputs '{"item":"tea"}' --key order-tea-1
-browserkit abilities test shop.example search  # its stored cases; fails on constant output
+browserkit actions build shop.example "find a product's price and stock"   # a tested ability
+browserkit actions run shop.example order --inputs '{"item":"tea"}' --key order-tea-1
+browserkit actions test shop.example search  # its stored cases; fails on constant output
 ```
 
 - **Start with `site.capabilities()`** in browser code (or `browserkit capabilities <site>`): the

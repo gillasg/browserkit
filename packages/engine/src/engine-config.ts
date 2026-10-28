@@ -42,7 +42,7 @@ export const engineConfig: EngineConfig = {
   idleTitle: "browserkit",
   notificationIcon: "icon-128.png",
   tabGroups: true,
-  tabGroupTitle: () => "Agent",
+  tabGroupTitle: (_owner, title) => title ?? "Agent",
   agentView: () => Promise.resolve("split"),
   agentInFront: () => Promise.resolve(false),
   hideAgentCursor: async () =>

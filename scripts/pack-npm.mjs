@@ -44,6 +44,7 @@ await writeFile(
       files: ["dist", "skills"],
       engines: { node: ">=22" },
       repository: { type: "git", url: "git+https://github.com/gillasg/browserkit.git" },
+      license: "MIT",
     },
     null,
     2,
