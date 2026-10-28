@@ -192,6 +192,8 @@ const OVERLAY = `(update) => {
     setTimeout(() => { s.trail.innerHTML = ""; }, 900);
   }
   if (update.needs) update.caption = update.needs;
+  // While the agent waits for the user, its request stays the caption.
+  else if (update.caption && s.wrap.classList.contains("needs")) update.caption = undefined;
   if (update.caption && !(update.soft && Date.now() - (s.captionAt || 0) < 1500)) {
     s.captionAt = Date.now();
     const text = String(update.caption).slice(0, 120);

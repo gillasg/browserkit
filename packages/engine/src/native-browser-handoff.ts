@@ -14,7 +14,7 @@ const POLL_MS = 600;
 const MAX_WAIT_MS = 30 * 60_000;
 const KEY = "Symbol.for('aeon.handoff')";
 
-const BANNER = (message: string) => `(() => {
+const BANNER = (message: string, pointY = -1) => `(() => {
   const state = globalThis[${KEY}];
   if (state === "done" || state === "cancelled") {
     document.getElementById("aeon-handoff")?.remove();
@@ -24,7 +24,9 @@ const BANNER = (message: string) => `(() => {
   const host = document.createElement("div");
   host.id = "aeon-handoff";
   host.setAttribute("data-aeon-overlay", "");
-  host.style.cssText = "position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:2147483647;";
+  // The card sits at the bottom, or the top when what the cursor points at is low on the page.
+  const edge = ${pointY} > innerHeight * 0.55 ? "top" : "bottom";
+  host.style.cssText = "position:fixed;left:50%;" + edge + ":24px;transform:translateX(-50%);z-index:2147483647;";
   const root = host.attachShadow({ mode: "closed" });
   root.innerHTML = '<style>div{display:flex;align-items:center;gap:12px;max-width:min(560px,calc(100vw - 32px));padding:12px 14px;border-radius:14px;background:#17181c;color:#f3f4f6;font:14px/1.4 system-ui,sans-serif;box-shadow:0 8px 30px rgba(0,0,0,.35),0 0 0 1px rgba(255,255,255,.08)}p{margin:0;flex:1}b{display:block;font-size:12px;color:#a5b4fc;font-weight:600}button{border:0;border-radius:9px;padding:7px 12px;font:600 13px system-ui,sans-serif;cursor:pointer}.done{background:#4f46e5;color:#fff}.cancel{background:transparent;color:#9ca3af}</style><div><p><b>Agent needs you</b></p><button class="cancel">Cancel</button><button class="done">Done</button></div>';
   root.querySelector("p").append(${JSON.stringify(message)});
@@ -77,7 +79,12 @@ export async function handOffToUser(
       if (!(await chrome.tabs.get(tabId).catch(() => undefined))) throw new Error("TARGET_LOST");
       const answered = answers.get(tabId);
       if (answered) return answered;
-      const state = tabRecording(tabId) ? "waiting" : await evaluate(tabId, BANNER(message));
+      const state = tabRecording(tabId)
+        ? "waiting"
+        : await evaluate(
+            tabId,
+            BANNER(message, spotlight ? spotlight.y + spotlight.height / 2 : -1),
+          );
       if (state === "done" || state === "cancelled") return state;
       await new Promise((resolve) => setTimeout(resolve, POLL_MS));
     }

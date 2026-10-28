@@ -204,6 +204,8 @@ function finish(
   if (cell.done) return;
   cell.done = true;
   if (cell.progressTimer) clearTimeout(cell.progressTimer);
+  // A cell that failed never waits for the hand-offs it started: they end with it.
+  if (result.error) endStartedHandoffs(cell.run.cellId);
   finalize(cell, result);
 }
 
@@ -504,7 +506,17 @@ const INPUT_OPS = new Set([
 
 // A hand-off started ahead ({start}: before a click that opens a passkey, 2FA or payment prompt
 // the page then blocks on) keeps waiting after its cell; the next bu.handoff on the tab waits for it.
-const startedHandoffs = new Map<number, { token: object; run: Promise<"done" | "cancelled"> }>();
+const startedHandoffs = new Map<
+  number,
+  { token: object; run: Promise<"done" | "cancelled">; cellId: string }
+>();
+// A started hand-off nobody waits for ends on its own after this long.
+const STARTED_LIMIT_MS = 10 * 60_000;
+
+function endStartedHandoffs(cellId: string): void {
+  for (const [tabId, started] of startedHandoffs)
+    if (started.cellId === cellId) startedHandoffs.delete(tabId);
+}
 
 async function handoff(cell: Cell, request: object): Promise<unknown> {
   const { message, start, cancel, spotlight } = request as {
@@ -539,7 +551,10 @@ async function handoff(cell: Cell, request: object): Promise<unknown> {
       () => startedHandoffs.get(target.tabId)?.token === token,
       box,
     );
-    startedHandoffs.set(target.tabId, { token, run });
+    startedHandoffs.set(target.tabId, { token, run, cellId: cell.run.cellId });
+    setTimeout(() => {
+      if (startedHandoffs.get(target.tabId)?.token === token) startedHandoffs.delete(target.tabId);
+    }, STARTED_LIMIT_MS);
     void run.then(
       (outcome) =>
         Object.assign(entry, { disposition: outcome === "done" ? "completed" : "failed" }),
