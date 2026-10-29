@@ -710,9 +710,9 @@ function progressSteps(cell: Cell): Record<string, unknown>[] {
   }));
 }
 
-// The receiving socket closes on frames over 4 MB, which would end every running cell. Larger
-// messages are refused here instead: a call fails on its own, a result drops its value.
-const MAX_MESSAGE_CHARS = 3_500_000;
+// The bridge accepts frames up to 32 MB. A cell that returns more is refused here so the failure
+// is its own message (a result drops its value, a call fails alone) instead of a closed socket.
+const MAX_MESSAGE_CHARS = 24_000_000;
 function send(socket: WebSocket, message: unknown): boolean {
   if (socket.readyState !== WebSocket.OPEN) return false;
   let text = JSON.stringify(message);

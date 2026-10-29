@@ -297,7 +297,10 @@ export async function performExtra(
   if (!tab || !sameTarget(tab.target, request.step.target) || !safePage(tab.url))
     throw new Error("TARGET_LOST");
   const encoded = JSON.stringify(data);
-  if (encoded && encoded.length > 1_000_000)
+  // A CDP call is an explicit request for exactly what it returns: screenshots, PDFs and page
+  // snapshots are base64 images far past the read limit. Everything else keeps the tight cap.
+  const limit = step.op === "cdp" ? 24_000_000 : 1_000_000;
+  if (encoded && encoded.length > limit)
     throw new BrowserActionError(
       "UNSUPPORTED",
       "Result exceeds its size limit; extract in smaller batches and save artifacts.",

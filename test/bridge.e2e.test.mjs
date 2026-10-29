@@ -351,7 +351,13 @@ test(
           awaitPromise: true,
           returnByValue: true,
         });
-        assert.equal(String(grouped.result.result.value).replace(/\u2063.*$/, ""), "Agent");
+        // The shared group carries the host name and how many chats have tabs in it ("Agent · 3").
+        assert.equal(
+          String(grouped.result.result.value)
+            .replace(/\u2063.*$/, "")
+            .replace(/\s*·\s*\d+$/, ""),
+          "Agent",
+        );
 
         const { stdout } = await cell(`
           await page.rules.block({ urls: ["/api/items"] });
@@ -1117,8 +1123,9 @@ test(
             env,
           });
           assert.doesNotMatch(again.stdout, /Tip:/, again.stdout);
-          // A tab another session is driving: attaching gives this session its own copy.
-          const copy = await run(
+          // A tab another session is driving: every tab is open to every session, so attaching
+          // gives that tab itself (no private copy) and both can read it.
+          const shared = await run(
             process.execPath,
             [
               cli,
@@ -1127,13 +1134,12 @@ test(
               "lists-other",
               `const [held] = await browser.tabs(${JSON.stringify(siteUrl + "virtual")});
             const mine = await browser.attachTab(held);
-            console.log("COPY " + JSON.stringify({other: mine.target.tabId !== held.id, url: mine.url()}));`,
+            console.log("SHARED " + JSON.stringify({same: mine.target.tabId === held.id, url: mine.url()}));`,
             ],
             { env },
           );
-          assert.match(copy.stdout, /in use by another chat/, copy.stdout);
-          assert.deepEqual(JSON.parse(/COPY (.*)/.exec(copy.stdout)[1]), {
-            other: true,
+          assert.deepEqual(JSON.parse(/SHARED (.*)/.exec(shared.stdout)[1]), {
+            same: true,
             url: siteUrl + "virtual",
           });
         },
