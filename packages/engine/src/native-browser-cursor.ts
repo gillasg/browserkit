@@ -63,8 +63,8 @@ const OVERLAY = `(update) => {
     host.style.cssText = "position:fixed;inset:0;z-index:2147483647;pointer-events:none;contain:strict";
     const root = host.attachShadow({ mode: "closed" });
     root.innerHTML = '<style>' +
-      '.g{position:fixed;inset:0;border-radius:18px;pointer-events:none;opacity:0;transform:none;box-shadow:inset 0 0 0 2px rgba(139,147,167,.55),inset 0 0 28px rgba(139,147,167,.35);transition:opacity .3s ease;animation:edge 2.4s ease-in-out infinite}' +
-      '.g.on{opacity:1}.g.user{animation:none;opacity:.35}@keyframes edge{50%{opacity:.55}}' +
+      '.g{position:fixed;inset:0;border-radius:18px;pointer-events:none;opacity:0;transform:none;box-shadow:inset 0 0 0 1.5px rgba(139,147,167,.85),inset 0 0 22px rgba(139,147,167,.5),inset 0 0 80px rgba(139,147,167,.22);transition:opacity .3s ease;animation:edge 2.8s ease-in-out infinite}' +
+      '.g.on{opacity:1}.g.user{animation:none;opacity:.35}@keyframes edge{50%{opacity:.7}}' +
       '.needs .g{opacity:0!important}.needs .a path{fill:#e08a00}.needs .t path{stroke:#e08a00}.needs .p{background:#e08a00!important}.needs .s{border-color:rgba(224,138,0,.95)}' +
       '.clean .g,.clean .p,.clean .s,.clean .co,.clean .k,.clean svg.trail{display:none!important}' +
       '.c{position:absolute;left:0;top:0;will-change:transform;transition:opacity .18s ease}' +
@@ -112,7 +112,7 @@ const OVERLAY = `(update) => {
   if (update.glowColor && update.glowColor !== s.glowColor) {
     s.glowColor = update.glowColor;
     const rgb = toRgb(update.glowColor);
-    if (rgb) s.glow.style.boxShadow = "inset 0 0 0 2px rgba(" + rgb + ",.55),inset 0 0 28px rgba(" + rgb + ",.35)";
+    if (rgb) s.glow.style.boxShadow = "inset 0 0 0 1.5px rgba(" + rgb + ",.85),inset 0 0 22px rgba(" + rgb + ",.5),inset 0 0 80px rgba(" + rgb + ",.22)";
     // A product colour also colours the caption, so cursor, caption and glow read as one thing.
     if (rgb && update.glowColor !== "#8b93a7") s.pill.style.background = "rgba(" + rgb + ",.95)";
   }
