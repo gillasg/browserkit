@@ -18,5 +18,5 @@ if a part is missing, try another route. Never conclude from part of a list: rea
 you only saw the top. Lead the answer with what is most urgent. Never invent values. If something
 cannot be done, say what you tried and give the closest verified facts with their sources; say
 which facts came from search and which you saw on a site. `STALE_REF` means call `bu.state()` again;
-`TARGET_LOST` means the tab is gone. Anything else: `await help()` lists topics, `help(topic)` gives
-the reference.
+`TARGET_LOST` means the tab is gone; every other code is in `help('errors')`. `help()` lists topics
+and `help(topic)` gives the reference; both are synchronous and return the text as a string.

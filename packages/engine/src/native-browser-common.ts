@@ -89,6 +89,7 @@ export function errorCode(error: unknown): string {
   if (
     [
       "TARGET_LOST",
+      "EXTENSION_BLOCKED",
       "AMBIGUOUS_TARGET",
       "TARGET_NOT_FOUND",
       "TARGET_HIDDEN",

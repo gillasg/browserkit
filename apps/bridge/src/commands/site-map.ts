@@ -39,6 +39,52 @@ async function waitForEnter(prompt: string): Promise<void> {
   rl.close();
 }
 
+/** Without a terminal (an agent's shell), recording stops once the site has been quiet this long. */
+const AGENT_IDLE_SECONDS = 15;
+/** --until-idle never records longer than this. */
+const IDLE_LIMIT_MS = 15 * 60_000;
+
+const sleep = (ms: number) => new Promise<void>((done) => setTimeout(done, ms));
+
+/**
+ * How a recording ends: --for <seconds>, --until-idle <seconds> (no new request for that long),
+ * or Enter. With no terminal and neither flag, it waits for the site to go quiet, so an agent
+ * can map a site in one command.
+ */
+async function waitForStop(
+  what: string,
+  args: Args,
+  requests: () => Promise<number>,
+): Promise<void> {
+  const seconds = Number(flag(args, "for"));
+  const idleFlag = flag(args, "until-idle");
+  if (seconds > 0) {
+    process.stderr.write(`Recording ${what} for ${seconds}s…
+`);
+    return sleep(seconds * 1000);
+  }
+  if (!idleFlag && process.stdin.isTTY)
+    return waitForEnter(`Recording ${what}. Use it in the browser, then press Enter here… `);
+  const quiet = (Number(idleFlag) > 0 ? Number(idleFlag) : AGENT_IDLE_SECONDS) * 1000;
+  process.stderr.write(`Recording ${what} until no new request for ${quiet / 1000}s…
+`);
+  await waitForQuiet(requests, quiet);
+}
+
+async function waitForQuiet(requests: () => Promise<number>, quietMs: number): Promise<void> {
+  const started = Date.now();
+  let last = await requests();
+  let changed = Date.now();
+  while (Date.now() - changed < quietMs && Date.now() - started < IDLE_LIMIT_MS) {
+    await sleep(Math.min(2000, quietMs));
+    const now = await requests();
+    if (now !== last) {
+      last = now;
+      changed = Date.now();
+    }
+  }
+}
+
 async function buildAndReport(
   site: string,
   options: { until?: Stage; workDir?: string } = {},
@@ -63,9 +109,7 @@ async function recordPassive(args: Args): Promise<void> {
   const domains = list(args, "passive").map((domain) => siteName(domain));
   if (!domains.length) throw new Error("--passive needs one or more domains");
   const recorder = await PassiveRecorder.start(domains);
-  await waitForEnter(
-    `Recording every tab on ${domains.join(", ")}. Use the sites, then press Enter to stop… `,
-  );
+  await waitForStop(`every tab on ${domains.join(", ")}`, args, () => recorder.requestCount());
   const recording = await recorder.stop();
   const site = domains[0] as string;
   await saveRecording(site, recording, { name: flag(args, "name") ?? `passive-${Date.now()}` });
@@ -79,9 +123,7 @@ async function recordFlow(url: string, args: Args): Promise<void> {
     url: target,
     ...(attach ? { attach: /^\d+$/.test(attach) ? Number(attach) : attach } : {}),
   });
-  await waitForEnter(
-    `Recording ${target}. Do the flow in the browser tab, then press Enter here… `,
-  );
+  await waitForStop(target, args, () => session.requestCount());
   const recording = await session.stop();
   const name = flag(args, "name");
   const path = await saveRecording(target, recording, name ? { name } : {});
@@ -181,8 +223,8 @@ export const mapCommand: Command = {
   name: "map",
   group: "Map a site",
   summary: "record a flow in the browser (or explore sites), then build its API",
-  help: `Usage: browserkit map <url> [--attach <tab>] [--name <n>] [--no-build]
-       browserkit map --passive <domain,...> [--name <n>] [--no-build]
+  help: `Usage: browserkit map <url> [--attach <tab>] [--name <n>] [--for <s> | --until-idle <s>] [--no-build]
+       browserkit map --passive <domain,...> [--name <n>] [--for <s> | --until-idle <s>] [--no-build]
        browserkit map --explore <site> [site ...] [--goal <g>] [--parallel <n>] [--loud] [--actions]
 
 Records the site's own requests while you use it, then builds an OpenAPI spec, a typed
@@ -190,12 +232,17 @@ client and a callable API from them.
 
   <url>                  a page to open and record (https:// is added when missing)
   --attach <tab>         record a tab you already have open (id, or text from its title/URL)
-  --passive <domains>    record every tab on these domains until you press Enter
+  --passive <domains>    record every tab on these domains
+  --for <s>              stop recording after this many seconds
+  --until-idle <s>       stop once no new request has come for this many seconds (at most 15
+                         minutes). Without a terminal and without either flag, recording stops
+                         after ${AGENT_IDLE_SECONDS}s of quiet, so agents can map in one command.
+                         Otherwise it records until you press Enter.
   --name <n>             the name to save this flow under
   --no-build             only record; build later with \`browserkit build <site>\`
   --explore              map sites with an agent instead of a person: it uses each site in a
-                         background tab, looking only. Needs a model from the caller, which a
-                         standalone CLI does not have: call explore() in code for that.
+                         background tab, looking only. Needs a model: the standalone CLI has
+                         none, so call explore() in code with your model.
   --goal <g>             with --explore: extra things to do on each site
   --parallel <n>         with --explore: how many sites at once (default 1; max 3)
   --loud                 with --explore: allow popunders, autoplay and ads

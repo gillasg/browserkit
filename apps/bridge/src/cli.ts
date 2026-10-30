@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { readFileSync } from "node:fs";
 import { closeSharedBridge as closeCrawlBridge } from "@browserkit/tools/browser-crawl";
 import { closeSharedBridge, errorKind } from "@browserkit/tools/site-to-api";
 import { has, parseArgs } from "./args.js";
@@ -17,6 +18,17 @@ const EXIT_CODES: Record<string, number> = {
 };
 
 const HELP = new Set(["help", "--help", "-h"]);
+const VERSION = new Set(["version", "--version", "-v"]);
+
+function printVersion(): number {
+  const manifest = JSON.parse(
+    readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+  ) as {
+    version?: string;
+  };
+  out(`browserkit ${manifest.version ?? "unknown"}`);
+  return 0;
+}
 
 async function main(argv: string[]): Promise<number> {
   // Chrome launches the native host with the calling extension's origin as the first argument.
@@ -24,6 +36,7 @@ async function main(argv: string[]): Promise<number> {
     await runNativeHost();
     return 0;
   }
+  if (VERSION.has(argv[0] ?? "")) return printVersion();
   if (HELP.has(argv[0] ?? "")) return printHelp(argv.slice(1));
   const args = parseArgs(argv);
   const [name, ...rest] = args.positional;

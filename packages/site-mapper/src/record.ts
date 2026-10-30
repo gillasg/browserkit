@@ -62,6 +62,18 @@ async function readInChunks(
   return text;
 }
 
+async function countRequests(bridge: Bridge, session: string): Promise<number> {
+  const count = await bridge
+    .run(
+      `let __n = 0;
+for (const tab of globalThis.__recTabs || []) { try { __n += (await tab.network.list()).length; } catch {} }
+__n`,
+      { session },
+    )
+    .catch(() => 0);
+  return typeof count === "number" ? count : 0;
+}
+
 export class RecordingSession {
   private constructor(
     private readonly bridge: Bridge,
@@ -105,6 +117,11 @@ await globalThis.__recTabs[0].navigate(${JSON.stringify(options.url)});
       session: this.session,
       timeoutMs,
     });
+  }
+
+  /** Requests recorded so far, so a caller can stop once the site goes quiet. */
+  requestCount(): Promise<number> {
+    return countRequests(this.bridge, this.session);
   }
 
   /** Tabs this recording still has, so a failure can say which ones it left behind. */
@@ -171,6 +188,11 @@ for (const tab of await browser.tabs()) {
 __recTabs.length`,
       { session: SESSION + "-passive" },
     );
+  }
+
+  /** Requests recorded so far across every watched tab. */
+  requestCount(): Promise<number> {
+    return countRequests(this.bridge, SESSION + "-passive");
   }
 
   async stop(): Promise<Recording> {

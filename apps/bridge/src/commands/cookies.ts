@@ -111,10 +111,15 @@ async function remove(args: Args): Promise<number> {
 async function cookies(args: Args): Promise<number> {
   const action = args.positional[0] ?? "list";
   if (action === "list") return list(args);
+  // A session handed to an app: every cookie with its value (HttpOnly too), as JSON.
+  if (action === "export")
+    return list({ ...args, flags: { ...args.flags, values: true, json: true } });
   if (action === "set") return set(args);
   if (action === "clear") return clear(args);
   if (action === "delete" || action === "remove") return remove(args);
-  throw new Error("Usage: browserkit cookies list|set|clear|delete [--domain <host>] [--json]");
+  throw new Error(
+    "Usage: browserkit cookies list|export|set|clear|delete [--domain <host>] [--json]",
+  );
 }
 
 export const cookiesCommand: Command = {
@@ -122,6 +127,7 @@ export const cookiesCommand: Command = {
   group: "Browser",
   summary: "list, set, clear or delete cookies for a site",
   help: `Usage: browserkit cookies list --domain <host> [--values] [--json]
+       browserkit cookies export --domain <host>       every cookie with its value (HttpOnly too) as JSON
        browserkit cookies set --domain <host> --name <name> --value <value> [--path /] [--secure] [--http-only]
        browserkit cookies delete --name <name> --domain <host> [--json]
        browserkit cookies clear --domain <host> [--json]

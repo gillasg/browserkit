@@ -252,7 +252,9 @@ function __expandRead(options) {
     if (danger.test(text) && !/^(show replies|show more replies|more replies)$/i.test(text)) { skipped.push(text.slice(0, 60)); continue; }
     try { button.click(); clicked.push(text); } catch {}
   }
-  return {clicked, skipped};
+  // Every other button on the page is skipped: report each label once, a dozen at most.
+  var unique = [...new Set(skipped)];
+  return {clicked, skipped: unique.slice(0, 12), ...(skipped.length > 12 ? {skippedTotal: skipped.length} : {})};
 }
 
 // Waits for the main content to settle: the text stops growing and no new resources arrive for

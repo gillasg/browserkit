@@ -361,6 +361,7 @@ var bu = Object.freeze({
   handoff: async (message, options = {}) => {
     var target = options.target || __lastTarget;
     if (!target) throw Error('Use bu.use(attachedTarget) or browser.page(target) first');
+    if (options.wait === true) return __handoffUntilClear(message, target, options);
     __handedOff = true;
     var spotlight = options.selector ? await browser.page(target).locator(options.selector).boundingBox().catch(() => null) : null;
     var request = {message: String(message ?? '').slice(0, 500), target, ...(spotlight ? {spotlight} : {})};

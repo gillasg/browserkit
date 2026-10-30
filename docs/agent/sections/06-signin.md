@@ -18,3 +18,9 @@ The password manager is set up once by the user: `browserkit signin setup bitwar
 Hand back to the user with `bu.handoff("...")` only for what no agent can do: a 2FA code by SMS or
 email, a CAPTCHA, a payment, or a choice that is theirs. Before a click that opens a passkey or 2FA
 prompt the page blocks on, start it first with `{start: true}` (help('signin')).
+
+A bot wall (Cloudflare, DataDome and the like) logs a `[warn] challenge:` line when the page opens.
+Never click through it yourself: `await bu.handoff("Please finish the check", {wait: true})` returns
+once the page is clear. To reuse the signed-in session from a script, `browserkit session export
+<site>` or `browserkit cookies export <site>` saves the cookies, mapped site or not.
+`help('gated')`.

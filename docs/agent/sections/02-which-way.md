@@ -5,9 +5,12 @@
 - **Read a lot of pages** (a page, a section, a whole site, a sitemap, search results): `crawl`,
   `scrape`, `map-urls`, `search`. Plain HTTP first, the browser only when a page needs it. Much
   cheaper than driving each page.
+- **Which of many sites load** (dead links, parked domains, which answer an API path): `browserkit
+check <urls|--file f>`, with evidence per site. Far cheaper than opening each one.
 - **Call a site's API**: only if the site is mapped (`browserkit sites`). One call replaces many
   page actions and returns JSON with the user's session. If it is not mapped, map it (`map`,
-  `describe`, `learn`) or just use the page.
+  `describe`, `learn`) or just use the page. `map <url> --until-idle` (or `--for 60`) records
+  without waiting for Enter, for scripts and agents.
 - **A site used repeatedly**, where the answer must keep coming: map it, then `call`, `watch`,
   `federate` (several sites at once, with provenance).
 - **What the user visited, saved or has open**: their history, bookmarks and open tabs, not a

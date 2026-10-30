@@ -7,6 +7,7 @@ import {
   exportSite,
   formatDiff,
   loadFlows,
+  loadModel,
   loadVersion,
   readDocs,
   readOverrides,
@@ -82,13 +83,21 @@ async function showDiff(args: Args): Promise<number> {
 }
 
 async function session(args: Args): Promise<number> {
-  const site = args.positional[0];
+  // "session export <site>" reads naturally too.
+  const site = args.positional[0] === "export" ? args.positional[1] : args.positional[0];
   if (!site) throw new Error("Usage: browserkit session <site> [--status]");
   if (has(args, "status")) {
     printJson(await sessionStatus(site));
     return 0;
   }
-  const { session: saved, path } = await exportSession(await mappedModel(site));
+  // Exporting is a cookie and storage read: any site the browser has visited works, mapped or not.
+  const host = siteName(site);
+  const model = (await loadModel(site)) ?? { site: host, origins: [`https://${host}`] };
+  const { session: saved, path } = await exportSession(model);
+  if (has(args, "json")) {
+    printJson({ path, ...saved });
+    return 0;
+  }
   out(
     `Saved ${saved.cookies.length} cookies and web storage to ${path} (readable only by you). Calls run without the browser, and the session renews itself from the browser when it expires.`,
   );
@@ -225,9 +234,13 @@ export const sessionCommand: Command = {
   name: "session",
   group: "Keep a site working",
   summary: "export a site's session for calls without a browser, or say whether one is fresh",
-  help: `Usage: browserkit session <site> [--status]
+  help: `Usage: browserkit session <site> [--status] [--json]
 
-  --status   report whether a session was exported, how old it is, and whether it is fresh`,
+Saves the site's cookies (HttpOnly too) and web storage from your browser, for calls without
+it. Works on any site you are signed in to, mapped or not.
+
+  --status   report whether a session was exported, how old it is, and whether it is fresh
+  --json     print the saved session (cookies with values) as JSON`,
   run: session,
 };
 

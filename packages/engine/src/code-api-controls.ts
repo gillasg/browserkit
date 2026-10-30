@@ -633,6 +633,33 @@ async function __challenges(target) {
   var found = await browser.page(target).inspect(__pageChallenge).catch(() => []);
   return (found || []).map((c) => ({...c, advice: __CHALLENGE_ADVICE[c.kind]}));
 }
+// bu.handoff(message, {wait: true}): the user passes a bot check or captcha in the tab and the
+// cell carries on by itself once the check is gone (or they click Done), with no new message.
+// Without a check on the page it is a plain hand-off that ends on Done.
+async function __handoffUntilClear(message, target, options) {
+  var started = Date.now(), limit = Math.min(Number(options.timeoutMs) || 600000, 1800000);
+  var present = (await __challenges(target).catch(() => [])).length > 0;
+  var handle = await bu.handoff(message, {target, selector: options.selector, start: true});
+  var outcome = null;
+  var waiting = handle.wait().then(() => { outcome = outcome || 'done'; }, () => { outcome = outcome || 'cancelled'; });
+  while (!outcome && Date.now() - started < limit) {
+    await new Promise((done) => setTimeout(done, 2000));
+    if (outcome || !present) continue;
+    var left = await __challenges(target).catch(() => null);
+    if (left && !left.length) outcome = 'cleared';
+  }
+  if (!outcome) outcome = 'timeout';
+  if (outcome === 'cleared' || outcome === 'timeout') await handle.cancel().catch(() => {});
+  await Promise.race([waiting, new Promise((done) => setTimeout(done, 3000))]);
+  __states.delete(__key(target));
+  return {solved: outcome === 'cleared' || outcome === 'done', by: outcome, waitedMs: Date.now() - started};
+}
+// After openTab or goto: a page that loaded as a bot check or captcha says so at once, so a
+// challenge is never read as the page itself.
+async function __noteChallenge(target, url) {
+  var note = await __challengeNote(target, url).catch(() => '');
+  if (note) console.log('[warn] ' + note.split('\\n').join('\\n[warn] ') + ' (or bu.handoff(message, {wait: true}) and continue when it clears)');
+}
 // A line for bu.state, once per page and kind.
 async function __challengeNote(target, url) {
   var found = await __challenges(target), lines = [];

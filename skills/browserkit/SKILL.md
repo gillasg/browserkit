@@ -19,7 +19,8 @@ real.
 2. **Don't put JSON on the command line.** Shells mangle its quotes (PowerShell strips them
    entirely). For simple inputs use `key=value` pairs: `browserkit call shop.example search q=lamp`
    (values that are valid JSON, like numbers or `'["a","b"]'`, are parsed as JSON). For code or
-   anything nested, write the input to a file and pass `@file.json`, or pipe it in with `-`.
+   anything nested, write the input to a file and pass `@file.json` (`repl @cell.js` for code, the
+   safest form on Windows), or pipe it in with `-`.
 3. **Pick one session name and reuse it** (`--session work`). Calls in the same session share
    variables, tabs and saved files; without one the MCP server uses `mcp` and the CLI uses `cli`.
 
@@ -30,9 +31,12 @@ real.
 - **Read a lot of pages** (a page, a section, a whole site, a sitemap, search results): `crawl`,
   `scrape`, `map-urls`, `search`. Plain HTTP first, the browser only when a page needs it. Much
   cheaper than driving each page.
+- **Which of many sites load** (dead links, parked domains, which answer an API path): `browserkit
+check <urls|--file f>`, with evidence per site. Far cheaper than opening each one.
 - **Call a site's API**: only if the site is mapped (`browserkit sites`). One call replaces many
   page actions and returns JSON with the user's session. If it is not mapped, map it (`map`,
-  `describe`, `learn`) or just use the page.
+  `describe`, `learn`) or just use the page. `map <url> --until-idle` (or `--for 60`) records
+  without waiting for Enter, for scripts and agents.
 - **A site used repeatedly**, where the answer must keep coming: map it, then `call`, `watch`,
   `federate` (several sites at once, with provenance).
 - **What the user visited, saved or has open**: their history, bookmarks and open tabs, not a
@@ -148,6 +152,12 @@ Hand back to the user with `bu.handoff("...")` only for what no agent can do: a 
 email, a CAPTCHA, a payment, or a choice that is theirs. Before a click that opens a passkey or 2FA
 prompt the page blocks on, start it first with `{start: true}` (help('signin')).
 
+A bot wall (Cloudflare, DataDome and the like) logs a `[warn] challenge:` line when the page opens.
+Never click through it yourself: `await bu.handoff("Please finish the check", {wait: true})` returns
+once the page is clear. To reuse the signed-in session from a script, `browserkit session export
+<site>` or `browserkit cookies export <site>` saves the cookies, mapped site or not.
+`help('gated')`.
+
 ## Blocked sites
 
 Sites the user blocked are off limits in every way: no tab opens them, `browser.fetch` and site API
@@ -228,8 +238,8 @@ if a part is missing, try another route. Never conclude from part of a list: rea
 you only saw the top. Lead the answer with what is most urgent. Never invent values. If something
 cannot be done, say what you tried and give the closest verified facts with their sources; say
 which facts came from search and which you saw on a site. `STALE_REF` means call `bu.state()` again;
-`TARGET_LOST` means the tab is gone. Anything else: `await help()` lists topics, `help(topic)` gives
-the reference.
+`TARGET_LOST` means the tab is gone; every other code is in `help('errors')`. `help()` lists topics
+and `help(topic)` gives the reference; both are synchronous and return the text as a string.
 
 ## Moving a site to another machine
 

@@ -10,7 +10,7 @@ import { PageTransport } from "./transports.js";
 // can run from Node. Used by `site-to-api session`, and to renew an exported session that expired.
 
 export async function exportSession(
-  model: SiteModel,
+  model: Pick<SiteModel, "site" | "origins">,
   bridge?: () => Promise<Bridge>,
 ): Promise<{ session: SessionFile; path: string }> {
   const page = new PageTransport(bridge);

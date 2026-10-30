@@ -171,6 +171,24 @@ function __iconBoxes(max, selector) {
     };
   });
 }
+// A screenshot is saved in the workspace and returned as {saved: absolute path}. The image itself
+// stays off the printed result (megabytes of base64) unless {inline: true} or {save: false}, but
+// code can still read .dataBase64. {path} names the file; it is always written inside the workspace.
+async function __savedShot(shot, options) {
+  if (!shot.data) throw new Error('SCREENSHOT_CAPTURE_FAILED');
+  var mimeType = shot.mimeType || 'image/png';
+  var result = {mimeType};
+  if (options.save !== false) {
+    var asked = String(options.path || options.name || '').replace(/\\\\/g, '/');
+    var outside = /^([a-z]:)?\\//i.test(asked) || asked.startsWith('../');
+    var name = !asked ? 'screens/' + Date.now() + '.' + (mimeType.split('/')[1] === 'jpeg' ? 'jpg' : mimeType.split('/')[1]) : outside ? 'screens/' + asked.split('/').pop() : asked;
+    var file = await artifact(name, __bytesFromBase64(shot.data));
+    result.saved = (file && file.path) || name;
+    if (outside) result.note = 'browser code writes only inside its workspace, so ' + asked + ' was saved there instead';
+  }
+  Object.defineProperty(result, 'dataBase64', {value: shot.data, enumerable: options.inline === true || options.save === false});
+  return result;
+}
 function __bytesFromBase64(base64) {
   var binary = atob(base64);
   var bytes = new Uint8Array(binary.length);
@@ -320,22 +338,14 @@ function __extendPageSurface(target, base) {
     settle: async (options = {}) => (await __step({op:'settle', target, quietMs: Math.min(Math.max(options.quietMs || 500, 50), 10000), timeoutMs: Math.min(Math.max(options.timeoutMs || 10000, 100), 60000)})).data,    // Screenshot with full-page, annotation, and save choices.
     screenshot: async (options = {}) => {
       if (options.labels) return __labeledScreenshot(target);
-      if (options.fullPage || options.annotate) {
-        var params = { format: options.format || 'png', captureBeyondViewport: options.fullPage === true };
-        if (options.annotate) {
-          await __step({op:'evaluate', target, expression: '(' + __annotateShim.toString() + ')(' + JSON.stringify(options.annotate === true ? {} : options.annotate) + ')'});
-        }
-        var shot = await page.cdp('Page.captureScreenshot', params);
-        var saved;
-        if (options.save !== false) {
-          var name = options.name || ('screens/' + Date.now() + '.' + (options.format || 'png'));
-          await artifact(name, __bytesFromBase64(shot.data));
-          saved = name;
-        }
-        return { dataBase64: shot.data, ...(saved ? { saved } : {}) };
+      var params = { format: options.format || 'png', captureBeyondViewport: options.fullPage === true };
+      if (options.annotate) {
+        await __step({op:'evaluate', target, expression: '(' + __annotateShim.toString() + ')(' + JSON.stringify(options.annotate === true ? {} : options.annotate) + ')'});
       }
-      var result = await __step({op:'observe', target, kind:'screenshot'});
-      return result.data ? result.data : result;
+      var shot = options.fullPage || options.annotate || options.path || options.name
+        ? {data: (await page.cdp('Page.captureScreenshot', params)).data, mimeType: 'image/' + params.format}
+        : await __step({op:'observe', target, kind:'screenshot'}).then((result) => ({data: result.data && result.data.dataBase64, mimeType: result.data && result.data.mimeType}));
+      return __savedShot(shot, options);
     },
     // Emulation: network conditions, CPU throttle, viewport and touch.
     emulateNetwork: async (options = {}) => page.cdp('Network.emulateNetworkConditions', {

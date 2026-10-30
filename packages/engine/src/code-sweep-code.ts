@@ -129,7 +129,7 @@ export function sweepCode(spec: {
         const text = await tab.evaluate(() => document.body ? document.body.innerText.slice(0, 1200) : '').catch(() => '');
         let saved = null;
         try {
-          const shot = await tab.screenshot();
+          const shot = await tab.screenshot({save: false});
           const base64 = shot && (shot.dataBase64 || (shot.data && shot.data.dataBase64));
           if (base64) {
             const name = 'sweep/' + (options.checkpoint || spec.jobId) + '/' + (offset + index) + '.png';

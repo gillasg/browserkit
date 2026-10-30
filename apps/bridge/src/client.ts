@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { WebSocket } from "ws";
+import { cliHost, type CliHost } from "./host.js";
 import { statePath, type BridgeState } from "./paths.js";
 
 type Json = Record<string, unknown>;
@@ -73,7 +74,11 @@ export class BridgeClient {
     { resolve(value: Json): void; onEvent?: ((event: Json) => void) | undefined }
   >();
 
-  private constructor(private readonly socket: WebSocket) {
+  private constructor(
+    private readonly socket: WebSocket | undefined,
+    private readonly host?: CliHost,
+  ) {
+    if (!socket) return;
     socket.on("message", (raw) => {
       const message = JSON.parse(String(raw)) as Json;
       const waiter = this.waiting.get(Number(message.id));
@@ -91,6 +96,9 @@ export class BridgeClient {
   }
 
   static async connect(): Promise<BridgeClient> {
+    // An app that runs browser code itself installs a host; its commands then never need a bridge.
+    const host = cliHost();
+    if (host) return new BridgeClient(undefined, host);
     const state = await ensureBridge();
     const socket = new WebSocket(`ws://127.0.0.1:${state.port}/client`);
     await new Promise<void>((resolve, reject) => {
@@ -102,14 +110,31 @@ export class BridgeClient {
   }
 
   request(kind: string, body: Json = {}, onEvent?: (event: Json) => void): Promise<Json> {
+    if (this.host) return hostRequest(this.host, kind, body);
+    const socket = this.socket as WebSocket;
     const id = ++this.sequence;
     return new Promise((resolve) => {
       this.waiting.set(id, { resolve, onEvent });
-      this.socket.send(JSON.stringify({ id, kind, ...body }));
+      socket.send(JSON.stringify({ id, kind, ...body }));
     });
   }
 
   close(): void {
-    this.socket.close();
+    this.socket?.close();
+  }
+}
+
+/** A bridge request answered by the host: browser code runs there; the rest is bridge-only. */
+async function hostRequest(host: CliHost, kind: string, body: Json): Promise<Json> {
+  if (kind === "status") return { browsers: 1 };
+  if (kind !== "run") return { error: `${kind} needs browserkit's own bridge` };
+  try {
+    const options = {
+      ...(typeof body.session === "string" ? { session: body.session } : {}),
+      ...(typeof body.timeoutMs === "number" ? { timeoutMs: body.timeoutMs } : {}),
+    };
+    return { value: await host.runInBrowser(String(body.code ?? ""), options) };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : String(error) };
   }
 }

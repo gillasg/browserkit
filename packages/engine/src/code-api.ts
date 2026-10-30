@@ -201,6 +201,7 @@ var browser = Object.freeze({
       __noteNavError(result.tab.target, url, 'openTab', result.reason || 'navigation failed');
       console.log('[warn] tab ' + result.tab.target.tabId + ' opened, but ' + url + ' did not load: ' + (result.reason || 'navigation failed') + '; the tab is still yours (page.navigation is "failed", page.lastError says why)');
     }
+    else await __noteChallenge(result.tab.target, url);
     return __openResult(result.tab, false, result.navigation === 'failed' ? result.reason : undefined);
   },
   // A tab kept for later: an open tab on the URL is reused (and attached to this session), else a
@@ -400,6 +401,7 @@ var browser = Object.freeze({
           ...(options.present === false ? {present:false} : {}),
           ...(options.timeoutMs ? {timeoutMs: Math.max(500, Math.min(Number(options.timeoutMs) || 0, 120000))} : {})});
         __lastErrors.delete(__key(target));
+        await __noteChallenge(target, destination);
         return result;
       } catch (error) {
         __noteNavError(target, destination, 'navigate', error);
