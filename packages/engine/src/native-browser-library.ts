@@ -1,6 +1,8 @@
 import { boostsCall, isBoostsRequest } from "./native-browser-boosts.js";
 import { forgetAgentTab } from "./native-browser-tab-cleanup.js";
 import { disableQuietTab } from "./native-browser-quiet.js";
+import { historyCall } from "./native-browser-history.js";
+import { identityCall, isIdentityRequest } from "./native-browser-identity.js";
 
 // The user's history and bookmarks, for questions like "that article I read last week" and for
 // organizing bookmarks. Results are compact records; the code runtime gets them as plain data.
@@ -17,12 +19,14 @@ export function isLibraryRequest(value: Request | null): boolean {
       typeof value.extension === "string" ||
       value.tabs === "move" ||
       value.tabs === "keep" ||
+      isIdentityRequest(value) ||
       isBoostsRequest(value)),
   );
 }
 
 export function libraryCall(value: Request): Promise<unknown> {
   if (typeof value.history === "string") return historyCall(value.history, value);
+  if (isIdentityRequest(value)) return identityCall(value);
   if (typeof value.downloads === "string") return downloadsCall(value.downloads, value);
   if (typeof value.extension === "string") return extensionCall(value.extension, value.message);
   if (value.tabs === "move") return moveTabs(value);
@@ -75,22 +79,6 @@ async function extensionCall(id: string, message: unknown): Promise<unknown> {
       `EXTENSION_UNAVAILABLE: ${id} is not installed or did not answer (${error instanceof Error ? error.message : String(error)})`,
     );
   }
-}
-
-async function historyCall(action: string, value: Request): Promise<unknown> {
-  if (action !== "search") throw new Error("UNSUPPORTED: browser.history." + action);
-  const days = Math.min(3650, Math.max(0, Number(value.days ?? 30)));
-  const items = await chrome.history.search({
-    text: String(value.text ?? ""),
-    startTime: days ? Date.now() - days * 86_400_000 : 0,
-    maxResults: limit(value.max, 50),
-  });
-  return items.map((item) => ({
-    url: item.url,
-    title: item.title,
-    lastVisit: item.lastVisitTime ? new Date(item.lastVisitTime).toISOString() : undefined,
-    visits: item.visitCount,
-  }));
 }
 
 // Recent downloads, so the agent can find a file the user or a page just saved.

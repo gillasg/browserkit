@@ -9,6 +9,11 @@ import {
   browserActionDescription,
   browserActionSchema,
 } from "@browserkit/tools/action";
+import {
+  browserContextCode,
+  browserContextDescription,
+  browserContextSchema,
+} from "@browserkit/tools/context";
 
 // A stdio MCP server (JSON-RPC 2.0, one message per line) exposing the browser to any MCP client.
 type Json = Record<string, unknown>;
@@ -39,6 +44,11 @@ const tools = [
     description:
       "List the open tabs of the connected browser, with the target to pass to browser.attachTab().",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
+    name: "browser_context",
+    description: browserContextDescription,
+    inputSchema: browserContextSchema,
   },
   {
     name: "browser_action",
@@ -93,6 +103,16 @@ async function handle(message: Json, bridge: () => Promise<BridgeClient>): Promi
   if (params.name === "browser_tabs") {
     const reply = await client.request("tabs");
     return { content: [{ type: "text", text: JSON.stringify(reply.tabs ?? [], null, 2) }] };
+  }
+  if (params.name === "browser_context") {
+    const result = await client.request("run", {
+      code: browserContextCode(args as never),
+      session: typeof args.session === "string" ? args.session : "mcp",
+    });
+    return {
+      content: [{ type: "text", text: formatResult(result).text }],
+      isError: Boolean(result.error),
+    };
   }
   if (params.name === "browser_action") {
     const code = browserActionCode(args as never);

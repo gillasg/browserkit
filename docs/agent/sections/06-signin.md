@@ -7,7 +7,8 @@ await bu.signIn(); // {signedIn, site, provider, account, reason}
 await bu.signIn({ account: "me@example.com" });
 ```
 
-It fills the username, password and, when the password manager has one, the one-time code, across
+It fills the username, password and the one-time code (the password manager's, else one the site
+just sent to the user's Gmail or Google Messages), across
 multi-step forms. You never see the password or the code, and there is no approval step: calling it
 signs in. `reason` says why it stopped: `NO_PASSWORD_MANAGER`, `NO_SAVED_LOGIN`, `CHOOSE_ACCOUNT`
 (call again with `account`), `NEEDS_CODE` (a code by SMS or email), `CAPTCHA`, or `REJECTED`.

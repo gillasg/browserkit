@@ -12,6 +12,9 @@ import { browserEventsApi } from "./code-api-events.js";
 import { browserDemonstrationApi } from "./code-api-demonstration.js";
 import { browserRecordingApi } from "./code-api-recording.js";
 import { browserSitesApi } from "./code-api-sites.js";
+import { browserContextApi } from "./code-api-context.js";
+import { browserSnipeApi } from "./code-api-snipe.js";
+import { browserTablesApi } from "./code-api-tables.js";
 import { browserHelpApi } from "./code-api-help.js";
 import { browserControlsApi } from "./code-api-controls.js";
 import { browserMediaApi } from "./code-media-api.js";
@@ -86,6 +89,9 @@ evaluate(
     browserMediaApi,
     browserCodeApi,
     browserSitesApi,
+    browserContextApi,
+    browserSnipeApi,
+    browserTablesApi,
     browserHelpApi,
     browserFastApi,
     browserCapabilityApi,
@@ -134,7 +140,8 @@ async function run(message: Record<string, unknown>): Promise<void> {
     const delivered = evaluate("__hasDelivered ? {value: __deliveryValue} : null") as {
       value: unknown;
     } | null;
-    if (delivered) value = delivered.value;
+    // finish_from_js: the value is the run's answer, handed to the user as it is.
+    if (delivered) value = { delivered: true, answer: delivered.value };
   } catch (caught) {
     error = withHint(
       caught instanceof Error ? caught.message : String(caught),

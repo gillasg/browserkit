@@ -344,7 +344,7 @@ function __extendPageSurface(target, base) {
       }
       var shot = options.fullPage || options.annotate || options.path || options.name
         ? {data: (await page.cdp('Page.captureScreenshot', params)).data, mimeType: 'image/' + params.format}
-        : await __step({op:'observe', target, kind:'screenshot'}).then((result) => ({data: result.data && result.data.dataBase64, mimeType: result.data && result.data.mimeType}));
+        : await __step({op:'observe', target, kind:'screenshot'}).then((result) => { var shot = (result && result.data) || result || {}; return {data: shot.dataBase64, mimeType: shot.mimeType}; });
       return __savedShot(shot, options);
     },
     // Emulation: network conditions, CPU throttle, viewport and touch.

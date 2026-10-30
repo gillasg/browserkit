@@ -32,7 +32,10 @@
     "declarativeNetRequest",
     "contentSettings",
     "clipboardRead",
-    "clipboardWrite"
+    "clipboardWrite",
+    "proxy",
+    "identity",
+    "identity.email"
   ],
   "host_permissions": ["http://*/*", "https://*/*"],
   "sandbox": {

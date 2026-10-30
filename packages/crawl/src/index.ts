@@ -3,7 +3,14 @@ export * from "./types.js";
 export { scrape, buildResult, DEFAULT_FORMATS, type ScrapeContext } from "./scrape.js";
 export { Crawl, crawl, type CrawlHooks, type CrawlDeps } from "./crawler.js";
 export { mapSite, type MapOptions, type MappedUrl } from "./map.js";
-export { search, searchAndScrape, type SearchResult } from "./search.js";
+export {
+  prefersGoogle,
+  search,
+  searchAndScrape,
+  type SearchEngine,
+  type SearchResult,
+} from "./search.js";
+export { searchWeb, WEB_PROVIDERS, type WebProvider, type WebResult } from "./web-search.js";
 export { findList, type FindOptions, type FoundRow } from "./find.js";
 export { syncSite, type SyncReport } from "./sync.js";
 export { startServer, type CrawlServer, type ServerOptions } from "./server.js";

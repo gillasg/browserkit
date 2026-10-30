@@ -386,6 +386,27 @@ var bu = Object.freeze({
     __states.delete(__key(target));
     return result;
   },
+  // A code the site just sent to the user's Gmail or phone (Google Messages), typed and submitted.
+  fillCode: async (options = {}) => {
+    var target = options.target || __lastTarget;
+    if (!target) throw Error('Use bu.use(attachedTarget) or browser.page(target) first');
+    var result = await __call({fillCode: {target, ...(options.waitMs ? {waitMs: Number(options.waitMs)} : {})}});
+    __states.delete(__key(target));
+    return result;
+  },
+  // Fills the form from the user's profile; returns field names only, never values.
+  fillProfile: async (options = {}) => {
+    var target = options.target || __lastTarget;
+    if (!target) throw Error('Use bu.use(attachedTarget) or browser.page(target) first');
+    var result = await __call({fillProfile: {target, ...(Array.isArray(options.fields) ? {fields: options.fields.map(String)} : {})}});
+    __states.delete(__key(target));
+    return result;
+  },
+  profile: Object.freeze({
+    fields: async () => (await __call({profile: 'fields'})).fields,
+    save: (values) => __call({profile: 'save', values}),
+    remove: (name) => __call({profile: 'remove', name: String(name)}),
+  }),
 });
 // Draws each interactive bu id on the page, captures, then removes the overlay.
 async function __labeledScreenshot(target) {

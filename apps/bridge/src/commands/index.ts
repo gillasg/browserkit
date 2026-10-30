@@ -15,6 +15,8 @@ import {
 import { mapGroup } from "./site-map.js";
 import { keepGroup } from "./site-keep.js";
 import { blockGroup } from "./block-sites.js";
+import { formsCommand } from "./forms.js";
+import { tablesCommand } from "./tables.js";
 import { signinCommand } from "./signin.js";
 import { packCommand } from "./pack.js";
 import { useGroup } from "./site-use.js";
@@ -58,6 +60,8 @@ export const COMMANDS: Command[] = [
   recipeCommand,
   ...keepGroup,
   ...blockGroup,
+  formsCommand,
+  tablesCommand,
   signinCommand,
   boostsCommand,
   packCommand,

@@ -11,7 +11,11 @@ type, wait for the suggestion list, then click the matching option; read each fi
 before the next.
 
 `page.controls.inspect()` gives every field's state; `page.batch(steps)` fills, selects, checks and
-submits in one call, ending with a read of the result (`help("forms")`). `TARGET_BLOCKED` names what
+submits in one call, ending with a read of the result (`help("forms")`). Fields about the
+user: `await bu.fillProfile()` fills them from their form profile without you seeing the values;
+for each field it reports `missing`, ask the user, then offer to keep the answer and on yes
+`bu.profile.save({field: value})` (`help("profile")`). A code sent by email or text:
+`await bu.fillCode()`. `TARGET_BLOCKED` names what
 covers the control: act inside that dialog or close it. If something seems missing, scroll, search
 the page or try another URL before concluding it is not there. Never repeat a failing action more
 than twice; change strategy.

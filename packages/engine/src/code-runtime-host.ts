@@ -19,7 +19,8 @@ import { executeLocalBrowserStep } from "./native-browser-executor.js";
 import { browserSessionOwner } from "./native-browser-session.js";
 import { currentInventoryTabs } from "./native-inventory-client.js";
 import { notePreviewActivity } from "./native-browser-preview.js";
-import { signInToPage } from "./native-browser-signin.js";
+import { fillCodeOnPage, signInToPage } from "./native-browser-signin.js";
+import { fillProfileOnPage } from "./native-browser-profile.js";
 import { sessionHeadersFor } from "./native-browser-session-headers.js";
 import {
   captureTypedPassword,
@@ -352,12 +353,32 @@ function serveSignIn(
 ): Promise<unknown> | undefined {
   if (value && "credential" in value)
     return Promise.reject(new Error("FORBIDDEN: use bu.signIn() to sign in"));
+  if (value?.profile === "values")
+    return Promise.reject(new Error("FORBIDDEN: use bu.fillProfile() to fill a form"));
+  const filled = serveFill(cell, value);
+  if (filled) return filled;
   if (!value || typeof value.signIn !== "object" || !value.signIn) return undefined;
   const request = value.signIn as { target?: unknown; account?: unknown };
   const target = authorizedTarget(cell, request.target);
   void notePreviewActivity(cell.run.chatId, target.tabId);
   return guardCellTab(cell, target.tabId).then(() =>
     signInToPage(target.tabId, { account: request.account }, (ask) => callCore(cell, ask)),
+  );
+}
+
+// bu.fillCode() and bu.fillProfile(): the engine reads codes and profile values and types them.
+function serveFill(
+  cell: Cell,
+  value: Record<string, unknown> | null,
+): Promise<unknown> | undefined {
+  const request = (value?.fillCode ?? value?.fillProfile) as
+    { target?: unknown; waitMs?: unknown; fields?: unknown } | undefined;
+  if (!value || !request || typeof request !== "object") return undefined;
+  const target = authorizedTarget(cell, request.target);
+  return guardCellTab(cell, target.tabId).then((): Promise<unknown> =>
+    value.fillCode
+      ? fillCodeOnPage(target.tabId, request)
+      : fillProfileOnPage(target.tabId, request, (ask) => callCore(cell, ask)),
   );
 }
 

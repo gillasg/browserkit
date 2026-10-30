@@ -97,6 +97,8 @@ export type CrawlToolInput = {
   expect?: string;
   /** Also open each site and report typed readiness (ready, empty, loading, login, challenge, not-found, error). */
   readiness?: boolean;
+  /** For search: auto (default), web (keyless providers) or google (the user's browser). */
+  engine?: "auto" | "web" | "google";
   api?: { site: string; operation: string; params?: Record<string, unknown>; maxItems?: number };
 };
 
@@ -155,6 +157,12 @@ const crawlParameters: JsonObjectSchema = {
       description:
         "For check: what those paths should answer (json, html, m3u8, xml, text or a content type); the body's real shape is checked.",
     },
+    engine: {
+      type: "string",
+      enum: ["auto", "web", "google"],
+      description:
+        "For search: auto picks Google in the user's browser for local, live and personal queries (near me, prices, scores, today, my ...) and fast keyless web search for the rest; web or google forces one.",
+    },
     readiness: {
       type: "boolean",
       description:
@@ -179,7 +187,7 @@ const crawlParameters: JsonObjectSchema = {
 export const crawlTool: AgentToolDefinition<CrawlToolInput> = {
   name: "crawl",
   description:
-    "Read web pages as Markdown and data: scrape a URL, crawl a site or section, map a site's URLs, check which of many sites load, or search Google. Uses plain HTTP first and the user's browser (with their logins) when needed.",
+    "Read web pages as Markdown and data: scrape a URL, crawl a site or section, map a site's URLs, check which of many sites load, or search the web (keyless search providers, or Google in the user's browser for local, live and personal queries). Uses plain HTTP first and the user's browser (with their logins) when needed.",
   actions: [
     { name: "scrape", params: ["url", "query", "formats", "render"] },
     {
@@ -225,7 +233,10 @@ export const crawlTool: AgentToolDefinition<CrawlToolInput> = {
         ...(context.model ? { model: (await context.model()) as never } : {}),
       });
     if (input.action === "search")
-      return search(require(input.query, "query"), { limit: input.limit ?? 10 });
+      return search(require(input.query, "query"), {
+        limit: input.limit ?? 10,
+        ...(input.engine ? { engine: input.engine } : {}),
+      });
     const url = require(input.url, "url");
     if (input.action === "scrape")
       return scrape(url, {

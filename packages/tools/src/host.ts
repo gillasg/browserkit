@@ -2,6 +2,8 @@ import { join } from "node:path";
 import { learnAbout, readLearned, learnedHint } from "@browserkit/site-mapper";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { handleCredentialRequest, isCredentialRequest } from "@browserkit/credentials";
+import { handleProfileRequest, isProfileRequest } from "./profile.js";
+import { handleTableRequest, isTableRequest } from "./tables.js";
 import {
   isSiteToolRequest,
   listSiteTools,
@@ -137,6 +139,8 @@ export function createHostHandler(
   const home = options.dataDirectory ?? browserkitHome();
   return (request, context) => {
     if (isCredentialRequest(request)) return handleCredentialRequest(request, home);
+    if (isProfileRequest(request)) return handleProfileRequest(request, home);
+    if (isTableRequest(request)) return handleTableRequest(request, home);
     if (isSiteRulesRequest(request)) return answerSiteRules(context, options, home);
     if (isSiteToolRequest(request)) return handleSiteTool(request);
     if (isSiteCapabilitiesRequest(request))

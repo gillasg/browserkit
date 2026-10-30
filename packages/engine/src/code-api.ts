@@ -300,6 +300,8 @@ var browser = Object.freeze({
   }),
   // Many pages past the cell deadline: start a job, then check it in a later cell.
   job: __job,
+  // Act at an exact moment with a warmed tab, a prefilled form and retries: browser.snipe({at, url, prepare, fire, done}).
+  snipe: (options) => __snipe(options),
   // Bulk capture over many URLs (a job mode): browser.sweep(urls, {gate, capture, play, evidence}).
   sweep: __sweep,
   // Stop a running job: browser.jobCancel(jobId), then browser.job(id) reports cancelled.
@@ -317,8 +319,19 @@ var browser = Object.freeze({
     remove: (id) => __call({boosts:"remove", id}),
     enable: (id, enabled = true) => __call({boosts:"enable", id, enabled}),
   }),
+  // The active tab, open tabs, recent and most used sites, and history/bookmark matches for a request.
+  context: (request = "", options = {}) => __context(request, options),
+  // Who the run is: the Chrome profile account and the Google accounts signed in (authuser order).
+  identity: Object.freeze({ accounts: () => __call({identity:"accounts"}) }),
+  // A proxy for some sites (or all) in this profile, until cleared. Chrome routes per site, not per tab.
+  proxy: Object.freeze({
+    set: (server, options = {}) => __call({proxy:"set", server: String(server), ...(options.sites ? {sites: options.sites} : {})}),
+    clear: () => __call({proxy:"clear"}),
+    get: () => __call({proxy:"get"}),
+  }),
   history: Object.freeze({
     search: (text = "", options = {}) => __call({history:"search", text, ...options}),
+    top: (options = {}) => __call({history:"top", ...options}),
   }),
   bookmarks: Object.freeze({
     search: (query, options = {}) => __call({bookmarks:"search", query, ...options}),

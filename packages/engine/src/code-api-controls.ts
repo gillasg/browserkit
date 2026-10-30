@@ -657,14 +657,14 @@ async function __handoffUntilClear(message, target, options) {
 // After openTab or goto: a page that loaded as a bot check or captcha says so at once, so a
 // challenge is never read as the page itself.
 async function __noteChallenge(target, url) {
-  var note = await __challengeNote(target, url).catch(() => '');
+  var note = await __challengeNote(target, url, 'open').catch(() => '');
   if (note) console.log('[warn] ' + note.split('\\n').join('\\n[warn] ') + ' (or bu.handoff(message, {wait: true}) and continue when it clears)');
 }
-// A line for bu.state, once per page and kind.
-async function __challengeNote(target, url) {
+// A line for bu.state (and one for opening the page), once per page and kind.
+async function __challengeNote(target, url, scope = 'state') {
   var found = await __challenges(target), lines = [];
   for (var c of found) {
-    var key = __key(target) + '|' + String(url).split('#')[0] + '|' + c.kind + '|' + c.provider;
+    var key = scope + '|' + __key(target) + '|' + String(url).split('#')[0] + '|' + c.kind + '|' + c.provider;
     if (__challengeSeen.has(key)) continue;
     __challengeSeen.add(key);
     lines.push('challenge: ' + c.kind + ' (' + c.provider + ', ' + c.evidence + '). ' + c.advice);

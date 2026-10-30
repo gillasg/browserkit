@@ -111,7 +111,14 @@ async function runMap(target: string, args: Args): Promise<number> {
 
 async function runSearch(target: string, args: Args): Promise<number> {
   const results = (await crawlTool.run(
-    { action: "search", query: target, limit: Number(flag(args, "limit") ?? 10) },
+    {
+      action: "search",
+      query: target,
+      limit: Number(flag(args, "limit") ?? 10),
+      ...(flag(args, "engine")
+        ? { engine: flag(args, "engine") as "auto" | "web" | "google" }
+        : {}),
+    },
     {},
   )) as { url: string; title?: string; snippet?: string }[];
   if (has(args, "json")) printJson(results);
@@ -376,8 +383,12 @@ export const urlMapCommand: Command = {
 export const searchCommand: Command = {
   name: "search",
   group: "Read the web",
-  summary: "search Google through your browser",
-  help: `Usage: browserkit search <query> [--limit n] [--json]`,
+  summary: "search the web: keyless providers, or Google in your browser",
+  help: `Usage: browserkit search <query> [--engine auto|web|google] [--limit n] [--json]
+
+auto (default) uses Google in your browser for local, live and personal queries (near me, prices,
+scores, today, my ...) and keyless web search providers (Exa, Parallel, TinyFish) for the rest,
+falling back to the other when one finds nothing.`,
   run: (args) => {
     const target = args.positional.join(" ");
     if (!target) throw new Error("Usage: browserkit search <query>");

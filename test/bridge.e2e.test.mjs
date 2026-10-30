@@ -1533,7 +1533,14 @@ test(
           const listed = await mcp.call("tools/list", {});
           assert.deepEqual(
             listed.tools.map((tool) => tool.name),
-            ["browser_code", "browser_tabs", "browser_action", "crawl", "site_mapper"],
+            [
+              "browser_code",
+              "browser_tabs",
+              "browser_context",
+              "browser_action",
+              "crawl",
+              "site_mapper",
+            ],
           );
           const crawled = await mcp.call("tools/call", {
             name: "crawl",
@@ -1550,6 +1557,13 @@ test(
           assert.match(called.content[0].text, /→ 3/);
           const tabs = await mcp.call("tools/call", { name: "browser_tabs", arguments: {} });
           assert.match(tabs.content[0].text, /127\.0\.0\.1/);
+          const context = await mcp.call("tools/call", {
+            name: "browser_context",
+            arguments: { request: "127.0.0.1" },
+          });
+          assert.equal(context.isError, false, JSON.stringify(context));
+          assert.match(context.content[0].text, /openTabs[\s\S]*127\.0\.0\.1/);
+          assert.match(context.content[0].text, /topSites/);
         } finally {
           mcp.close();
         }

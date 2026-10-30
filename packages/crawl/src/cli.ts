@@ -9,7 +9,7 @@ import { AutoFetcher } from "./fetch/auto.js";
 import { mapSite } from "./map.js";
 import { writeOutput } from "./output.js";
 import { scrape } from "./scrape.js";
-import { search, searchAndScrape } from "./search.js";
+import { search, searchAndScrape, type SearchEngine } from "./search.js";
 import { findList } from "./find.js";
 import { startServer } from "./server.js";
 import { listJobs, JobStore } from "./store.js";
@@ -28,7 +28,7 @@ const usage = `browser-crawl: crawl anything, including behind your logins.
   crawl --api <site>:<operation>         every item of a site mapped with site-to-api
   crawl --resume <job id or state dir>   continue a paused or interrupted crawl
   sync <url> <folder>        keep a Markdown mirror up to date (only changed pages are fetched)
-  search "<query>"           Google in your browser [--scrape] [--limit n]
+  search "<query>"           web search: keyless providers, or Google in your browser for local, live and personal queries [--engine auto|web|google] [--scrape] [--limit n]
   find "<query>"             build a list: search, keep matches, fill columns (needs a model)
                              --columns "name,founded=year founded" [--criteria text] [--also "q2|q3"]
   schema <url> "<what>"      write a reusable CSS extraction schema from one page (needs a model)
@@ -241,11 +241,12 @@ const COMMANDS: Record<string, (positional: string[], flags: Flags) => Promise<v
   search: async (positional, flags) => {
     const query = positional.slice(1).join(" ");
     const limit = Number(typeof flags.limit === "string" ? flags.limit : 10);
+    const engine = (typeof flags.engine === "string" ? flags.engine : "auto") as SearchEngine;
     out(
       JSON.stringify(
         flags.scrape
-          ? await searchAndScrape(query, { ...(await options(flags)), limit })
-          : await search(query, { limit }),
+          ? await searchAndScrape(query, { ...(await options(flags)), limit, engine })
+          : await search(query, { limit, engine }),
         null,
         2,
       ),

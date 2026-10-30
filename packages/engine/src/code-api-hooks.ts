@@ -53,8 +53,10 @@ async function artifact(name,data) {
   } while(at<value.length);
   return {...result,bytes:base64?Math.floor(value.length*3/4)-(value.endsWith('==')?2:value.endsWith('=')?1:0):new TextEncoder().encode(value).length};
 }
-var checkpoint=(name,value)=>__call({workspace:'checkpoint',name,value});
-var loadCheckpoint=name=>__call({workspace:'load',name});
+// {partial: true} keeps a partial answer under partial/: it is what a stopped or budget-limited run delivers from.
+var __checkpointName=(name,options)=>options&&options.partial?'partial/'+String(name):name;
+var checkpoint=(name,value,options={})=>__call({workspace:'checkpoint',name:__checkpointName(name,options),value});
+var loadCheckpoint=(name,options={})=>__call({workspace:'load',name:__checkpointName(name,options)});
 var saveHelper=(name,fn)=>__call({workspace:'helper',name,value:typeof fn==='function'?'('+fn.toString()+')':fn});
 var loadHelper=async name=>eval(await __call({workspace:'loadHelper',name}));
 var showImage=async name=>{await __call({workspace:'image',name});return {displayed:true,path:name};};

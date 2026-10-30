@@ -9,6 +9,7 @@ import {
   type SignInFields,
 } from "./native-browser-signin-page.js";
 import { rememberSecrets } from "./native-browser-secrets.js";
+import { messagesSnapshot, waitForInboxCode } from "./native-browser-inbox-code.js";
 
 // bu.signIn(): sign in to the page the agent is on with a login from the user's password
 // manager. The machine looks the login up by the tab's real address; the engine types it into
@@ -55,6 +56,13 @@ interface LoginAnswer {
 }
 
 type Ask = (request: unknown) => Promise<unknown>;
+type Inbox = { since: number; before: Set<string> };
+interface Attempt {
+  login: Login;
+  ask: Ask;
+  url: string;
+  inbox: Inbox;
+}
 const MAX_STAGES = 4;
 const APPROVE_WAIT_MS = 60_000;
 
@@ -68,17 +76,23 @@ export async function signInToPage(
   const site = siteOf(url);
   if (!site) throw new Error("INVALID_TARGET: sign-in needs an http(s) page");
   const account = typeof options.account === "string" ? options.account : undefined;
+  // Texts already in Google Messages before signing in, so only a code sent now counts.
+  const inbox: Inbox = { since: Date.now(), before: await messagesSnapshot() };
   const answer = (await ask({ credential: "login", url, ...(account ? { account } : {}) })) as
     LoginAnswer | undefined;
   const chosen = pickLogin(site, answer, account);
   if (!("login" in chosen)) return chosen;
   const { login, provider } = chosen;
   rememberSecrets([login.password]);
-  return fill(tabId, login, ask, url, {
-    site,
-    provider,
-    account: login.username || login.name,
-  });
+  return fill(
+    tabId,
+    { login, ask, url, inbox },
+    {
+      site,
+      provider,
+      account: login.username || login.name,
+    },
+  );
 }
 
 function pickLogin(
@@ -108,20 +122,14 @@ function pickLogin(
 
 type Base = Pick<SignInResult, "site" | "provider" | "account">;
 
-async function fill(
-  tabId: number,
-  login: Login,
-  ask: Ask,
-  url: string,
-  base: Base,
-): Promise<SignInResult> {
+async function fill(tabId: number, attempt: Attempt, base: Base): Promise<SignInResult> {
   let fields = await scanFields(tabId);
   if (!fields || !(fields.user || fields.password || fields.code))
     return { ...base, signedIn: false, reason: "NO_SIGN_IN_FORM" };
   if (fields.foreign)
     return { ...base, signedIn: false, reason: "FOREIGN_FORM", detail: fields.foreign };
   for (let stage = 0; stage < MAX_STAGES && fields; stage++) {
-    const stop = await step(tabId, fields, login, ask, url);
+    const stop = await step(tabId, fields, attempt);
     if (stop) return { ...base, signedIn: false, reason: stop };
     if (!(fields.user || fields.password || fields.code)) break;
     let next = await waitForChange(tabId, fields);
@@ -136,14 +144,13 @@ async function fill(
 async function step(
   tabId: number,
   fields: SignInFields,
-  login: Login,
-  ask: Ask,
-  url: string,
+  attempt: Attempt,
 ): Promise<SignInResult["reason"] | undefined> {
+  const { login } = attempt;
   if (fields.captcha) return "CAPTCHA";
   if (fields.foreign) return "FOREIGN_FORM";
   if (fields.covered) await clearCover(tabId);
-  if (fields.code) return enterCode(tabId, login, ask, url, fields.codeBoxes ?? 0);
+  if (fields.code) return enterCode(tabId, attempt, fields.codeBoxes ?? 0);
   if (fields.user && login.username && fields.userValue !== login.username)
     await typeInto(tabId, "user", login.username);
   if (fields.password) await typeInto(tabId, "password", login.password);
@@ -151,20 +158,34 @@ async function step(
   return undefined;
 }
 
+/** The saved authenticator code, else one the site just sent to the user's email or phone. */
+async function oneTimeCode(attempt: Attempt): Promise<string | undefined> {
+  const { login, ask, url, inbox } = attempt;
+  if (login.hasTotp && login.id) {
+    const reply = (await ask({ credential: "totp", url, id: login.id })) as {
+      code?: string | null;
+    };
+    if (reply?.code) return reply.code;
+  }
+  const site = siteOf(url);
+  return site ? (await waitForInboxCode(site, inbox))?.code : undefined;
+}
+
+export async function typeCode(tabId: number, code: string, boxes: number): Promise<void> {
+  rememberSecrets([code]);
+  if (boxes) await typeCodeBoxes(tabId, code, boxes);
+  else await typeInto(tabId, "code", code);
+  await submitForm(tabId);
+}
+
 async function enterCode(
   tabId: number,
-  login: Login,
-  ask: Ask,
-  url: string,
+  attempt: Attempt,
   boxes: number,
 ): Promise<SignInResult["reason"] | undefined> {
-  if (!login.hasTotp || !login.id) return "NEEDS_CODE";
-  const reply = (await ask({ credential: "totp", url, id: login.id })) as { code?: string | null };
-  if (!reply?.code) return "NEEDS_CODE";
-  rememberSecrets([reply.code]);
-  if (boxes) await typeCodeBoxes(tabId, reply.code, boxes);
-  else await typeInto(tabId, "code", reply.code);
-  await submitForm(tabId);
+  const code = await oneTimeCode(attempt);
+  if (!code) return "NEEDS_CODE";
+  await typeCode(tabId, code, boxes);
   return undefined;
 }
 
@@ -196,4 +217,22 @@ function siteOf(url: string): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+/**
+ * bu.fillCode(): types a code the site just sent by email or text into the page's code field and
+ * submits it. Agent code learns only whether it worked and where the code came from.
+ */
+export async function fillCodeOnPage(
+  tabId: number,
+  options: { waitMs?: unknown },
+): Promise<{ filled: boolean; from?: string; reason?: "NO_CODE_FIELD" | "NO_CODE" }> {
+  const fields = await scanFields(tabId);
+  const site = fields ? siteOf(fields.url) : undefined;
+  if (!fields?.code || !site) return { filled: false, reason: "NO_CODE_FIELD" };
+  const waitMs = Number(options.waitMs) || 90_000;
+  const found = await waitForInboxCode(site, { since: Date.now() - 180_000, waitMs });
+  if (!found) return { filled: false, reason: "NO_CODE" };
+  await typeCode(tabId, found.code, fields.codeBoxes ?? 0);
+  return { filled: true, from: found.from };
 }

@@ -14,10 +14,12 @@ check <urls|--file f>`, with evidence per site. Far cheaper than opening each on
 - **A site used repeatedly**, where the answer must keep coming: map it, then `call`, `watch`,
   `federate` (several sites at once, with provenance).
 - **What the user visited, saved or has open**: their history, bookmarks and open tabs, not a
-  search engine. A site, page or thing they name without a link: look in those three together
-  before guessing from memory.
+  search engine. A site, page or thing they name without a link: `browser_context` (or
+  `browser.context(request)`) looks in all three at once before guessing from memory.
+  "My most visited …": `browser.history.top({by, match, days})`.
 - **Anything live or on a specific site** (prices, stock, listings, showtimes, reviews): open that
-  site in the browser. Web search only finds which page to open.
+  site in the browser. Web search only finds which page to open (`search` uses keyless
+  providers, and Google in the user's browser for local, live and personal queries).
 - **A lasting tool for one task on a site** ("make me something that checks X"): build an ability
   (`browserkit actions build <site> "<task>"`); it is tested before it is saved, or says why the
   site cannot do it.
