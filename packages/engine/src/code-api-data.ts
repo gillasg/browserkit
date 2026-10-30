@@ -306,10 +306,13 @@ function __extendPageData(target, base) {
         ? result.markdown + '\\n\\n[PARTIAL: ' + (result.notes.join('; ') || 'read cut') + ']'
         : result.markdown;
     },
-    // One read of the page: data, the main repeated list and Markdown, merged and capped. It
-    // expands "show more" controls and waits for the content to settle; both only here.
+    // One read of the page: data, the main repeated list, Markdown and the panels that scroll on
+    // their own, merged and capped. It expands "show more" controls and waits for the content to
+    // settle; both only here. Everything fits a time budget (timeMs), so a huge page returns what
+    // it has instead of running into the cell deadline.
     read: async (options = {}) => {
       __noteRead(target);
+      var deadline = Date.now() + Math.max(5000, Number(options.timeMs) || 30000);
       var max = Math.max(2000, Math.min(200000, Number(options.max) || 40000));
       var expanded = options.expand === false
         ? {clicked: [], skipped: []}
@@ -324,10 +327,16 @@ function __extendPageData(target, base) {
         list = await __collectList(base, options.list || null, {
           max: Math.min(500, Number(options.maxItems) || 200),
           ...(options.maxScrolls ? {maxScrolls: options.maxScrolls} : {}),
+          deadline: Math.min(deadline - 8000, Date.now() + 12000),
         });
       } catch (error) {
         listNote = 'no repeated list: ' + String(error && error.message || error).slice(0, 200);
       }
+      var scrollers = options.scrollers === false
+        ? []
+        : await __readScrollers(base, {deadline, maxChars: Math.floor(max / 2)}).catch(() => []);
+      // A panel whose text did not grow while scrolling is already in the Markdown.
+      var panels = scrollers.filter((panel) => panel.grew).map(({grew, height, view, ...panel}) => panel);
       var notes = [
         ...(expanded.clicked.length ? ['expanded ' + expanded.clicked.length + ' control(s): ' + expanded.clicked.join(', ')] : []),
         ...(markdown.notes || []),
@@ -335,13 +344,14 @@ function __extendPageData(target, base) {
         ...(waited.note ? [waited.note] : []),
         ...(listNote ? [listNote] : []),
       ];
-      var partial = !!(markdown.partial || (data && data.partial) || (list && list.partial) || waited.partial);
+      var partial = !!(markdown.partial || (data && data.partial) || (list && list.partial) || waited.partial || panels.some((panel) => !panel.complete));
       var result = {
         url: await base.inspect(() => location.href),
         title: await base.inspect(() => document.title),
         data,
         list,
         markdown: markdown.markdown,
+        ...(panels.length ? {scrollers: panels} : {}),
         wait: waited,
         expand: expanded,
         partial,
@@ -350,19 +360,21 @@ function __extendPageData(target, base) {
       var serialized = JSON.stringify(result);
       if (serialized.length > max) {
         var saved = 'page-read-' + new Date().toISOString().replace(/[:.]/g, '-') + '.json';
-        await artifact(saved, serialized);
+        var file = await artifact(saved, serialized).catch(() => null);
+        var where = (file && file.path) || saved;
         result.partial = true;
-        result.artifact = saved;
-        result.notes.push('the full read (' + serialized.length + ' characters) is saved as ' + saved);
-        result.data = {partial: true, note: 'data omitted here; the full read is saved as ' + saved};
-        result.markdown = result.markdown.slice(0, Math.max(500, Math.floor(max * 0.6))) + '\\n\\n[PARTIAL: cut to ' + max + ' characters; full read saved as ' + saved + ']';
-        if (result.list) result.list = {...result.list, items: result.list.items.slice(0, 30), partial: true, note: 'list cut to 30 items; full read saved as ' + saved};
+        result.artifact = where;
+        result.notes.push('the full read (' + serialized.length + ' characters) is saved as ' + where);
+        result.data = {partial: true, note: 'data omitted here; the full read is saved as ' + where};
+        result.markdown = result.markdown.slice(0, Math.max(500, Math.floor(max * 0.6))) + '\\n\\n[PARTIAL: cut to ' + max + ' characters; full read saved as ' + where + ']';
+        if (result.list) result.list = {...result.list, items: result.list.items.slice(0, 30), partial: true, note: 'list cut to 30 items; full read saved as ' + where};
         serialized = JSON.stringify(result);
         if (serialized.length > max) {
-          var skeleton = {...result, markdown: '', list: null, data: null};
+          var skeleton = {...result, markdown: '', list: null, data: null, scrollers: undefined};
           var room = Math.max(0, max - JSON.stringify(skeleton).length - 250);
           result.markdown = result.markdown.slice(0, room);
           result.list = null;
+          delete result.scrollers;
           result.data = {partial: true, note: 'omitted to keep the read under ' + max + ' characters'};
           result.notes.push('list and data omitted to keep the read under ' + max + ' characters');
         }

@@ -7,6 +7,7 @@ import { browserCapabilityApi, browserDocumentApi } from "./code-api-hooks.js";
 import { browserPlaywrightApi } from "./code-api-playwright.js";
 import { browserDataApi } from "./code-api-data.js";
 import { browserListApi } from "./code-api-list.js";
+import { browserScrollersApi } from "./code-api-scrollers.js";
 import { browserEventsApi } from "./code-api-events.js";
 import { browserDemonstrationApi } from "./code-api-demonstration.js";
 import { browserRecordingApi } from "./code-api-recording.js";
@@ -92,6 +93,7 @@ evaluate(
     browserPlaywrightApi,
     browserDataApi,
     browserListApi,
+    browserScrollersApi,
     browserEventsApi,
     browserRecordingApi,
     browserDemonstrationApi,

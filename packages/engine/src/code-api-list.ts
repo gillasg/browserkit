@@ -43,7 +43,7 @@ async function __collectList(base, selector, options) {
   var max = options.max ?? 1000, seen = new Map(), chosen = selector || null, start = null;
   var complete = false, partial = false, stable = 0, scrolls = 0;
   var step = (args) => base.inspect('(' + __listStep.toString() + ')(' + JSON.stringify(chosen) + ', ' + JSON.stringify(args) + ')');
-  for (var i = 0; i < (options.maxScrolls ?? 300); i++) {
+  for (var i = 0; i < (options.maxScrolls ?? 300) && !(options.deadline && Date.now() > options.deadline); i++) {
     scrolls = i + 1;
     // The first read starts at the top; at the end, wait longer once, since lists that
     // load more on scroll need a moment to fetch.
@@ -70,7 +70,7 @@ async function __collectList(base, selector, options) {
     partial,
     selector: chosen,
     scrolls,
-    ...(!complete ? {note: 'list is not complete: stopped after ' + items.length + ' rows' + (seen.size >= max ? ' (max reached)' : '') + '; scroll or pass a larger max'} : {}),
+    ...(!complete ? {note: 'list is not complete: stopped after ' + items.length + ' rows' + (seen.size >= max ? ' (max reached)' : options.deadline && Date.now() > options.deadline ? ' (time budget)' : '') + '; call page.list() or pass a larger max'} : {}),
     items,
   };
 }

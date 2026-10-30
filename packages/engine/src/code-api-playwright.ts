@@ -352,6 +352,7 @@ function __extendPage(target, base) {
     table: (selector = 'table', options = {}) => (__noteRead(target), base.inspect('(' + __readTable.toString() + ')(' + JSON.stringify(selector) + ', ' + JSON.stringify(options) + ')')),
     // Every row of a list, scrolling lists that only draw what is on screen (code-api-list.ts).
     list: (selector, options) => (__noteRead(target), __collectList(base, selector, options)),
+    scrollers: (options) => (__noteRead(target), __readScrollers(base, options)),
     links: (selector = 'body') => base.inspect('(' + __readLinks.toString() + ')(' + JSON.stringify(selector) + ')'),
     keyboard,
     mouse: Object.freeze({
