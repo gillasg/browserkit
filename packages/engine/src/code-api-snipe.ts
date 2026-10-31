@@ -41,7 +41,7 @@ async function __snipe(options = {}) {
   var at = typeof options.at === 'number' ? options.at : Date.parse(options.at);
   if (!Number.isFinite(at)) throw Error('INVALID_ARGUMENT: browser.snipe needs at: an ISO time or epoch ms');
   if (typeof options.fire !== 'function') throw Error('INVALID_ARGUMENT: browser.snipe needs fire: async (page, attempt) => …');
-  if (at - Date.now() > 55 * 60000) throw Error('TOO_EARLY: browser.snipe starts at most 55 minutes ahead; for later, create a routine with schedule {kind: "once", atUtc: a few minutes before} that calls it');
+  if (at - Date.now() > 55 * 60000) throw Error('TOO_EARLY: a moment over 55 minutes away is a watch at that time: a watcher whose schedule is {kind: "once", atUtc: 3 minutes before} and whose check returns await browser.snipe({...same options, wait: true})');
   var windowMs = Math.min(Math.max(Number(options.windowMs ?? 120000), 1000), 30 * 60000);
   var offset = options.syncClock && options.url ? await __snipeOffset(options.url) : 0;
   var item = {at, until: at + windowMs, url: options.url || '', offset,

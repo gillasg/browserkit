@@ -117,7 +117,7 @@ export async function evaluateFrame(
   };
   if (result.exceptionDetails)
     throw new BrowserActionError(
-      "OPERATION_FAILED",
+      "CHROME_ERROR",
       result.exceptionDetails.exception?.description ?? result.exceptionDetails.text,
     );
   return result.result?.value;

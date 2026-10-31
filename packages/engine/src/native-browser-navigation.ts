@@ -294,7 +294,7 @@ export async function navigateReady(
     const error = (event: chrome.webNavigation.WebNavigationFramedErrorCallbackDetails) => {
       if (top(event) && !event.error.includes("ERR_ABORTED")) {
         clean();
-        reject(new Error("OPERATION_FAILED"));
+        reject(new BrowserActionError("CHROME_ERROR", "navigation failed: " + event.error));
       }
     };
     const timer = setTimeout(
@@ -435,7 +435,7 @@ async function evaluatePage(
       result.exceptionDetails.text ??
       "Page evaluation failed";
     if (isEvaluationTimeout(detail)) throw await evaluationTimeout(debuggee, timeout, detail);
-    throw new BrowserActionError("OPERATION_FAILED", hintEvaluateError(detail).slice(0, 1800));
+    throw new BrowserActionError("CHROME_ERROR", hintEvaluateError(detail).slice(0, 1800));
   }
   return result.result?.value;
 }

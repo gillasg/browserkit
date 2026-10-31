@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import { assertSiteAllowed } from "./web-gate.js";
 import { resolve } from "node:path";
 import { checkSites, crawl, findList, mapSite, scrape, search, type Format } from "browser-crawl";
 import {
@@ -437,6 +438,9 @@ export const siteMapperTool: AgentToolDefinition<SiteMapperToolInput> = {
   parameters: siteMapperParameters,
   async run(input, context) {
     if (input.action === "sites") return { sites: await listSites() };
+    // Every action that reaches a site checks it against the user's blocked sites first.
+    for (const named of [input.site, input.url, ...(input.sites ?? [])])
+      await assertSiteAllowed(named);
     if (input.action === "code")
       return readSiteCode(input.url ?? input.site ?? "", {
         ...(input.grep ? { grep: input.grep } : {}),

@@ -3,6 +3,7 @@
 // action, workflow, skill and site-tool stores; notes.md holds what is not callable.
 
 import { mkdir, readdir, readFile, rename, writeFile } from "node:fs/promises";
+import { needsError } from "./ability-needs.js";
 import { join } from "node:path";
 import { runNodeScript } from "./ability-node.js";
 import {
@@ -382,6 +383,11 @@ async function runRead(
   }
   for (const way of ways) {
     if (options.via && way.kind !== options.via) continue;
+    const unmet = needsError(way, host);
+    if (unmet) {
+      tried.push({ via: way.kind, error: unmet });
+      continue;
+    }
     try {
       return { result: await attemptWay(ability, way, inputs, host), via: way.kind, tried };
     } catch (error) {
@@ -424,6 +430,11 @@ async function runWrite(
   let last: WriteOutcome | undefined;
   for (const way of ability.ways) {
     if (options.via && way.kind !== options.via) continue;
+    const unmet = needsError(way, host);
+    if (unmet) {
+      tried.push({ via: way.kind, error: unmet });
+      continue;
+    }
     const progress = { reachedCommit: way.kind !== "api" };
     try {
       const result = await attemptWay(ability, way, inputs, host, progress);
@@ -523,7 +534,7 @@ async function attemptApi(
   if (!operations.length) throw new Error("API way has no operation");
   const call = host.write ?? host.call;
   if (!call) throw new Error("No site API transport");
-  if (way.open && host.open) await host.open(String(fill(way.open, inputs)));
+  if (way.open) await host.open!(String(fill(way.open, inputs)));
   const stepResults: unknown[] = [];
   const commit = Math.min(way.commit ?? operations.length - 1, operations.length - 1);
   let result: unknown;
@@ -623,9 +634,9 @@ function defaultHost(site: string): AbilityHost {
   return {
     call: (operation, params) => handleCall(site, operation, params),
     write: (operation, params) => handleCall(site, operation, params),
-    open: async (url) => (await browser()).open?.(url),
-    collect: async (input) => (await browser()).collect?.(input),
-    script: async (code, input) => (await browser()).script?.(onSite(site, code), input),
+    open: async (url) => required(await browser(), "open")(url),
+    collect: async (input) => required(await browser(), "collect")(input),
+    script: async (code, input) => required(await browser(), "script")(onSite(site, code), input),
   };
 }
 
@@ -638,6 +649,15 @@ function onSite(site: string, code: string): string {
   tab ??= await browser.openTab(${JSON.stringify(`https://${host}/`)}, { active: false });
   return await (${code})(tab, bu, inputs);
 }`;
+}
+
+function required<K extends "open" | "collect" | "script">(
+  host: AbilityHost,
+  name: K,
+): NonNullable<AbilityHost[K]> {
+  const run = host[name];
+  if (!run) throw new Error(`ABILITY_NEEDS: the browser host has no ${name}`);
+  return run as NonNullable<AbilityHost[K]>;
 }
 
 function once<T>(make: () => Promise<T>): () => Promise<T> {

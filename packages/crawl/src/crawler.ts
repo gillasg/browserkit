@@ -5,7 +5,7 @@ import { changeOf, isFresh, PageCache, validators } from "./cache.js";
 import type { ModelLike } from "./extract/model.js";
 import { AutoFetcher } from "./fetch/auto.js";
 import { rawFetcher, StaticFetcher } from "./fetch/static.js";
-import type { Fetched } from "./fetch/types.js";
+import { FetchError, type Fetched } from "./fetch/types.js";
 import { Frontier, type FrontierItem } from "./frontier.js";
 import { linkScore, Saturation } from "./relevance.js";
 import { buildResult, DEFAULT_FORMATS } from "./scrape.js";
@@ -382,7 +382,7 @@ export class Crawl extends EventEmitter {
       try {
         fetched = await this.fetcher.fetch(url, options, validators(cached));
       } catch (error) {
-        if (attempt >= retries) throw error;
+        if (attempt >= retries || isBlocked(error)) throw error;
         continue;
       }
       this.throttle.observe(
@@ -511,4 +511,9 @@ export async function crawl(options: CrawlOptions, deps: CrawlDeps = {}): Promis
   });
   await job.start();
   return pages.filter((page) => !page.error || page.status > 0);
+}
+
+/** A site the user blocked stays blocked: never retried. */
+function isBlocked(error: unknown): boolean {
+  return error instanceof FetchError && error.status === 451;
 }

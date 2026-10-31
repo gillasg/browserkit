@@ -1,4 +1,5 @@
 import { noteActionTiming } from "./native-browser-action-timing.js";
+import { isKernelErrorCode } from "./kernel-errors.js";
 import { engineConfig } from "./engine-config.js";
 import { assertBrowserNetwork } from "./native-browser-dns.js";
 import {
@@ -272,8 +273,9 @@ export async function performExtra(
         // A run reads and fills the user's own tabs but never sends one somewhere else.
         await ensureAgentTabsRestored();
         if (!isAgentTab(tabId))
-          throw new Error(
-            "USER_TAB: this tab is the user's, so a run never navigates it away. Open your own with browser.openTab(url).",
+          throw new BrowserActionError(
+            "USER_TAB",
+            "this tab is the user's; a run never navigates it away",
           );
         await assertBrowserNetwork(step.url);
         if (await engineConfig.privateNetwork())
@@ -717,26 +719,7 @@ function sendFailure(
 ): void {
   completeBrowserRequest(request);
   if (socket.readyState !== WebSocket.OPEN) return;
-  const safe = [
-    "TARGET_LOST",
-    "AMBIGUOUS_TARGET",
-    "TARGET_NOT_FOUND",
-    "TARGET_HIDDEN",
-    "TARGET_DISABLED",
-    "TARGET_BLOCKED",
-    "NOT_EDITABLE",
-    "INPUT_FAILED",
-    "STALE_REF",
-    "CLAIM_CONFLICT",
-    "UNSUPPORTED",
-    "INVALID_TARGET",
-    "TIMEOUT",
-    "BROWSER_OFFLINE",
-    "DAEMON_OFFLINE",
-    "OPERATION_FAILED",
-  ].includes(code)
-    ? code
-    : "OPERATION_FAILED";
+  const safe = isKernelErrorCode(code) ? code : "CHROME_ERROR";
   socket.send(
     JSON.stringify(
       BrowserOperationResultSchema.parse({

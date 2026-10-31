@@ -318,3 +318,30 @@ test("a page-script ability runs in the shared browser when no host is given", a
     }
   });
 });
+
+test("a way the host cannot run is refused up front, never half-run", async () => {
+  await withHome(async () => {
+    await saveAbility(
+      ability({
+        ways: [
+          {
+            kind: "api",
+            operation: "search",
+            open: "https://example.com/",
+            params: { q: "{{inputs.q}}" },
+          },
+          { kind: "steps", name: "search-flow" },
+        ],
+      }),
+    );
+    let calls = 0;
+    const host = { call: async () => ++calls };
+    await assert.rejects(
+      runAbility("example.com", "search", { q: "x" }, { host }),
+      (error) =>
+        /ABILITY_NEEDS: .*api way \(no page-open\)/.test(error.message) &&
+        /ABILITY_NEEDS: .*steps way \(no workflow\)/.test(error.message),
+    );
+    assert.equal(calls, 0, "the API way never ran without its page");
+  });
+});

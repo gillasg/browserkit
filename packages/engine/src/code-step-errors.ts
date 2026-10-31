@@ -24,7 +24,9 @@ export async function stepFailure(step: BrowserStep, error: unknown): Promise<un
   const fix =
     code === "STALE_REF"
       ? "; call bu.state() again for fresh ids"
-      : "; the tab was closed or moved, so use browser.tabs() and attach a live one";
+      : code === "TARGET_LOST"
+        ? "; the tab was closed or moved, so use browser.tabs() and attach a live one"
+        : "";
   const base = detail.startsWith(code) ? detail : `${code}: ${detail}`;
   return new Error(`${base}${where}${action}${fix}`);
 }

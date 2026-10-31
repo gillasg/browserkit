@@ -3,6 +3,7 @@ import { learnAbout, readLearned, learnedHint } from "@browserkit/site-mapper";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { handleCredentialRequest, isCredentialRequest } from "@browserkit/credentials";
 import { handleProfileRequest, isProfileRequest } from "./profile.js";
+export { readProfile, removeProfileField, saveProfileValues } from "./profile.js";
 import { handleTableRequest, isTableRequest } from "./tables.js";
 import {
   isSiteToolRequest,

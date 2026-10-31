@@ -4,7 +4,15 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { Crawl, crawl, mapSite, signature, readSitemaps, StaticFetcher } from "../dist/index.js";
+import {
+  Crawl,
+  crawl,
+  mapSite,
+  signature,
+  readSitemaps,
+  StaticFetcher,
+  useWebGate,
+} from "../dist/index.js";
 import { startCrawlSite } from "./fixture-site.mjs";
 import { fakeAuto, tempHome } from "./helpers.mjs";
 
@@ -277,4 +285,15 @@ test("include patterns written as whole URLs match", async () => {
   assert.equal(scope.reject("https://docs.example.com/other/"), "not included");
   const paths = new Scope(["https://docs.example.com/"], { include: ["/uv/**"] });
   assert.equal(paths.reject("https://docs.example.com/uv/guides/"), undefined);
+});
+
+test("the web gate keeps every fetch off a blocked page, followed links included", async (t) => {
+  const { origin } = await site(t);
+  useWebGate((url) => (url.includes("/pricing") ? "SITE_BLOCKED: pricing" : undefined));
+  t.after(() => useWebGate(undefined));
+  const fetcher = new StaticFetcher();
+  await assert.rejects(fetcher.fetch(origin + "/pricing", {}), /SITE_BLOCKED/);
+  const pages = await crawl({ url: origin + "/", limit: 50, ...fast }, { fetcher });
+  const pricing = pages.find((page) => page.url.endsWith("/pricing"));
+  assert.ok(!pricing || !pricing.markdown, "the blocked page was never read");
 });

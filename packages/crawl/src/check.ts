@@ -1,3 +1,4 @@
+import { passGate } from "./fetch/gate.js";
 import { sharedBridge } from "./bridge.js";
 import { botCheck, isDnsFailure, isNetworkRefusal } from "./challenge.js";
 
@@ -296,6 +297,7 @@ interface Answer2 {
 
 async function get(url: string, timeoutMs: number): Promise<Answer2 | undefined> {
   try {
+    await passGate(url);
     const response = await fetch(url, {
       headers: HEADERS,
       redirect: "follow",
@@ -372,6 +374,7 @@ export function siteUrl(input: string): string | undefined {
 async function checkOverHttp(url: string, timeoutMs: number): Promise<SiteCheck> {
   const host = new URL(url).hostname;
   try {
+    await passGate(url);
     const response = await fetch(url, {
       headers: HEADERS,
       redirect: "follow",

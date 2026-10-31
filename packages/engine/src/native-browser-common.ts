@@ -1,4 +1,5 @@
 import type { BrowserTargetKey } from "@browserkit/protocol";
+import { isKernelErrorCode } from "./kernel-errors.js";
 import type { BrowserIdentity } from "./native-worker-identity.js";
 
 export interface AxNode {
@@ -86,29 +87,15 @@ export function sameIdentity(target: BrowserTargetKey, identity: BrowserIdentity
 
 export function errorCode(error: unknown): string {
   const value = error instanceof Error ? error.message : "";
-  if (
-    [
-      "TARGET_LOST",
-      "EXTENSION_BLOCKED",
-      "AMBIGUOUS_TARGET",
-      "TARGET_NOT_FOUND",
-      "TARGET_HIDDEN",
-      "TARGET_DISABLED",
-      "TARGET_BLOCKED",
-      "NOT_EDITABLE",
-      "INPUT_FAILED",
-      "STALE_REF",
-      "CLAIM_CONFLICT",
-      "UNSUPPORTED",
-      "INVALID_TARGET",
-      "TIMEOUT",
-      "BROWSER_OFFLINE",
-    ].includes(value)
-  )
-    return value;
-  return value.toLowerCase().includes("debugger") || value.toLowerCase().includes("not permitted")
-    ? "UNSUPPORTED"
-    : "OPERATION_FAILED";
+  // A message that leads with its code ("TARGET_BLOCKED: covered by …") is that code.
+  const head = /^([A-Z_]+)(?::|$)/.exec(value)?.[1] ?? "";
+  if (head === "EXTENSION_BLOCKED" || isKernelErrorCode(head)) return head;
+  const lower = value.toLowerCase();
+  if (/no tab with id|tab was closed|tab has been closed|no target with given id/.test(lower))
+    return "TAB_DEAD";
+  if (lower.includes("detached") || lower.includes("not attached")) return "DEBUGGER_DETACHED";
+  if (lower.includes("debugger") || lower.includes("not permitted")) return "UNSUPPORTED";
+  return "CHROME_ERROR";
 }
 
 export class BrowserActionError extends Error {

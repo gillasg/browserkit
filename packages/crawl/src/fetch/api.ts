@@ -1,4 +1,5 @@
 import type { ScrapeOptions } from "../types.js";
+import { passGate } from "./gate.js";
 import type { Fetched, Fetcher } from "./types.js";
 import { siteApiAdapter, type MappedApi, type MappedModel } from "./site-api.js";
 
@@ -70,6 +71,7 @@ export class ApiFetcher implements Fetcher {
 
   async fetch(url: string, options: ScrapeOptions): Promise<Fetched> {
     void options;
+    await passGate(url);
     const adapter = siteApiAdapter();
     if (!adapter) throw new Error(`No mapped API serves ${url}`);
     const match = await this.endpoint(url);

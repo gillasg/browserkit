@@ -1,4 +1,5 @@
 import { sharedBridge, type Bridge } from "../bridge.js";
+import { passGate } from "./gate.js";
 import type { Action, ScrapeOptions } from "../types.js";
 import type { Fetched, Fetcher } from "./types.js";
 import { flattenedHtml } from "./flatten.js";
@@ -197,6 +198,7 @@ export class BrowserFetcher implements Fetcher {
   }
 
   async fetch(url: string, options: ScrapeOptions): Promise<Fetched> {
+    await passGate(url);
     const session = await this.acquire();
     try {
       const bridge = await this.bridge();

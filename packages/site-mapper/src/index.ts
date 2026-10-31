@@ -72,6 +72,7 @@ export {
   type WriteStatus,
 } from "./ability-writes.js";
 export type { AbilityTest, AbilityTestReport } from "./ability-contract.js";
+export { abilityNeeds, wayNeeds, missingNeeds, type AbilityNeed } from "./ability-needs.js";
 export {
   abilityFromAction,
   abilityFromRecipe,

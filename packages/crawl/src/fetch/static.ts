@@ -1,4 +1,5 @@
 import { readSession } from "../registry.js";
+import { passGate } from "./gate.js";
 import type { SessionFile } from "../session.js";
 import { fetch as proxiedFetch, ProxyAgent } from "undici";
 import type { ScrapeOptions } from "../types.js";
@@ -66,6 +67,7 @@ export class StaticFetcher implements Fetcher {
   }
 
   async fetch(input: string, options: ScrapeOptions, validators?: Validators): Promise<Fetched> {
+    await passGate(input);
     const url = new URL(input);
     const session = await this.session(url);
     const headers = requestHeaders(url, options, session, validators);
@@ -78,6 +80,8 @@ export class StaticFetcher implements Fetcher {
       redirect: "follow",
       signal: AbortSignal.timeout(options.timeoutMs ?? 30_000),
     });
+    // A redirect onto a blocked site is refused before its body is read.
+    if (response.url && response.url !== input) await passGate(response.url);
     const body = Buffer.from(await response.arrayBuffer());
     return {
       url: input,

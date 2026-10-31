@@ -56,3 +56,4 @@ export { lineDiff } from "./cache.js";
 export { useBrowser, closeSharedBridge, type Bridge } from "./bridge.js";
 // Hosts with site-to-api installed plug it in to read mapped sites through their API.
 export { useSiteApi, type SiteApiAdapter } from "./fetch/site-api.js";
+export { useWebGate, type WebGate } from "./fetch/gate.js";

@@ -123,7 +123,11 @@ async function runWithBrowserDebugger<T>(
   action: (debuggee: chrome.debugger.Debuggee) => Promise<T>,
 ): Promise<T> {
   await closing.get(tabId);
-  if (cancelled.has(tabId)) throw new Error("OPERATION_FAILED");
+  // Cancel on Chrome's debugging bar dropped this tab: say so once, then take it back.
+  if (cancelled.has(tabId)) {
+    cancelled.delete(tabId);
+    throw new Error("DEBUGGER_DETACHED");
+  }
   const chatId = owners.get(tabId);
   if (!chatId) throw new Error("CLAIM_CONFLICT");
   let entry = attachments.get(tabId);
@@ -135,7 +139,7 @@ async function runWithBrowserDebugger<T>(
     await entry.attached;
     touchAgentTab(tabId);
     await ensureBrowserViewport(tabId);
-    if (attachments.get(tabId) !== entry) throw new Error("OPERATION_FAILED");
+    if (attachments.get(tabId) !== entry) throw new Error("DEBUGGER_DETACHED");
     if (entry.timer !== undefined) clearTimeout(entry.timer);
     entry.timer = globalThis.setTimeout(() => idleDetach(tabId), 90_000);
     void showAgentBadge(tabId);
@@ -344,7 +348,7 @@ export function registerBrowserRequest(request: BrowserExecutorRequest): void {
 }
 export function assertRequestActive(request: BrowserExecutorRequest): void {
   if (requestEpochs.get(request.requestId) !== chatEpochs.get(request.chatId))
-    throw new Error("OPERATION_FAILED");
+    throw new Error("RUN_RESET");
 }
 export function completeBrowserRequest(request: BrowserExecutorRequest): void {
   requestEpochs.delete(request.requestId);

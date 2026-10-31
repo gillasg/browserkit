@@ -1,4 +1,7 @@
 import { stepTrace, takeActionTiming } from "./native-browser-action-timing.js";
+import { runEffect, type KernelChecks } from "./kernel.js";
+import { cellEffects } from "./code-runtime-effects.js";
+import { describeKernelError } from "./kernel-errors.js";
 import {
   BrowserCodeCancelSchema,
   BrowserCodeReplySchema,
@@ -10,18 +13,15 @@ import {
   type BrowserStep,
   type BrowserTargetKey,
 } from "@browserkit/protocol";
-import { jobs, saveJobs } from "./code-runtime-jobs.js";
 import { browserErrorDetail, errorCode, targetIdentity } from "./native-browser-common.js";
 import { OFFSCREEN, toOffscreen } from "./code-offscreen-host.js";
 import { stepFailure } from "./code-step-errors.js";
-import { jobCall, finishJob, cancelJobs } from "./code-runtime-job-control.js";
+import { jobs } from "./code-runtime-jobs.js";
+import { finishJob, cancelJobs } from "./code-runtime-job-control.js";
 import { executeLocalBrowserStep } from "./native-browser-executor.js";
 import { browserSessionOwner } from "./native-browser-session.js";
 import { currentInventoryTabs } from "./native-inventory-client.js";
 import { notePreviewActivity } from "./native-browser-preview.js";
-import { fillCodeOnPage, signInToPage } from "./native-browser-signin.js";
-import { fillProfileOnPage } from "./native-browser-profile.js";
-import { sessionHeadersFor } from "./native-browser-session-headers.js";
 import {
   captureTypedPassword,
   finishVaultCapture,
@@ -38,26 +38,8 @@ import {
 import { handOffToUser } from "./native-browser-handoff.js";
 import { presentBrowserTask, presentsBrowserTask } from "./native-browser-layout.js";
 import { engineConfig } from "./engine-config.js";
-import {
-  resetChatTabs,
-  agentTabSummary,
-  reapChatPopups,
-  unusedAgentTabs,
-} from "./native-browser-tab-cleanup.js";
+import { agentTabSummary, unusedAgentTabs } from "./native-browser-tab-cleanup.js";
 import { setOwnerTitle } from "./native-browser-owner.js";
-import { disableQuietTab, enableQuietTab } from "./native-browser-quiet.js";
-import { networkCall } from "./native-browser-network.js";
-import { mediaCall, type MediaRequest } from "./native-browser-media.js";
-import { isLibraryRequest, libraryCall } from "./native-browser-library.js";
-import { windowsCall } from "./native-browser-windows.js";
-import { tabGroupsCall } from "./native-browser-groups.js";
-import { recordingCall } from "./native-browser-recording.js";
-import { settingsCall } from "./native-browser-settings.js";
-import { closeTabCall } from "./code-tab-close.js";
-import { rulesCall } from "./native-browser-rules.js";
-import { permissionCall } from "./native-browser-permissions.js";
-import { googleCall } from "./native-browser-google.js";
-import { fetchCall, isFetchRequest } from "./native-browser-fetch.js";
 import type { BrowserIdentity } from "./native-worker-identity.js";
 
 const MAX_STEPS = 1000;
@@ -284,102 +266,18 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
   return true;
 });
 
-// Non-step requests: browser info and hand-off stay local, everything else goes to Core.
-function serveCall(cell: Cell, value: Record<string, unknown> | null): Promise<unknown> {
-  if (value && typeof value.sessionHeaders === "object" && value.sessionHeaders)
-    return Promise.resolve({
-      headers: sessionHeadersFor(String((value.sessionHeaders as { url?: unknown }).url ?? "")),
-    });
-  const signIn = serveSignIn(cell, value);
-  if (signIn) return signIn;
-  const guarded = guardedCall(cell, value);
-  if (guarded) return guarded;
-  if (value?.browserInfo === true)
-    return Promise.resolve({ clientInstanceIds: [cell.identity.clientInstanceId] });
-  if (value && typeof value.job === "object" && value.job)
-    return jobCall(cell, value.job as Record<string, unknown>);
-  if (value && typeof value.media === "object" && value.media) {
-    const media = value.media as { target?: unknown } & Record<string, unknown>;
-    const target = authorizedTarget(cell, media.target);
-    return mediaCall(target.tabId, media as MediaRequest);
-  }
-  if (value && typeof value.progress === "object" && jobs.get(cell.run.cellId) === cell) {
-    const job = jobs.get(cell.run.cellId);
-    const progress = value.progress as { done?: unknown; total?: unknown; label?: unknown };
-    if (job)
-      job.progress = {
-        done: Math.max(0, Number(progress.done) || 0),
-        total: Math.max(0, Number(progress.total) || 0),
-        ...(typeof progress.label === "string" ? { label: progress.label.slice(0, 200) } : {}),
-      };
-    void saveJobs();
-    return Promise.resolve({ ok: true });
-  }
-  if (value && typeof value.handoff === "object" && value.handoff)
-    return handoff(cell, value.handoff);
-  if (value && typeof value.quiet === "object" && value.quiet) return quietCall(cell, value.quiet);
-  if (value && value.tabs === "reset") return resetCall(cell);
-  if (value && value.session === "close") return resetCall(cell);
-  if (value && value.session === "reap")
-    return reapChatPopups(cell.run.chatId).then((closed) => ({ closed }));
-  if (value && value.tabs === "close") return closeTabCall(cell.run.chatId, value);
-  if (value && (value.settings === "get" || value.settings === "set")) return settingsCall(value);
-  // browserkit update: reload the extension once this answer is on its way.
-  if (value?.extension === "reload") {
-    setTimeout(() => chrome.runtime.reload(), 300);
-    return Promise.resolve({ reloading: true });
-  }
-  if (value && typeof value.recording === "string")
-    return recordingCall(authorizedTarget(cell, value.target).tabId, value);
-  if (value && typeof value.network === "string")
-    return networkCall(authorizedTarget(cell, value.target).tabId, value.network, value);
-  if (value && typeof value.rules === "string")
-    return rulesCall(authorizedTarget(cell, value.target).tabId, value);
-  if (value && typeof value.windows === "string") return windowsCall(value);
-  if (value && typeof value.tabGroups === "string") return tabGroupsCall(value);
-  if (value && value.permission === "set")
-    return permissionCall(authorizedTarget(cell, value.target).tabId, value);
-  if (value && isLibraryRequest(value)) return libraryCall(value);
-  if (value && typeof value.google === "string") return googleCall(value);
-  if (value && isFetchRequest(value)) return fetchCall(value);
-  return callCore(cell, value);
-}
+// Non-step requests are kernel effects (code-runtime-effects.ts): the kernel authorizes the tab
+// and checks the site each one names before it runs.
+const EFFECTS = cellEffects({ callCore, handoff });
+const CHECKS: KernelChecks<Cell> = {
+  authorize: (cell, target) => authorizedTarget(cell, target).tabId,
+  guardTab: (cell, tabId) => guardCellTab(cell, tabId),
+  guardSite: async (cell, site) => assertAllowed(await siteRulesFor(cell), site),
+};
 
-// Passwords and one-time codes travel only between the machine and the engine: agent code may
-// ask to sign in, never for the login itself.
-function serveSignIn(
-  cell: Cell,
-  value: Record<string, unknown> | null,
-): Promise<unknown> | undefined {
-  if (value && "credential" in value)
-    return Promise.reject(new Error("FORBIDDEN: use bu.signIn() to sign in"));
-  if (value?.profile === "values")
-    return Promise.reject(new Error("FORBIDDEN: use bu.fillProfile() to fill a form"));
-  const filled = serveFill(cell, value);
-  if (filled) return filled;
-  if (!value || typeof value.signIn !== "object" || !value.signIn) return undefined;
-  const request = value.signIn as { target?: unknown; account?: unknown };
-  const target = authorizedTarget(cell, request.target);
-  void notePreviewActivity(cell.run.chatId, target.tabId);
-  return guardCellTab(cell, target.tabId).then(() =>
-    signInToPage(target.tabId, { account: request.account }, (ask) => callCore(cell, ask)),
-  );
-}
-
-// bu.fillCode() and bu.fillProfile(): the engine reads codes and profile values and types them.
-function serveFill(
-  cell: Cell,
-  value: Record<string, unknown> | null,
-): Promise<unknown> | undefined {
-  const request = (value?.fillCode ?? value?.fillProfile) as
-    { target?: unknown; waitMs?: unknown; fields?: unknown } | undefined;
-  if (!value || !request || typeof request !== "object") return undefined;
-  const target = authorizedTarget(cell, request.target);
-  return guardCellTab(cell, target.tabId).then((): Promise<unknown> =>
-    value.fillCode
-      ? fillCodeOnPage(target.tabId, request)
-      : fillProfileOnPage(target.tabId, request, (ask) => callCore(cell, ask)),
-  );
+async function serveCall(cell: Cell, value: Record<string, unknown> | null): Promise<unknown> {
+  const done = value ? await runEffect(EFFECTS, CHECKS, cell, value) : undefined;
+  return done ? done.value : callCore(cell, value);
 }
 
 function siteRulesFor(cell: Cell): Promise<SiteRules> {
@@ -389,42 +287,9 @@ function siteRulesFor(cell: Cell): Promise<SiteRules> {
   return cell.siteRules;
 }
 
-async function quietCall(cell: Cell, request: object): Promise<unknown> {
-  const value = request as { target?: unknown; enabled?: unknown };
-  const target = authorizedTarget(cell, value.target);
-  const enabled = value.enabled !== false;
-  if (enabled) await enableQuietTab(target.tabId);
-  else await disableQuietTab(target.tabId);
-  return { quiet: enabled };
-}
-
-async function resetCall(cell: Cell): Promise<unknown> {
-  cancelJobs(cell.run.chatId);
-  await toOffscreen({
-    target: "aeon-code-offscreen",
-    kind: "stopJobs",
-    chatId: cell.run.chatId,
-  }).catch(() => undefined);
-  return resetChatTabs(cell.run.chatId);
-}
-
 async function guardCellTab(cell: Cell, tabId: number): Promise<void> {
   await guardTab(tabId, await siteRulesFor(cell));
   cell.guarded.add(tabId);
-}
-
-/** browser.fetch and site API calls name their site up front: refuse blocked ones. */
-function guardedCall(
-  cell: Cell,
-  value: Record<string, unknown> | null,
-): Promise<unknown> | undefined {
-  if (!value) return undefined;
-  const fetch = isFetchRequest(value);
-  if (!fetch && typeof value.siteMapper !== "string") return undefined;
-  return siteRulesFor(cell).then((rules) => {
-    assertAllowed(rules, fetch ? (value.fetch as { url?: unknown }).url : value.site);
-    return fetch ? fetchCall(value) : callCore(cell, value);
-  });
 }
 
 /** A step that goes somewhere, or acts in a tab, stays off blocked sites. */
@@ -758,6 +623,9 @@ function describe(error: unknown): string {
   const code = errorCode(error);
   const detail = browserErrorDetail(error);
   const message = error instanceof Error ? error.message : String(error);
-  if (code === "OPERATION_FAILED" && message && message !== code) return message;
-  return detail ? `${code}: ${detail}` : code;
+  if (detail) return describeKernelError(code, detail);
+  return describeKernelError(
+    code,
+    message.startsWith(code) ? message.slice(code.length).replace(/^:\s*/, "") : message,
+  );
 }

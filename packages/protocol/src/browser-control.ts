@@ -352,6 +352,13 @@ export const BrowserOperationResultSchema = z.discriminatedUnion("ok", [
         "BROWSER_OFFLINE",
         "DAEMON_OFFLINE",
         "OPERATION_FAILED",
+        "TAB_DEAD",
+        "DEBUGGER_DETACHED",
+        "USER_TAB",
+        "USER_HAS_CONTROL",
+        "RUN_RESET",
+        "SITE_BLOCKED",
+        "CHROME_ERROR",
       ]),
     })
     .strict(),
