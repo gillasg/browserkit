@@ -1,5 +1,4 @@
-// Which identity a run uses: the Chrome profile's own account, the Google accounts signed in on
-// the web (each one's authuser index opens it: mail.google.com/mail/u/1).
+// Which identity a run uses: the Google accounts signed in on the web (each one's authuser index opens it: mail.google.com/mail/u/1).
 
 type Request = Record<string, unknown>;
 
@@ -10,14 +9,6 @@ export function isIdentityRequest(value: Request | null): boolean {
 export function identityCall(value: Request): Promise<unknown> {
   if (value.identity === "accounts") return accounts();
   throw new Error("UNSUPPORTED: browser.identity." + String(value.identity));
-}
-
-async function profileAccount(): Promise<{ email?: string } | undefined> {
-  if (!chrome.identity?.getProfileUserInfo) return undefined;
-  const info = await chrome.identity
-    .getProfileUserInfo({ accountStatus: "ANY" as chrome.identity.AccountStatus })
-    .catch(() => undefined);
-  return info?.email ? { email: info.email } : undefined;
 }
 
 /**
@@ -45,6 +36,5 @@ async function gmailOwner(authuser: number): Promise<string | undefined> {
 }
 
 async function accounts(): Promise<unknown> {
-  const [profile, google] = await Promise.all([profileAccount(), googleAccounts()]);
-  return { chromeProfile: profile ?? null, google };
+  return { google: await googleAccounts() };
 }

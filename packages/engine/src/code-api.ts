@@ -321,7 +321,7 @@ var browser = Object.freeze({
   }),
   // The active tab, open tabs, recent and most used sites, and history/bookmark matches for a request.
   context: (request = "", options = {}) => __context(request, options),
-  // Who the run is: the Chrome profile account and the Google accounts signed in (authuser order).
+  // Who the run is: the Google accounts signed in on the web (authuser order).
   identity: Object.freeze({ accounts: () => __call({identity:"accounts"}) }),
   history: Object.freeze({
     search: (text = "", options = {}) => __call({history:"search", text, ...options}),
