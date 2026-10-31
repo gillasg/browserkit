@@ -36,6 +36,7 @@ import { executeDownload } from "./native-browser-downloads.js";
 import { claimAgentTab, groupAgentTab, noteAgentStep } from "./native-browser-groups.js";
 import {
   ensureAgentTabsRestored,
+  isAgentTab,
   markAgentTabGrouped,
   mineTabIds,
   trackAgentTab,
@@ -268,6 +269,12 @@ export async function performExtra(
       if (step.op === "press")
         return pressElement(debuggee, request, () => revalidate(request, tabId));
       if (step.op === "navigate") {
+        // A run reads and fills the user's own tabs but never sends one somewhere else.
+        await ensureAgentTabsRestored();
+        if (!isAgentTab(tabId))
+          throw new Error(
+            "USER_TAB: this tab is the user's, so a run never navigates it away. Open your own with browser.openTab(url).",
+          );
         await assertBrowserNetwork(step.url);
         if (await engineConfig.privateNetwork())
           await guardPrivateTab(tabId, await engineConfig.privateNetworkPorts());

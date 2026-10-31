@@ -80,7 +80,8 @@ const rows = await page.list("tr"); // every row, scrolling lists that draw lazi
   (`{newTab: true}` for another tab). `browser.activeTab()` is the tab the user is on;
   `browser.tabs(query?)` lists tabs (`mine:true` only for tabs this chat or session opened),
   `browser.attachTab(tabId)` takes over one, `bu.use(tabId)` switches. Work through the user's tabs
-  in place, all at once with `Promise.all`.
+  in place, all at once with `Promise.all`; they are read and filled but never navigated away
+  (`USER_TAB`): to go somewhere else, open your own tab.
 - `bu.state()` prints `[id] role "name" = value` and visible text (`*` marks changes; scope with
   `{selector}` or `{query}`). Act on apps that redraw themselves by visible text, role or bu id,
   never `document.querySelector`. Controls inside a cross-origin iframe appear under their iframe
