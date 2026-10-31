@@ -267,3 +267,14 @@ test("map lists URLs fast and ranks them by a phrase", async (t) => {
   const ranked = await mapSite(origin + "/", { search: "setup" });
   assert.equal(new URL(ranked[0].url).pathname, "/docs/setup");
 });
+
+test("include patterns written as whole URLs match", async () => {
+  const { Scope } = await import("../dist/index.js");
+  const scope = new Scope(["https://docs.example.com/uv/"], {
+    include: ["https://docs.example.com/uv/**"],
+  });
+  assert.equal(scope.reject("https://docs.example.com/uv/guides/"), undefined);
+  assert.equal(scope.reject("https://docs.example.com/other/"), "not included");
+  const paths = new Scope(["https://docs.example.com/"], { include: ["/uv/**"] });
+  assert.equal(paths.reject("https://docs.example.com/uv/guides/"), undefined);
+});

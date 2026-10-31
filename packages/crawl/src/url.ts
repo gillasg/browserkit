@@ -90,9 +90,10 @@ export class Scope {
     if (!this.onSite(url)) return "another site";
     const target = this.options.matchFullUrl ? url.href : url.pathname + url.search;
     const path = this.options.matchFullUrl ? url.href : url.pathname;
-    if (this.includes.length && !this.includes.some((re) => re.test(target) || re.test(path)))
-      return "not included";
-    if (this.excludes.some((re) => re.test(target) || re.test(path))) return "excluded";
+    // A pattern written as a whole URL (https://site/docs/**) is matched against the whole URL.
+    const matches = (re: RegExp) => re.test(target) || re.test(path) || re.test(url.href);
+    if (this.includes.length && !this.includes.some(matches)) return "not included";
+    if (this.excludes.some(matches)) return "excluded";
     return undefined;
   }
 }

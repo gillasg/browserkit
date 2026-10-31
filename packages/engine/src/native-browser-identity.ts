@@ -23,31 +23,28 @@ async function profileAccount(): Promise<{ email?: string } | undefined> {
   return info?.email ? { email: info.email } : undefined;
 }
 
-/** Google's own list of the accounts signed in on the web, in authuser order. */
-async function googleAccounts(): Promise<{ email: string; name?: string; authuser: number }[]> {
-  const response = await fetch(
-    "https://accounts.google.com/ListAccounts?gpsia=1&source=ChromiumBrowser&json=standard",
-    {
-      credentials: "include",
-    },
-  ).catch(() => undefined);
-  if (!response?.ok) return [];
-  const text = await response.text();
-  const start = text.indexOf("[");
-  let list: unknown;
-  try {
-    list = JSON.parse(text.slice(start));
-  } catch {
-    return [];
+/**
+ * The Google accounts signed in on the web, in authuser order. Each one's Gmail feed names its
+ * owner; an index past the last account redirects to u/0. (Google refuses ListAccounts from
+ * extensions.) Accounts without Gmail are not listed.
+ */
+async function googleAccounts(): Promise<{ email: string; authuser: number }[]> {
+  const found: { email: string; authuser: number }[] = [];
+  for (let authuser = 0; authuser < 10; authuser += 1) {
+    const email = await gmailOwner(authuser);
+    if (!email || found.some((account) => account.email === email)) break;
+    found.push({ email, authuser });
   }
-  const rows = Array.isArray(list) && Array.isArray(list[1]) ? (list[1] as unknown[][]) : [];
-  return rows
-    .filter((row) => Array.isArray(row) && typeof row[3] === "string")
-    .map((row) => ({
-      email: String(row[3]),
-      ...(typeof row[2] === "string" ? { name: row[2] } : {}),
-      authuser: typeof row[7] === "number" ? row[7] : rows.indexOf(row),
-    }));
+  return found;
+}
+
+async function gmailOwner(authuser: number): Promise<string | undefined> {
+  const url = `https://mail.google.com/mail/u/${authuser}/feed/atom`;
+  const response = await fetch(url, { credentials: "include" }).catch(() => undefined);
+  if (!response?.ok || (authuser > 0 && !response.url.includes(`/u/${authuser}/`)))
+    return undefined;
+  const title = /<title>([^<]*)<\/title>/.exec(await response.text())?.[1] ?? "";
+  return /[^\s]+@[^\s]+/.exec(title)?.[0];
 }
 
 async function accounts(): Promise<unknown> {
