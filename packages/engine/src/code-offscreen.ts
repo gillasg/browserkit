@@ -60,7 +60,7 @@ function drop(chatId: string): void {
   for (const [cellId, cell] of cells)
     if (cell.chatId === chatId) {
       cells.delete(cellId);
-      cell.reply({ output: "", error: "Browser runtime reset", reset: true });
+      cell.reply({ output: "", error: "RUN_RESET: browser runtime reset", reset: true });
     }
 }
 

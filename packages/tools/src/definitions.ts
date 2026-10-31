@@ -1,11 +1,13 @@
 import { readFile } from "node:fs/promises";
 import { assertSiteAllowed } from "./web-gate.js";
+import { classifyError, describeError, isErrorCode, type ErrorCode } from "@browserkit/protocol";
 import { resolve } from "node:path";
 import { checkSites, crawl, findList, mapSite, scrape, search, type Format } from "browser-crawl";
 import {
   checkCaptures,
   code as readSiteCode,
   buildAbility,
+  errorKind,
   explore,
   importCaptures,
   isSiteToolAction,
@@ -211,58 +213,59 @@ export const crawlTool: AgentToolDefinition<CrawlToolInput> = {
     { name: "check", params: ["urls", "file", "limit", "via", "paths", "expect", "readiness"] },
   ],
   parameters: crawlParameters,
-  async run(input, context) {
-    const formats =
-      input.formats ?? (input.query ? ["fitMarkdown", "metadata"] : ["markdown", "metadata"]);
-    const render = input.render ?? "auto";
-    if (input.action === "check") {
-      const urls = [...(input.urls ?? []), ...(await urlsFromFile(input.file, context.workspace))];
-      if (!urls.length)
-        throw new Error("Give urls (hosts or URLs) or a workspace file listing them");
-      return checkSites(urls.slice(0, 5000), {
-        via: input.via ?? "auto",
-        ...(input.paths?.length ? { paths: input.paths.slice(0, 20) } : {}),
-        ...(input.expect ? { expect: input.expect } : {}),
-        ...(input.readiness === true ? { readiness: true } : {}),
-      });
-    }
-    if (input.action === "find")
-      return findList(require(input.query, "query"), {
-        columns: input.columns ?? { name: "name" },
-        ...(input.criteria ? { criteria: input.criteria } : {}),
-        perQuery: input.limit ?? 10,
-        ...(context.model ? { model: (await context.model()) as never } : {}),
-      });
-    if (input.action === "search")
-      return search(require(input.query, "query"), {
-        limit: input.limit ?? 10,
-        ...(input.engine ? { engine: input.engine } : {}),
-      });
-    const url = require(input.url, "url");
-    if (input.action === "scrape")
-      return scrape(url, {
-        formats,
-        render,
-        ...(input.query ? { query: input.query } : {}),
-      });
-    if (input.action === "map")
-      return mapSite(url, {
-        limit: input.limit ?? 500,
-        ...(input.query ? { search: input.query } : {}),
-      });
-    return crawl({
-      url,
-      limit: input.limit ?? 25,
+  run: (input, context) => withNamedErrors(() => runCrawl(input, context)),
+};
+
+async function runCrawl(input: CrawlToolInput, context: AgentToolContext): Promise<unknown> {
+  const formats =
+    input.formats ?? (input.query ? ["fitMarkdown", "metadata"] : ["markdown", "metadata"]);
+  const render = input.render ?? "auto";
+  if (input.action === "check") {
+    const urls = [...(input.urls ?? []), ...(await urlsFromFile(input.file, context.workspace))];
+    if (!urls.length) throw new Error("Give urls (hosts or URLs) or a workspace file listing them");
+    return checkSites(urls.slice(0, 5000), {
+      via: input.via ?? "auto",
+      ...(input.paths?.length ? { paths: input.paths.slice(0, 20) } : {}),
+      ...(input.expect ? { expect: input.expect } : {}),
+      ...(input.readiness === true ? { readiness: true } : {}),
+    });
+  }
+  if (input.action === "find")
+    return findList(require(input.query, "query"), {
+      columns: input.columns ?? { name: "name" },
+      ...(input.criteria ? { criteria: input.criteria } : {}),
+      perQuery: input.limit ?? 10,
+      ...(context.model ? { model: (await context.model()) as never } : {}),
+    });
+  if (input.action === "search")
+    return search(require(input.query, "query"), {
+      limit: input.limit ?? 10,
+      ...(input.engine ? { engine: input.engine } : {}),
+    });
+  const url = require(input.url, "url");
+  if (input.action === "scrape")
+    return scrape(url, {
       formats,
       render,
-      ...(input.maxDepth !== undefined ? { maxDepth: input.maxDepth } : {}),
-      ...(input.include ? { include: input.include } : {}),
-      ...(input.exclude ? { exclude: input.exclude } : {}),
-      ...(input.query ? { query: input.query, strategy: "best" as const } : {}),
-      ...(input.api ? { api: input.api } : {}),
+      ...(input.query ? { query: input.query } : {}),
     });
-  },
-};
+  if (input.action === "map")
+    return mapSite(url, {
+      limit: input.limit ?? 500,
+      ...(input.query ? { search: input.query } : {}),
+    });
+  return crawl({
+    url,
+    limit: input.limit ?? 25,
+    formats,
+    render,
+    ...(input.maxDepth !== undefined ? { maxDepth: input.maxDepth } : {}),
+    ...(input.include ? { include: input.include } : {}),
+    ...(input.exclude ? { exclude: input.exclude } : {}),
+    ...(input.query ? { query: input.query, strategy: "best" as const } : {}),
+    ...(input.api ? { api: input.api } : {}),
+  });
+}
 
 export const SITE_MAPPER_TOOL_ACTIONS = [
   "sites",
@@ -436,68 +439,73 @@ export const siteMapperTool: AgentToolDefinition<SiteMapperToolInput> = {
     { name: "signing", params: ["site", "operation", "name"] },
   ],
   parameters: siteMapperParameters,
-  async run(input, context) {
-    if (input.action === "sites") return { sites: await listSites() };
-    // Every action that reaches a site checks it against the user's blocked sites first.
-    for (const named of [input.site, input.url, ...(input.sites ?? [])])
-      await assertSiteAllowed(named);
-    if (input.action === "code")
-      return readSiteCode(input.url ?? input.site ?? "", {
-        ...(input.grep ? { grep: input.grep } : {}),
-        ...(input.maxFiles ? { maxFiles: input.maxFiles } : {}),
-        ...(input.maxBytes ? { maxBytes: input.maxBytes } : {}),
-      });
-    if (input.action === "build") {
-      if (!input.site || !input.goal)
-        throw new Error("Give site and goal: the task the new ability should do");
-      return buildAbility(input.site, input.goal, {
-        ...(input.kind ? { kind: input.kind } : {}),
-        ...(input.name ? { name: input.name } : {}),
-        ...(input.params ? { example: input.params } : {}),
-        ...(context.model ? { model: (await context.model()) as never } : {}),
-      });
-    }
-    if (input.action === "explore") {
-      const sites = input.sites?.length ? input.sites : input.site ? [input.site] : [];
-      if (!sites.length) throw new Error("Give sites: the names or URLs of the sites to map");
-      return {
-        howToCall: HOW_TO_CALL,
-        results: await explore(sites, {
-          ...(input.goal ? { goal: input.goal } : {}),
-          ...(input.actions === true ? { actions: true } : {}),
-          ...(context.model ? { model: (await context.model()) as never } : {}),
-        }),
-      };
-    }
-    if (input.action === "learn" || input.action === "import")
-      return learnCaptures(input, context.workspace);
-    const site = normalizeSite(input);
-    if (input.action === "operations") return describeOperations(site);
-    if (input.action === "call") {
-      if (!input.operation) throw new Error("Give the operation id (see the operations action)");
-      const api = await siteMapper(site, { transport: input.transport ?? "auto" });
-      return api.call(input.operation, (input.params ?? {}) as never);
-    }
-    if (input.action === "watch") {
-      if (!input.operation)
-        throw new Error("Give the operation id to watch (see the operations action)");
-      return watch(site, input.operation, (input.params ?? {}) as never, {
-        transport: input.transport ?? "auto",
-        ...(input.key ? { key: input.key } : {}),
-      });
-    }
-    if (isSiteToolAction(input.action))
-      return runSiteToolAction(input.action, {
-        ...(input as unknown as Record<string, never>),
-        site,
-        ...(context.model ? { model: () => context.model!().then((model) => model as never) } : {}),
-        ...(input.folder && context.workspace
-          ? { folder: resolve(context.workspace, input.folder) }
-          : {}),
-      });
-    throw new Error(`Unsupported site_mapper action ${input.action}`);
-  },
+  run: (input, context) => withNamedErrors(() => runSiteMapper(input, context)),
 };
+
+async function runSiteMapper(
+  input: SiteMapperToolInput,
+  context: AgentToolContext,
+): Promise<unknown> {
+  if (input.action === "sites") return { sites: await listSites() };
+  // Every action that reaches a site checks it against the user's blocked sites first.
+  for (const named of [input.site, input.url, ...(input.sites ?? [])])
+    await assertSiteAllowed(named);
+  if (input.action === "code")
+    return readSiteCode(input.url ?? input.site ?? "", {
+      ...(input.grep ? { grep: input.grep } : {}),
+      ...(input.maxFiles ? { maxFiles: input.maxFiles } : {}),
+      ...(input.maxBytes ? { maxBytes: input.maxBytes } : {}),
+    });
+  if (input.action === "build") {
+    if (!input.site || !input.goal)
+      throw new Error("Give site and goal: the task the new ability should do");
+    return buildAbility(input.site, input.goal, {
+      ...(input.kind ? { kind: input.kind } : {}),
+      ...(input.name ? { name: input.name } : {}),
+      ...(input.params ? { example: input.params } : {}),
+      ...(context.model ? { model: (await context.model()) as never } : {}),
+    });
+  }
+  if (input.action === "explore") {
+    const sites = input.sites?.length ? input.sites : input.site ? [input.site] : [];
+    if (!sites.length) throw new Error("Give sites: the names or URLs of the sites to map");
+    return {
+      howToCall: HOW_TO_CALL,
+      results: await explore(sites, {
+        ...(input.goal ? { goal: input.goal } : {}),
+        ...(input.actions === true ? { actions: true } : {}),
+        ...(context.model ? { model: (await context.model()) as never } : {}),
+      }),
+    };
+  }
+  if (input.action === "learn" || input.action === "import")
+    return learnCaptures(input, context.workspace);
+  const site = normalizeSite(input);
+  if (input.action === "operations") return describeOperations(site);
+  if (input.action === "call") {
+    if (!input.operation) throw new Error("Give the operation id (see the operations action)");
+    const api = await siteMapper(site, { transport: input.transport ?? "auto" });
+    return api.call(input.operation, (input.params ?? {}) as never);
+  }
+  if (input.action === "watch") {
+    if (!input.operation)
+      throw new Error("Give the operation id to watch (see the operations action)");
+    return watch(site, input.operation, (input.params ?? {}) as never, {
+      transport: input.transport ?? "auto",
+      ...(input.key ? { key: input.key } : {}),
+    });
+  }
+  if (isSiteToolAction(input.action))
+    return runSiteToolAction(input.action, {
+      ...(input as unknown as Record<string, never>),
+      site,
+      ...(context.model ? { model: () => context.model!().then((model) => model as never) } : {}),
+      ...(input.folder && context.workspace
+        ? { folder: resolve(context.workspace, input.folder) }
+        : {}),
+    });
+  throw new Error(`Unsupported site_mapper action ${input.action}`);
+}
 
 async function learnCaptures(input: SiteMapperToolInput, workspace?: string): Promise<unknown> {
   const site = normalizeSite(input);
@@ -621,4 +629,36 @@ export function toolSchema<Input extends Record<string, unknown>>(
     enum: [...allowed],
   };
   return { ...definition.parameters, properties };
+}
+
+/**
+ * Every failure a tool returns is one of the shared codes with its recovery hint, so the model
+ * never sees a bare stack message; one no code names is INTERNAL, a bug to fix.
+ */
+const KIND_CODES: Partial<Record<string, ErrorCode>> = {
+  challenged: "BOT_WALL",
+  "signed-out": "SIGNED_OUT",
+  "missing-input": "INVALID_INPUT",
+  "browser-offline": "BROWSER_OFFLINE",
+  broken: "SITE_BROKEN",
+};
+
+export async function withNamedErrors<T>(run: () => Promise<T>): Promise<T> {
+  try {
+    return await run();
+  } catch (error) {
+    throw new Error(namedErrorText(error), { cause: error });
+  }
+}
+
+/** A tool failure as the model sees it: led by its shared code, with the recovery hint. */
+export function namedErrorText(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  if (message.includes("\nHint: ") && isErrorCode(/^[A-Z_]+/.exec(message)?.[0] ?? ""))
+    return message;
+  const code = KIND_CODES[errorKind(error)] ?? classifyError(error);
+  const detail = message.startsWith(code)
+    ? message.slice(code.length).replace(/^:\s*/, "")
+    : message;
+  return describeError(code, detail);
 }

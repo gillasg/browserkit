@@ -9,7 +9,7 @@
     "lint": "pnpm --filter site-boosts lint && pnpm --filter @browserkit/site-mapper lint && pnpm --filter browser-crawl lint && node scripts/check-source-limits.mjs",
     "format": "prettier --write \"apps/**/*.{ts,mjs,json,html}\" \"packages/**/*.{ts,mjs,json,html,css}\" \"test/*.mjs\" \"*.{json,yaml}\"",
     "format:check": "prettier --check \"apps/**/*.{ts,mjs,json,html}\" \"packages/**/*.{ts,mjs,json,html,css}\" \"test/*.mjs\" \"*.{json,yaml}\"",
-    "test": "pnpm build && node --test --test-timeout=180000 test/*.test.mjs",
+    "test": "pnpm test:engine && pnpm test:site-mapper && pnpm test:crawl && pnpm test:workflows && pnpm test:boosts && node scripts/run-tests.mjs \"test/*.test.mjs\"",
     "test:boosts": "pnpm --filter site-boosts test:unit",
     "test:boosts:e2e": "pnpm --filter site-boosts test:e2e",
     "test:site-mapper": "pnpm --filter @browserkit/site-mapper test:unit",
@@ -18,8 +18,10 @@
     "test:crawl": "pnpm --filter browser-crawl test",
     "agent-text": "node scripts/build-agent-text.mjs",
     "agent-text:check": "node scripts/build-agent-text.mjs --check",
-    "check": "pnpm format:check && pnpm typecheck && pnpm test && pnpm test:workflows && pnpm test:engine && pnpm agent-text:check",
-    "links": "node scripts/link-repos.mjs"
+    "check": "pnpm format:check && pnpm lint && pnpm agent-text:check && pnpm typecheck && pnpm build && pnpm test",
+    "links": "node scripts/link-repos.mjs",
+    "test:browser": "node scripts/run-tests.mjs --browser \"test/*.test.mjs\"",
+    "check:browser": "pnpm build && pnpm test:browser"
   },
   "devDependencies": {
     "@types/node": "26.6.3",

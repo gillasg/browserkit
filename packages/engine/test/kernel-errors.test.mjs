@@ -7,7 +7,8 @@ test("every failure is a kernel code, never a bare one", () => {
   const cases = {
     "No tab with id: 123.": "TAB_DEAD",
     "Debugger is not attached to the tab with id: 5.": "DEBUGGER_DETACHED",
-    "Detached while handling command.": "DEBUGGER_DETACHED",
+    "Detached while handling command.": "TARGET_LOST",
+    "Cannot access a chrome-extension:// URL of different extension": "PROTECTED_UI",
     "Cannot access a chrome:// URL; debugger refused": "UNSUPPORTED",
     "Something nobody planned for": "CHROME_ERROR",
     STALE_REF: "STALE_REF",

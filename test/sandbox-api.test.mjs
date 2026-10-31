@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { browserControlsApi } from "../packages/engine/dist/code-api-controls.js";
+import { browserMediaChallengesApi } from "../packages/engine/dist/code-api-media-challenges.js";
 import { browserSitesApi } from "../packages/engine/dist/code-api-sites.js";
 
 // API source is evaluated inside the sandbox before its message listener is installed. A runtime
@@ -17,4 +18,5 @@ test("the sites API evaluates before the sandbox listener is installed", () => {
 
 test("the controls API evaluates before the sandbox listener is installed", () => {
   assert.doesNotThrow(() => new Function(browserControlsApi)());
+  assert.doesNotThrow(() => new Function(browserMediaChallengesApi)());
 });

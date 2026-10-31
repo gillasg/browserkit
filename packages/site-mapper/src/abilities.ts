@@ -533,8 +533,11 @@ async function attemptApi(
   const operations = apiOperations(way);
   if (!operations.length) throw new Error("API way has no operation");
   const call = host.write ?? host.call;
-  if (!call) throw new Error("No site API transport");
-  if (way.open) await host.open!(String(fill(way.open, inputs)));
+  if (!call) throw new Error("ABILITY_NEEDS: no site API transport");
+  if (way.open) {
+    if (!host.open) throw new Error("ABILITY_NEEDS: this host cannot open a page for that way");
+    await host.open(String(fill(way.open, inputs)));
+  }
   const stepResults: unknown[] = [];
   const commit = Math.min(way.commit ?? operations.length - 1, operations.length - 1);
   let result: unknown;

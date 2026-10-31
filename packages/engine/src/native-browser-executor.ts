@@ -133,11 +133,14 @@ export async function performCapability(
     await revalidate(request, tabId);
     const debuggee =
       "frameId" in step ? await frameDebuggee(root, step.frameId, step.frameKey) : root;
-    if (step.op === "event") return executeBrowserEvent({ ...request, step }, debuggee);
+    if (step.op === "event")
+      return afterSettle(debuggee, () => executeBrowserEvent({ ...request, step }, debuggee));
     if (step.op === "frames") return executeFrame(root, debuggee, step);
-    if (step.op === "upload") return uploadFiles(debuggee, { ...request, step });
+    if (step.op === "upload")
+      return afterSettle(debuggee, () => uploadFiles(debuggee, { ...request, step }));
     if (step.op === "downloads") return executeDownload({ ...request, step });
-    if (step.op === "pointer" || step.op === "keys") return executeInteraction(debuggee, step);
+    if (step.op === "pointer" || step.op === "keys")
+      return afterSettle(debuggee, () => executeInteraction(debuggee, step));
     return { reconnected: true, handlesMustBeRefreshed: true };
   });
   if (JSON.stringify(data).length > 1_000_000)
@@ -557,6 +560,14 @@ async function executeStep(
       stepInput(step.target.tabId, false);
     }
   });
+}
+/** Every step that can change the page returns once it has settled, never mid-reaction. */
+async function afterSettle<T>(debuggee: chrome.debugger.Debuggee, run: () => Promise<T>) {
+  await primeBrowserSettle(debuggee);
+  const since = Date.now();
+  const value = await run();
+  await settleBrowserPage(debuggee, 800, since, 80);
+  return value;
 }
 async function dispatchStep(
   request: BrowserExecutorRequest,

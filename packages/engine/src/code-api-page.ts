@@ -221,7 +221,7 @@ function __element(target, element) {
   var looksLikeId = typeof element === 'number' || /^(\\d+|e\\d+|f\\d+:e\\d+|[a-z]\\d+)$/i.test(element);
   if (!looksLikeId) return __parseSelector(element).spec;
   var state = __states.get(__key(target));
-  if (!state) throw Error('Observe this page with bu.state() before using an id');
+  if (!state) throw Error('STALE_REF: observe this page with bu.state() before using an id');
   var node = state.nodes.find(n => n.backendNodeId === element || n.ref === element || (typeof element === "string" && n.backendNodeId === Number(element)));
   if (!node) throw Error('STALE_REF: id absent from the latest state; observe again');
   return node.backendNodeId && !node.frame ? {kind:'backend',backendNodeId:node.backendNodeId,documentEpoch:state.documentEpoch}
@@ -308,7 +308,7 @@ function __lazyPage() {
       var tab = await browser.openTab(String(args[0]));
       return {opened: true, url: String(await tab.url())};
     }
-    throw Error('No page is open yet: start with await page.goto(url) (or browser.openTab(url)).');
+    throw Error('INVALID_TARGET: no page is open yet: start with await page.goto(url) (or browser.openTab(url)).');
   }});
 }
 Object.defineProperty(globalThis,'page',{value:__lazyPage(),writable:true,configurable:true});

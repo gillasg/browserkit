@@ -278,6 +278,9 @@ importers:
       "@browserkit/credentials":
         specifier: workspace:*
         version: link:../credentials
+      "@browserkit/protocol":
+        specifier: workspace:*
+        version: link:../protocol
       "@browserkit/site-mapper":
         specifier: workspace:*
         version: link:../site-mapper

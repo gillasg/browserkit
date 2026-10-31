@@ -73,7 +73,8 @@
   "dependencies": {
     "browser-crawl": "workspace:*",
     "@browserkit/site-mapper": "workspace:*",
-    "@browserkit/credentials": "workspace:*"
+    "@browserkit/credentials": "workspace:*",
+    "@browserkit/protocol": "workspace:*"
   },
   "files": [
     "dist"

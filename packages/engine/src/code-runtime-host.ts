@@ -98,7 +98,9 @@ export function handleBrowserCodeMessage(
     if (cell)
       finish(cell, {
         output: "",
-        error: reset ? "Browser workflow cancelled; runtime reset" : "Browser workflow cancelled",
+        error: reset
+          ? "RUN_RESET: browser workflow cancelled; runtime reset"
+          : "RUN_RESET: browser workflow cancelled",
         reset,
       });
     return true;
@@ -152,6 +154,8 @@ async function startCell(identity: BrowserIdentity, socket: WebSocket, run: Brow
   };
   cell.startedAt = Date.now();
   cells.set(run.cellId, cell);
+  // The caller's proof the connection carried the run; without it, it fails fast and reconnects.
+  sendStage(cell, "received");
   try {
     const result = (await toOffscreen({
       target: "aeon-code-offscreen",
@@ -167,7 +171,7 @@ async function startCell(identity: BrowserIdentity, socket: WebSocket, run: Brow
       cell,
       result ?? {
         output: "",
-        error: "Browser runtime did not respond; runtime reset",
+        error: "INTERNAL: browser runtime did not respond; runtime reset",
         reset: true,
       },
     );
@@ -256,7 +260,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
   if (message.kind !== "call") return;
   const cell = cells.get(message.cellId) ?? jobs.get(message.cellId);
   if (!cell) {
-    reply({ error: "Browser cell is no longer active" });
+    reply({ error: "RUN_RESET: browser cell is no longer active" });
     return;
   }
   serve(cell, message.request).then(
@@ -508,7 +512,9 @@ function setWaiting(cell: Cell, waiting: boolean): void {
 
 async function prepare(cell: Cell, value: Record<string, unknown>): Promise<BrowserStep> {
   if (++cell.count > MAX_STEPS)
-    throw new Error(`Browser workflow reached its ${MAX_STEPS}-operation limit`);
+    throw new Error(
+      `INVALID_INPUT: one cell may run ${MAX_STEPS} browser steps; split the work across cells`,
+    );
   if (value.op === "openTab" && !value.clientInstanceId)
     value.clientInstanceId = cell.identity.clientInstanceId;
   if (value.op === "openTab" && value.space === undefined)
@@ -520,8 +526,11 @@ async function prepare(cell: Cell, value: Record<string, unknown>): Promise<Brow
     value.files = await callCore(cell, { validateUpload: value.files });
   const parsed = BrowserStepSchema.safeParse(value);
   if (parsed.success) return parsed.data;
-  const issues = parsed.error.issues.map((issue) => issue.message).join("; ");
-  throw new Error("INVALID_TARGET: " + issues.slice(0, 400));
+  // The model's arguments did not fit the step: name the field, so it can fix that one.
+  const issues = parsed.error.issues
+    .map((issue) => (issue.path.length ? `${issue.path.join(".")}: ` : "") + issue.message)
+    .join("; ");
+  throw new Error(`INVALID_INPUT: ${String(value.op)} ${issues}`.slice(0, 400));
 }
 
 function authorize(cell: Cell, step: BrowserStep): void {
@@ -538,7 +547,9 @@ function authorize(cell: Cell, step: BrowserStep): void {
     return;
   }
   if (cell.allowed.has(key) || browserSessionOwner(target.tabId) === cell.run.chatId) return;
-  throw new Error("TARGET_LOST: attach the exact browser target first (browser.attachTab)");
+  throw new Error(
+    `INVALID_TARGET: tab ${target.tabId} is not this run's: attach it first with browser.attachTab, or open your own with browser.openTab(url)`,
+  );
 }
 
 function recordScreenshot(cell: Cell, step: BrowserStep, result: unknown): void {

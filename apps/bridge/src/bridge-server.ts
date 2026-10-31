@@ -376,7 +376,7 @@ export class Bridge {
       });
     try {
       const cell = this.cells.get(String(message.cellId));
-      if (!cell) throw new Error("Browser cell is no longer active");
+      if (!cell) throw new Error("RUN_RESET: browser cell is no longer active");
       const value = await serveRequest(message.request, cell.session, cell.files);
       reply({ value });
     } catch (error) {

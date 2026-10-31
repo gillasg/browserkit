@@ -1,6 +1,7 @@
 // One chat's browser_code realm. Runs in a manifest sandbox page, where eval is allowed and
 // no extension APIs exist; every browser or workspace request goes to the parent document.
 import { toReplScript } from "./code-repl.js";
+import { errorHint, leadingCode, nameModelCodeError } from "@browserkit/protocol";
 import { browserCodeApi } from "./code-api.js";
 import { browserFastApi } from "./code-api-page.js";
 import { browserCapabilityApi, browserDocumentApi } from "./code-api-hooks.js";
@@ -17,6 +18,7 @@ import { browserSnipeApi } from "./code-api-snipe.js";
 import { browserTablesApi } from "./code-api-tables.js";
 import { browserHelpApi } from "./code-api-help.js";
 import { browserControlsApi } from "./code-api-controls.js";
+import { browserMediaChallengesApi } from "./code-api-media-challenges.js";
 import { browserMediaApi } from "./code-media-api.js";
 import { browserSurfaceApi, browserWindowApi } from "./code-api-surface.js";
 
@@ -104,6 +106,7 @@ evaluate(
     browserRecordingApi,
     browserDemonstrationApi,
     browserControlsApi,
+    browserMediaChallengesApi,
   ].join("\n"),
 );
 
@@ -144,6 +147,7 @@ async function run(message: Record<string, unknown>): Promise<void> {
     if (delivered) value = { delivered: true, answer: delivered.value };
   } catch (caught) {
     error = withHint(
+      nameModelCodeError(caught),
       caught instanceof Error ? caught.message : String(caught),
       String(message.code),
     );
@@ -175,13 +179,16 @@ function tip(code: string): void {
 }
 
 /** The error with a "did you mean" from the realm's real API, when one applies. */
-function withHint(message: string, code: string): string {
+/** `raw` is the error as thrown, which the API's own "did you mean" reads; `message` is named. */
+function withHint(message: string, raw: string, code: string): string {
   let hint = "";
   try {
-    hint = String((scope.__hint as (text: string, code: string) => string)(message, code) || "");
+    hint = String((scope.__hint as (text: string, code: string) => string)(raw, code) || "");
   } catch {
     // No hint: the error stands as it is.
   }
+  // Without a hint of its own, the error's shared code still says how to recover.
+  hint ||= message.includes("\nHint: ") ? "" : errorHint(leadingCode(message) ?? "");
   return hint ? `${message}\nHint: ${hint}` : message;
 }
 

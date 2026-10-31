@@ -16,6 +16,11 @@ import { currentInventoryTabs } from "./native-inventory-client.js";
 import { tidyAllChatTabs, tidyChatTabs, touchAgentTab } from "./native-browser-tab-cleanup.js";
 import type { BrowserExecutorRequest } from "@browserkit/protocol";
 import { onEngineInstall } from "./native-engine-install.js";
+import {
+  followReplacement,
+  recordReplacement,
+  reviveDiscardedTab,
+} from "./native-browser-replaced.js";
 
 interface Attachment {
   chatId: string;
@@ -63,6 +68,14 @@ onEngineInstall(() => {
     owners.delete(tabId);
     cancelled.delete(tabId);
   });
+  // A discarded or prerendered tab comes back under a new id: it stays the same run's tab.
+  chrome.tabs.onReplaced.addListener((addedId, removedId) => {
+    recordReplacement(removedId, addedId);
+    const owner = owners.get(removedId);
+    forget(removedId);
+    owners.delete(removedId);
+    if (owner) bindBrowserSession(addedId, owner);
+  });
 });
 
 /** Tabs held by a chat's session, or by any session. */
@@ -70,7 +83,7 @@ export function browserSessionTabs(chatId?: string): number[] {
   return [...owners].filter(([, owner]) => !chatId || owner === chatId).map(([tabId]) => tabId);
 }
 export function browserSessionOwner(tabId: number): string | undefined {
-  return owners.get(tabId);
+  return owners.get(followReplacement(tabId));
 }
 
 export function bindBrowserSession(tabId: number, chatId: string): void {
@@ -98,6 +111,7 @@ export async function withBrowserDebugger<T>(
   tabId: number,
   action: (debuggee: chrome.debugger.Debuggee) => Promise<T>,
 ): Promise<T> {
+  tabId = followReplacement(tabId);
   let evicted = 0;
   for (let attempt = 0; ; attempt++) {
     try {
@@ -193,6 +207,8 @@ function forget(tabId: number): void {
 }
 
 async function attach(tabId: number): Promise<void> {
+  // Memory Saver discards background tabs, agent tabs first: load it back before driving it.
+  await reviveDiscardedTab(tabId);
   try {
     await chrome.debugger.attach({ tabId }, "1.3");
   } catch (error) {

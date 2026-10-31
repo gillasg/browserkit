@@ -205,18 +205,24 @@ function parseMcp(body: string): McpResult | undefined {
   return undefined;
 }
 
+/** A field's value, or undefined when Exa left it empty or "N/A". */
+function exaField(block: string, pattern: RegExp): string | undefined {
+  const value = block.match(pattern)?.[1]?.trim();
+  return value && value !== "N/A" ? value : undefined;
+}
+
 function exaBlock(block: string): WebResult[] {
-  const url = block.match(/^URL:\s*(.+)$/m)?.[1]?.trim();
+  const url = exaField(block, /^URL:\s*(.+)$/m);
   if (!url) return [];
-  const title = block.match(/^Title:\s*(.+)$/m)?.[1]?.trim();
-  const published = block.match(/^Published:\s*(.+)$/m)?.[1]?.trim();
-  const content = block.match(/^(?:Highlights|Text):\s*\n?([\s\S]*)$/m)?.[1]?.trim();
+  const title = exaField(block, /^Title:\s*(.+)$/m);
+  const published = exaField(block, /^Published:\s*(.+)$/m);
+  const content = exaField(block, /^(?:Highlights|Text):\s*\n?([\s\S]*)$/m);
   return [
     {
       url,
-      ...(title && title !== "N/A" ? { title } : {}),
+      ...(title ? { title } : {}),
       ...(content ? { content } : {}),
-      ...(published && published !== "N/A" ? { published } : {}),
+      ...(published ? { published } : {}),
     },
   ];
 }
