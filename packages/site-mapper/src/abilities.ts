@@ -614,11 +614,35 @@ async function handleCall(
   return handleSiteMapperRequest({ siteMapper: "call", site, operation, params });
 }
 
+/** Site calls through the mapped runtime; page ways and page scripts in a browser tab on the site. */
 function defaultHost(site: string): AbilityHost {
+  const browser = once(async () => {
+    const { browserRecipeHost } = await import("./runtime/recipe-host.js");
+    return browserRecipeHost(site, { session: `ability-${siteName(site)}` });
+  });
   return {
     call: (operation, params) => handleCall(site, operation, params),
     write: (operation, params) => handleCall(site, operation, params),
+    open: async (url) => (await browser()).open?.(url),
+    collect: async (input) => (await browser()).collect?.(input),
+    script: async (code, input) => (await browser()).script?.(onSite(site, code), input),
   };
+}
+
+/** Wraps a page script so it runs on a tab of its own site, opening one in the background if needed. */
+function onSite(site: string, code: string): string {
+  const host = siteName(site);
+  return `async (page, bu, inputs) => {
+  let tab = page;
+  try { if (!tab || !new URL(await tab.url()).hostname.endsWith(${JSON.stringify(host)})) tab = undefined; } catch { tab = undefined; }
+  tab ??= await browser.openTab(${JSON.stringify(`https://${host}/`)}, { active: false });
+  return await (${code})(tab, bu, inputs);
+}`;
+}
+
+function once<T>(make: () => Promise<T>): () => Promise<T> {
+  let value: Promise<T> | undefined;
+  return () => (value ??= make());
 }
 
 async function recordAbilityRun(ability: Ability, ok: boolean): Promise<void> {

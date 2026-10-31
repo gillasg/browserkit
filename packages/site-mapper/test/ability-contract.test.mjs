@@ -280,3 +280,41 @@ test("a node script's browser.fetch answers in browser code's shape", async () =
     server.close();
   }
 });
+
+test("a page-script ability runs in the shared browser when no host is given", async () => {
+  await withHome(async () => {
+    const { useBrowser } = await import("../dist/runtime/bridge.js");
+    const cells = [];
+    useBrowser({
+      run: async (code) => {
+        cells.push(code);
+        return [{ title: "Sharp Objects", price: "47.82" }];
+      },
+      status: async () => ({ browsers: 1 }),
+      close() {},
+    });
+    try {
+      await saveAbility(
+        ability({
+          name: "find book",
+          inputs: { type: "object", properties: { title: { type: "string" } } },
+          ways: [
+            {
+              kind: "script",
+              runtime: "page",
+              code: "async (page, bu, inputs) => [{ title: inputs.title, price: '47.82' }]",
+            },
+          ],
+          options: {},
+        }),
+        { check: false },
+      );
+      const run = await runAbility("example.com", "find book", { title: "Sharp Objects" });
+      assert.equal(run.result[0].title, "Sharp Objects");
+      assert.match(cells[0], /hostname\.endsWith\("example\.com"\)/);
+      assert.match(cells[0], /browser\.openTab\("https:\/\/example\.com\/"/);
+    } finally {
+      useBrowser(undefined);
+    }
+  });
+});

@@ -25,16 +25,19 @@ export async function browserRecipeHost(
   site: string,
   options: RecipeHostOptions = {},
 ): Promise<RecipeHost> {
-  const api = await siteMapper(site, options.transport ? { transport: options.transport } : {});
-  const model = await loadModel(site);
+  // The site's API is loaded on first call, so page-only work runs on sites that are not mapped.
+  let mapped: ReturnType<typeof siteMapper> | undefined;
+  const api = () =>
+    (mapped ??= siteMapper(site, options.transport ? { transport: options.transport } : {}));
+  const model = await loadModel(site).catch(() => undefined);
   let bridge: Bridge | undefined = options.bridge;
   const browser = async (): Promise<Bridge> => {
     bridge ??= await sharedBridge();
     return bridge;
   };
   return {
-    call: (operation, params) => api.call(operation, params),
-    write: (operation, params) => api.write(operation, params),
+    call: async (operation, params) => (await api()).call(operation, params),
+    write: async (operation, params) => (await api()).write(operation, params),
     resolveOperation: (wanted) =>
       model === undefined ? undefined : resolveOperationInModel(model, wanted),
     open: async (url) => {
