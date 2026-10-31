@@ -323,12 +323,6 @@ var browser = Object.freeze({
   context: (request = "", options = {}) => __context(request, options),
   // Who the run is: the Chrome profile account and the Google accounts signed in (authuser order).
   identity: Object.freeze({ accounts: () => __call({identity:"accounts"}) }),
-  // A proxy for some sites (or all) in this profile, until cleared. Chrome routes per site, not per tab.
-  proxy: Object.freeze({
-    set: (server, options = {}) => __call({proxy:"set", server: String(server), ...(options.sites ? {sites: options.sites} : {})}),
-    clear: () => __call({proxy:"clear"}),
-    get: () => __call({proxy:"get"}),
-  }),
   history: Object.freeze({
     search: (text = "", options = {}) => __call({history:"search", text, ...options}),
     top: (options = {}) => __call({history:"top", ...options}),

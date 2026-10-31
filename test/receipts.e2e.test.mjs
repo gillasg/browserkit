@@ -22,7 +22,7 @@ const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
 const run = promisify(execFile);
 
 test(
-  "challenges solve a checkbox without a decoy and a grid with selected tiles",
+  "a click receipt names the popup, dialog and download it caused",
   {
     skip:
       !process.env.REQUIRE_E2E &&

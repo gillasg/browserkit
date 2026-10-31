@@ -223,7 +223,6 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
         cellId: message.cellId,
         code: message.code,
         attached: message.attached,
-        challengeAssist: message.challengeAssist,
       },
       "*",
     );

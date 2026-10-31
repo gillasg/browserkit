@@ -47,7 +47,6 @@ async function repl(args: Args): Promise<number> {
       code: prelude + code,
       session: flag(args, "session") ?? "cli",
       ...(timeout ? { timeoutMs: Number(timeout) } : {}),
-      ...(has(args, "challenge-assist") ? { challengeAssist: true } : {}),
     });
     if (!has(args, "quiet")) {
       const text = await spillText(formatResult(result).text, flag(args, "session") ?? "cli");
@@ -232,8 +231,7 @@ Prints tab id, title and URL, one tab per line; --json prints the browser's own 
 
 The last expression is returned. Variables and tabs persist per session. A long cell goes in a
 file (@file.js) or on stdin (-) instead of on the command line, so quoting and line endings stay
-out of the way. --quiet prints only errors (on stderr) and keeps the exit code. --timeout caps the cell.
---challenge-assist allows human-verification assistance only for chat cells.`,
+out of the way. --quiet prints only errors (on stderr) and keeps the exit code. --timeout caps the cell.`,
     run: repl,
   },
   {

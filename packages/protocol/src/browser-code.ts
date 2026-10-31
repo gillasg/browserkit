@@ -16,8 +16,6 @@ export const BrowserCodeRunSchema = z
     ownerTitle: z.string().min(1).max(120).optional(),
     /** Where this run's tabs go unless a step chooses: a background window or the user's window. */
     space: z.enum(["window", "tabs"]).optional(),
-    /** Human-verification assistance is allowed only for chat-sourced cells. */
-    challengeAssist: z.boolean().optional(),
   })
   .strict();
 export type BrowserCodeRun = z.infer<typeof BrowserCodeRunSchema>;

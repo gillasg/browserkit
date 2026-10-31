@@ -254,7 +254,6 @@ export class Bridge {
         code: String(request.code ?? ""),
         targets,
         timeoutMs,
-        ...(request.challengeAssist === true ? { challengeAssist: true } : {}),
       });
     });
   }

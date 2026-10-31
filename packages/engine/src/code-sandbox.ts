@@ -135,7 +135,6 @@ async function run(message: Record<string, unknown>): Promise<void> {
   let error: string | undefined;
   try {
     evaluate("__beginCell()");
-    scope.__challengeAssist = message.challengeAssist === true;
     if (message.attached) scope.__attachedTarget = message.attached;
     if (message.attached && !evaluate("__lastTarget"))
       (scope.bu as { use(target: unknown): unknown }).use(message.attached);

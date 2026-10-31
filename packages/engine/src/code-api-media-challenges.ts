@@ -89,7 +89,7 @@ function __pageChallenge() {
 }
 var __CHALLENGE_ADVICE = {
   'bot-check': 'It often clears by itself: wait a few seconds once. If it stays, bu.handoff() so the user can pass it; never retry in a loop.',
-  captcha: 'Checkbox widgets can be tried once with page.challenges.solve(); sliders are detected and handed back. Otherwise bu.handoff() for the user. Do not loop.',
+  captcha: 'A check for people: bu.handoff(message, {wait: true}) asks the user and continues once it is gone. Never solve or click through it yourself.',
   blocked: 'The site refused this request; repeating it will not help. Use another route (its API, another source) or tell the user.',
   'rate-limit': 'Slow down: wait before the next request and stop parallel requests to this site.',
   login: 'The user is signed out here: await bu.signIn() signs in with their password manager (it returns {signedIn, reason}); if it cannot (reason NO_PASSWORD_MANAGER, NO_SAVED_LOGIN, NEEDS_CODE, CAPTCHA), bu.handoff("Please sign in") and continue after.',
@@ -138,34 +138,6 @@ async function __challengeNote(target, url, scope = 'state') {
   if (__challengeSeen.size > 200) __challengeSeen.clear();
   return lines.join('\\n');
 }
-// Human-verification assistance: text-only outcomes, no pixels or tokens in logs. The agent can
-// look at a numbered grid crop and answer with indexes; the engine never calls a model.
-function __pageChallengeInfo() {
-  var shown = (el) => { var r = el.getBoundingClientRect(); return r.width > 4 && r.height > 4 && getComputedStyle(el).visibility !== "hidden"; };
-  var frame = (re) => [...document.querySelectorAll("iframe")].filter(shown).find((el) => re.test(el.src || "") && !/size=invisible/.test(el.src || ""));
-  var rect = (el) => { var r = el.getBoundingClientRect(); return {x:r.left,y:r.top,width:r.width,height:r.height}; };
-  var tokens = {};
-  for (var name of ["g-recaptcha-response","h-captcha-response","cf-turnstile-response"]) tokens[name] = Boolean(document.querySelector('textarea[name="'+name+'"],input[name="'+name+'"]')?.value);
-  var widget = frame(/turnstile|recaptcha\\/(api2|enterprise)\\/anchor|hcaptcha/);
-  var gridFrame = frame(/recaptcha\\/(api2|enterprise)\\/bframe|hcaptcha\\.com.*frame=challenge/);
-  var boxes = [...document.querySelectorAll("iframe")].filter(shown).map((el) => ({src:el.src || "", ...rect(el)}));
-  var label = (el) => [el.getAttribute("aria-label"), el.getAttribute("title"), el.innerText].join(" ");
-  var checkbox = [...document.querySelectorAll("[role=checkbox],input[type=checkbox]")].filter(shown).find((el) => {
-    var box = rect(el);
-    return /verify|robot|human|captcha/i.test(label(el)) ||
-      (widget && Math.abs(box.x - widget.getBoundingClientRect().left) < 200 && Math.abs(box.y - widget.getBoundingClientRect().top) < 200);
-  });
-  var container = [...document.querySelectorAll("[class*=turnstile],[class*=captcha],[id*=captcha]")].filter(shown)[0];
-  var scope = container || widget;
-  var tiles = !gridFrame && scope ? [...scope.querySelectorAll('[class*=tile],img,[role=checkbox]')].filter(shown)
-    .map((el) => ({kind:el.tagName.toLowerCase() + ":" + (el.className || ""), ...rect(el)}))
-    .filter((b) => b.width > 20 && b.height > 20) : [];
-  var handle = document.querySelector('[role=slider],.geetest_slider_button,.slider-handle');
-  var text = (document.body && document.body.innerText || "").slice(0, 400);
-  return {tokens, checkbox: checkbox ? rect(checkbox) : null, widget: widget ? rect(widget) : null, container: container ? rect(container) : null,
-    gridFrame: gridFrame ? rect(gridFrame) : null, frames: boxes, tiles: tiles.slice(0, 20),
-    slider: Boolean(handle) || /slide|drag.*slider|puzzle|handle/i.test(text), grid: Boolean(gridFrame) || /click.*(square|tile|image)|select all/i.test(text), text:text.slice(0,120)};
-}
 async function __pageWebmcpList() {
   var ctx = navigator.modelContext || document.modelContext;
   if (!ctx || typeof ctx.getTools !== "function") return {available: false, tools: [], note: "this page registers no WebMCP tools"};
@@ -182,83 +154,6 @@ async function __pageWebmcpCall(arg) {
   var timeout = new Promise((resolve) => setTimeout(() => resolve({error: "webmcp timeout"}), 4000));
   return {available: true, result: await Promise.race([Promise.resolve(run), timeout])};
 }
-function __pageGridOverlay(arg) {
-  document.querySelectorAll('[data-browserkit-grid]').forEach((el) => el.remove());
-  var host = document.createElement('div'); host.setAttribute('data-browserkit-grid', ''); host.style.cssText = 'position:fixed;inset:0;z-index:2147483646;pointer-events:none';
-  for (var tile of arg.tiles) { var b = document.createElement('b'); b.textContent = String(tile.index); b.style.cssText = 'position:fixed;left:' + (tile.x + tile.width / 2 - 6) + 'px;top:' + (tile.y + tile.height / 2 - 8) + 'px;padding:1px 3px;background:#4f46e5;color:#fff;font:700 12px system-ui;border-radius:3px'; host.append(b); }
-  document.documentElement.append(host);
-}
-function __pageGridOverlayClear() { document.querySelectorAll('[data-browserkit-grid]').forEach((el) => el.remove()); }
-var __challengeAttempts = new Map();
-var __challengeTiles = new Map();
-async function __solveChallenge(target, options = {}) {
-  if (!__challengeAssist) throw Error("CHALLENGE_ASSIST_NOT_ALLOWED");
-  var info = await browser.page(target).inspect(__pageChallengeInfo);
-  var stage = options.stage || (info.grid ? "grid" : info.slider ? "slider" : "checkbox");
-  if (stage !== "checkbox" && stage !== "slider" && stage !== "grid") throw Error("CHALLENGE_STAGE_UNKNOWN");
-  var key = __key(target) + "|" + stage, attempts = (__challengeAttempts.get(key) || 0) + 1;
-  __challengeAttempts.set(key, attempts);
-  if (attempts > 3) { await bu.handoff("Please finish the verification"); return {stage, action: "handoff", cleared: false, attempts}; }
-  if (stage === "checkbox") {
-    var box = info.widget || info.checkbox || info.container;
-    if (!box) { await bu.handoff("Please finish the verification"); return {stage, action: "no checkbox", cleared: false, attempts}; }
-    await browser.page(target).clickAt(box.x + box.width * 0.25, box.y + box.height / 2);
-    var cleared = false;
-    for (var i = 0; i < 12; i++) {
-      await new Promise((r) => setTimeout(r, i < 4 ? 500 : 400));
-      var now = await browser.page(target).inspect(__pageChallengeInfo);
-      if (Object.values(now.tokens).some(Boolean) || !now.widget) { cleared = true; break; }
-    }
-    if (!cleared && attempts >= 2) await bu.handoff("Please finish the verification");
-    return {stage, action: "checkbox clicked", cleared, attempts};
-  }
-  if (stage === "slider") {
-    await bu.handoff("Please finish the verification");
-    return {stage, action: "slider detected; handed off", cleared: false, attempts};
-  }
-  if (!options.tiles) {
-    var tiles;
-    if (info.gridFrame) {
-      var frame = info.gridFrame;
-      tiles = [];
-      for (var row = 0; row < 3; row++) for (var col = 0; col < 3; col++)
-        tiles.push({index: row * 3 + col + 1, bounds: {x: frame.x + col * frame.width / 3, y: frame.y + row * frame.height / 3, width: frame.width / 3, height: frame.height / 3}});
-    } else {
-      tiles = info.tiles.map((tile, index) => ({index: index + 1, bounds: tile}));
-    }
-    if (!tiles.length) { await bu.handoff("Please finish the verification"); return {stage, action: "no tiles", cleared: false, attempts}; }
-    __challengeTiles.set(key, {frame: info.gridFrame, tiles});
-    var clip = tiles.length ? {x: Math.max(0, Math.min(...tiles.map((t) => t.bounds.x)) - 12), y: Math.max(0, Math.min(...tiles.map((t) => t.bounds.y)) - 12), width: Math.max(...tiles.map((t) => t.bounds.x + t.bounds.width)) - Math.min(...tiles.map((t) => t.bounds.x)) + 24, height: Math.max(...tiles.map((t) => t.bounds.y + t.bounds.height)) - Math.min(...tiles.map((t) => t.bounds.y)) + 24} : undefined;
-    try {
-      await browser.page(target).inspect(__pageGridOverlay, {tiles});
-      var shot = await browser.page(target).cdp("Page.captureScreenshot", {format: "png", ...(clip ? {clip: {...clip, scale: 1}} : {})});
-      var binary = atob(shot.data), bytes = new Uint8Array(binary.length);
-      for (var n = 0; n < binary.length; n++) bytes[n] = binary.charCodeAt(n);
-      await artifact("screens/challenge-grid.png", bytes);
-    } finally { await browser.page(target).inspect(__pageGridOverlayClear).catch(() => {}); }
-    return {stage, needsVision: true, saved: "screens/challenge-grid.png", tiles};
-  }
-  var stored = __challengeTiles.get(key);
-  if (!stored || !stored.tiles.length) return {stage, reset: true, cleared: false, attempts, action: "tiles changed; request a new crop"};
-  if (JSON.stringify(stored.frame) !== JSON.stringify(info.gridFrame)) return {stage, reset: true, cleared: false, attempts, action: "tiles changed; request a new crop"};
-  var allTiles = stored.tiles;
-  var picked = (options.tiles || []).map((index) => allTiles.find((tile) => tile.index === index)).filter(Boolean);
-  for (var index = 0; index < picked.length; index++) {
-    await browser.page(target).clickAt(picked[index].bounds.x + picked[index].bounds.width / 2, picked[index].bounds.y + picked[index].bounds.height / 2);
-    await new Promise((r) => setTimeout(r, 70 + Math.floor(Math.random() * 140)));
-  }
-  var verify = await browser.page(target).inspect(() => {
-    var box = [...document.querySelectorAll("button,[role=button]")].find((el) => /verify|submit|next/i.test(el.innerText || el.value || ""))?.getBoundingClientRect();
-    return box ? {x: box.x, y: box.y, width: box.width, height: box.height} : null;
-  }).catch(() => null);
-  if (verify && Number.isFinite(verify.x) && Number.isFinite(verify.y))
-    await browser.page(target).clickAt(verify.x + verify.width / 2, verify.y + verify.height / 2);
-  await new Promise((r) => setTimeout(r, 1200));
-  var final = await browser.page(target).inspect(__pageChallengeInfo);
-  var cleared2 = Object.values(final.tokens).some(Boolean) || (!final.grid && !final.frames.some((f) => /bframe|frame=challenge/i.test(f.src)));
-  return {stage, action: "grid tiles " + (options.tiles || []).join(","), cleared: cleared2, attempts, tileCount: picked.length};
-}
-
 function __extendPageControls(target, base) {
   return Object.assign(base, {
     controls: Object.freeze({
@@ -279,7 +174,7 @@ function __extendPageControls(target, base) {
       // The first HLS (.m3u8) or DASH (.mpd) manifest this tab requested, with its headers.
       manifest: () => __mediaManifest(target),
     }),
-    challenges: Object.assign(async () => __challenges(target), {solve: (options = {}) => __solveChallenge(target, options)}),
+    challenges: async () => __challenges(target),
     webmcp: Object.freeze({
       list: () => browser.page(target).inspect(__pageWebmcpList),
       call: (name, input = {}) => browser.page(target).inspect(__pageWebmcpCall, {name, input}),

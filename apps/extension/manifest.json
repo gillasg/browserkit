@@ -33,7 +33,6 @@
     "contentSettings",
     "clipboardRead",
     "clipboardWrite",
-    "proxy",
     "identity",
     "identity.email"
   ],
